@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Agent Kontrol Paneli</title>
+<style>
+  :root { --bg:#0f1115; --panel:#1a1d24; --line:#2a2f3a; --fg:#e6e6e6; --muted:#8a91a0;
+          --plan:#7c9cff; --code:#5ad19a; --review:#f5c451; --fix:#ff8a65; --err:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); font-weight:600; }
+  .wrap { display:grid; grid-template-columns:320px 1fr; gap:0; height:calc(100vh - 51px); }
+  .side { padding:16px; border-right:1px solid var(--line); overflow:auto; }
+  .main { padding:16px; overflow:auto; }
+  label { display:block; margin:12px 0 4px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  textarea, select, input { width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--line);
+          border-radius:8px; padding:8px; font:inherit; }
+  textarea { min-height:90px; resize:vertical; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row input[type=checkbox] { width:auto; }
+  button { margin-top:16px; width:100%; padding:10px; border:0; border-radius:8px; cursor:pointer;
+          background:var(--plan); color:#0b0d12; font-weight:700; }
+  button:disabled { opacity:.5; cursor:default; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; margin:0 0 12px; overflow:hidden; }
+  .card h3 { margin:0; padding:8px 12px; font-size:13px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
+  .card pre { margin:0; padding:12px; white-space:pre-wrap; word-break:break-word; font:12.5px/1.5 ui-monospace, monospace; }
+  .tag { font-size:11px; padding:1px 8px; border-radius:20px; color:#0b0d12; }
+  .plan{background:var(--plan)} .code{background:var(--code)} .review{background:var(--review)}
+  .fix{background:var(--fix)} .exec{background:#9aa5b1} .err{background:var(--err)}
+  .meta { color:var(--muted); font-size:12px; }
+  #totals { position:sticky; top:0; background:var(--bg); padding:8px 0; border-bottom:1px solid var(--line); margin-bottom:12px; }
+  .pill { display:inline-block; background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:3px 10px; margin-right:6px; }
+</style>
+</head>
+<body>
+<header>🤖 Multi-Agent Kontrol Paneli</header>
+<div class="wrap">
+  <div class="side">
+    <label>Görev</label>
+    <textarea id="task" placeholder="Örn: bir CSV dosyasını okuyup sütun ortalamalarını yazan python scripti"></textarea>
+
+    <label>Planner modeli</label>
+    <select id="planner"><option value="claude">Claude</option><option value="deepseek">DeepSeek</option><option value="gemini">Gemini</option></select>
+
+    <label>Coder modeli</label>
+    <select id="coder"><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="gemini">Gemini</option></select>
+
+    <label>Reviewer modeli</label>
+    <select id="reviewer"><option value="gemini">Gemini</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option></select>
+
+    <label>Maksimum düzeltme turu</label>
+    <input id="max_rounds" type="number" value="3" min="1" max="6">
+
+    <label>Kodu gerçekten çalıştır (execution grounding)</label>
+    <div class="row"><input id="run_python" type="checkbox"><span class="meta">Python kodunu çalıştırıp hatayı geri besler</span></div>
+
+    <button id="go">Çalıştır ▶</button>
+  </div>
+
+  <div class="main">
+    <div id="totals" class="meta">Hazır. Bir görev girip “Çalıştır”a bas.</div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const log = $("#log"), totals = $("#totals"), go = $("#go");
+const COLORS = {plan:"plan",code:"code",review:"review",fix:"fix"};
+
+function card(stage, round){
+  const c = document.createElement("div"); c.className="card";
+  const title = stage.toUpperCase() + (round?` · tur ${round}`:"");
+  c.innerHTML = `<h3><span class="tag ${COLORS[stage]||'exec'}">${title}</span><span class="meta" data-metric></span></h3><pre></pre>`;
+  log.appendChild(c); c.scrollIntoView({block:"end"});
+  return c;
+}
+let current = {}; // stage+round -> card
+
+async function runTask(){
+  log.innerHTML=""; current={}; go.disabled=true;
+  totals.textContent="Çalışıyor…";
+  const body = {
+    task:$("#task").value, planner:$("#planner").value, coder:$("#coder").value,
+    reviewer:$("#reviewer").value, max_rounds:$("#max_rounds").value,
+    run_python:$("#run_python").checked
+  };
+  const res = await fetch("/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const reader = res.body.getReader(); const dec = new TextDecoder();
+  let buf="";
+  while(true){
+    const {value,done} = await reader.read(); if(done) break;
+    buf += dec.decode(value,{stream:true});
+    let nl; while((nl=buf.indexOf("\n"))>=0){
+      const line=buf.slice(0,nl); buf=buf.slice(nl+1);
+      if(line.trim()) handle(JSON.parse(line));
+    }
+  }
+  go.disabled=false;
+}
+
+function handle(ev){
+  const key = ev.stage + (ev.round||"");
+  if(ev.type==="stage"){ current[key]=card(ev.stage, ev.round); current[key].querySelector("pre").textContent="…"; }
+  else if(ev.type==="output"){ if(current[key]) current[key].querySelector("pre").textContent=ev.text; }
+  else if(ev.type==="metric"){ if(current[key]) current[key].querySelector("[data-metric]").textContent=`${ev.model} · ${ev.latency_s}s · ${ev.tokens} tok · $${ev.cost_usd}`; }
+  else if(ev.type==="exec"){ const c=card(ev.ok?"exec":"err","");
+      c.querySelector("h3 .tag").textContent = (ev.ok?"ÇALIŞTIRMA ✔":"ÇALIŞTIRMA ✖")+(ev.round?` · tur ${ev.round}`:"");
+      c.querySelector("pre").textContent=ev.text; }
+  else if(ev.type==="note"){ const c=card("exec",""); c.querySelector("h3 .tag").textContent="NOT"; c.querySelector("pre").textContent=ev.text; }
+  else if(ev.type==="error"){ const c=card("err",""); c.querySelector("h3 .tag").textContent="HATA"; c.querySelector("pre").textContent=ev.text; }
+  else if(ev.type==="done"){ const t=ev.totals;
+      totals.innerHTML=`<span class="pill">✅ Bitti</span><span class="pill">⏱ ${t.latency_s}s</span><span class="pill">🔢 ${t.tokens} token</span><span class="pill">💲 $${t.cost_usd}</span><span class="pill">📄 ${ev.code_path}</span>`; }
+}
+go.addEventListener("click", runTask);
+</script>
+</body>
+</html>

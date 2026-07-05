@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { height:100%; margin:0; background:#1e1e1e; color:#ccc;
+    font:13px system-ui, sans-serif; overflow:hidden; }
+  #tabs { display:flex; height:34px; background:#252526; border-bottom:1px solid #333;
+    overflow-x:auto; white-space:nowrap; }
+  .tab { display:inline-flex; align-items:center; gap:6px; padding:0 12px; height:34px;
+    background:#2d2d2d; border-right:1px solid #333; color:#bbb; cursor:pointer; }
+  .tab.active { background:#1e1e1e; color:#fff; }
+  .tab .dot { width:7px; height:7px; border-radius:50%; background:#e6a23c; visibility:hidden; }
+  .tab.dirty .dot { visibility:visible; }
+  .tab .x { opacity:.6; padding:0 2px; }
+  .tab .x:hover { opacity:1; }
+  .tab.difftab { color:#e6a23c; }
+  .tab.difftab.active { color:#ffce7a; background:#1e1e1e; }
+  .tab .difficon { font-weight:700; }
+  #editor, #diff { position:absolute; top:34px; left:0; right:0; bottom:0; }
+  #diff { display:none; }
+  #empty { position:absolute; top:34px; left:0; right:0; bottom:0; display:flex;
+    align-items:center; justify-content:center; color:#666; }
+</style>
+</head>
+<body>
+  <div id="tabs"></div>
+  <div id="editor"></div>
+  <div id="diff"></div>
+  <div id="empty">Bir dosya aç (soldaki gezginden çift tıkla)</div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script src="vs/loader.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>
