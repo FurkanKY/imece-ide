@@ -25,6 +25,10 @@ interface EditorState {
   renamePath: (oldRel: string, newRel: string) => void;
   /** silinen dosya/klasörün sekmelerini kapatır */
   closeDeleted: (rel: string) => void;
+  /** merkez diff görünümü (Cursor deseni): öneri diff'i tam boy editörde */
+  diff: { path: string; original: string; modified: string } | null;
+  openDiff: (path: string) => Promise<void>;
+  closeDiff: () => void;
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -113,4 +117,24 @@ export const useEditor = create<EditorState>((set, get) => ({
           : s.activeRel;
       return { tabs, activeRel };
     }),
+
+  diff: null,
+
+  openDiff: async (path) => {
+    const { useRun } = await import("@/state/run");
+    const prop = useRun.getState().proposals.find((p) => p.path === path);
+    if (!prop) return;
+    let original = "";
+    if (!prop.is_new) {
+      try {
+        const r = await bridge.call("fs.readFile", { rel: path });
+        original = r.content;
+      } catch {
+        // yeni dosya gibi davran
+      }
+    }
+    set({ diff: { path, original, modified: prop.new } });
+  },
+
+  closeDiff: () => set({ diff: null }),
 }));

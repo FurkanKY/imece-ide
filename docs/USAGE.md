@@ -39,9 +39,20 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
   açılışta geri gelir. Pencere geometrisi ve son projeler de hatırlanır.
 - Dosyalar dışarıdan değişirse (başka editör/git) gezgin kendini tazeler.
 
-**Yol haritası (sonraki fazlar):** AI paneli + canlı pipeline + diff incelemesi (P2),
-entegre terminal (ConPTY, P3), global arama + ayarlar (P4), cutover (P5).
-Bkz. [WEB-SHELL-PLAN.md](WEB-SHELL-PLAN.md).
+**Ajanlarla değişiklik (P2 — sağdaki AI EKİBİ paneli):**
+1. Görev kutusuna yaz (ör. *"utils.py'deki tarih biçimini ISO 8601 yap"*), istersen
+   rol→model seçimlerini değiştir, **▶** (veya Enter).
+2. **EKİP hattı** canlı işler: aktif ajan nefes alır, biten aşamada model·süre·token·
+   maliyet görünür. **Akış** sekmesinde aşama kartları + çıktılar; hata olursa kırmızı kart.
+3. Öneri gelince **Değişiklikler** sekmesi açılır + **merkez inline diff** kendiliğinden
+   gelir (⇄ sekmesi). Satırlara tıklayıp dosya dosya incele; istemediklerinin işaretini kaldır.
+4. **Uygula (n)** → dosyalar yazılır (.bak yedekli), açık sekmeler + ağaç tazelenir.
+   **Vazgeç** → hiçbir şey yazılmaz. Koşuyu **■** ile durdurabilirsin.
+5. Alt çubukta toplam token/maliyet sayaçla akar; ⏱ (saat) ikonu geçmiş koşuları açar —
+   tıkla → görev composer'a geri gelir. Ctrl+J paneli gizler/gösterir.
+
+**Yol haritası (sonraki fazlar):** entegre terminal (ConPTY, P3), global arama + ayarlar
+(P4), cutover (P5). Bkz. [WEB-SHELL-PLAN.md](WEB-SHELL-PLAN.md).
 
 > **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
 > gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +

@@ -15,8 +15,10 @@ import { Welcome } from "@/components/welcome/Welcome";
 import { Palette } from "@/components/palette/Palette";
 import { ToastHost } from "@/components/toasts/ToastHost";
 import { DialogHost } from "@/components/dialogs/DialogHost";
+import { AiPanel } from "@/components/aipanel/AiPanel";
 import { useEditor } from "@/state/editor";
 import { useUi } from "@/state/ui";
+import { useRun } from "@/state/run";
 
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
 const smokeMode = new URLSearchParams(location.search).get("smoke");
@@ -25,7 +27,9 @@ const scenario = new URLSearchParams(location.search).get("scenario");
 function Workspace() {
   const [view, setView] = useState<View>("explorer");
   const hasTabs = useEditor((s) => s.tabs.length > 0);
+  const hasDiff = useEditor((s) => s.diff !== null);
   const sidebarVisible = useUi((s) => s.sidebarVisible);
+  const aiPanelVisible = useUi((s) => s.aiPanelVisible);
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -41,15 +45,16 @@ function Workspace() {
         )}
       </aside>
       )}
-      {hasTabs ? (
+      {hasTabs || hasDiff ? (
         <Editor />
       ) : (
         <div className="flex min-w-0 flex-1 items-center justify-center bg-panel">
           <p className="text-faint" style={{ fontSize: "var(--t-body)" }}>
-            Soldan bir dosya seç.
+            Soldan bir dosya seç — ya da sağdan ekibe bir görev ver.
           </p>
         </div>
       )}
+      {aiPanelVisible && <AiPanel />}
     </div>
   );
 }
@@ -66,11 +71,19 @@ export default function App() {
     void (async () => {
       const { installSessionPersistence } = await import("@/lib/session");
       installSessionPersistence();
+      useRun.getState().install();
+      void useRun.getState().loadProviders();
       await loadSettings();
-      // mock senaryosu: otomatik proje aç (webshot/geliştirme)
-      if (!bridge.isNative && (scenario === "project" || scenario === "editor")) {
+      // mock senaryoları: otomatik proje aç (+ koşu) — webshot/geliştirme
+      const runScenarios = ["running", "result", "error"];
+      if (!bridge.isNative && (scenario === "project" || scenario === "editor" || runScenarios.includes(scenario ?? ""))) {
         await openProject("C:/Projeler/demo-api");
         if (scenario === "editor") await useEditor.getState().open("src/App.tsx");
+        if (runScenarios.includes(scenario ?? "")) {
+          const { TASK } = await import("@/bridge/mock/fixtures/run");
+          useRun.getState().setTask(TASK);
+          void useRun.getState().start();
+        }
       }
       document.documentElement.dataset.ready = "1";
       void bridge.call("window.ready", {}); // kapatma koruması aktive

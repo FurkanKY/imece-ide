@@ -7,11 +7,14 @@ import { X, Circle } from "lucide-react";
 import { initMonaco, langForPath } from "@/lib/monaco";
 import { fileIcon } from "@/lib/fileIcons";
 import { useEditor } from "@/state/editor";
+import { DiffView, DiffTab } from "./DiffView";
 
 function TabBar() {
   const { tabs, activeRel, activate, close } = useEditor();
+  const diff = useEditor((s) => s.diff);
   return (
     <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border-w bg-side">
+      {diff && <DiffTab path={diff.path} />}
       {tabs.map((t) => {
         const on = t.rel === activeRel;
         const { Icon, color } = fileIcon(t.name);
@@ -141,10 +144,14 @@ export function Editor() {
     }
   }, [tabs]);
 
+  const diff = useEditor((s) => s.diff);
+
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-panel">
       <TabBar />
-      <div ref={hostRef} className="min-h-0 flex-1" />
+      {/* diff açıkken editör gizlenir (dispose edilmez — model/scroll korunur) */}
+      <div ref={hostRef} className={diff ? "hidden" : "min-h-0 flex-1"} />
+      {diff && <DiffView path={diff.path} original={diff.original} modified={diff.modified} />}
     </div>
   );
 }

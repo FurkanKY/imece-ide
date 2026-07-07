@@ -1,8 +1,9 @@
 /* mock — düz tarayıcıda geliştirme + görsel doğrulama için sahte host.
    Senaryo seçimi: ?scenario=empty|project|running|result|error (P2'de fixtures/run.ts genişler). */
 
-import { Api, Bridge, Events, Prefs } from "../protocol";
+import { Api, Bridge, Events, Prefs, Proposal } from "../protocol";
 import * as vfs from "./vfs";
+import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
 
 const DEFAULT_PREFS: Prefs = {
   accent: "blue",
@@ -20,6 +21,8 @@ export class MockBridge implements Bridge {
   readonly isNative = false;
   private listeners = new Map<string, Set<(payload: unknown) => void>>();
   private maximized = false;
+  private runCancelled = false;
+  private mockProposals: Proposal[] = [];
   private prefs: Prefs = (() => {
     try {
       const raw = localStorage.getItem("magent.prefs");
@@ -105,9 +108,71 @@ export class MockBridge implements Bridge {
         this.prefs = params as Prefs;
         localStorage.setItem("magent.prefs", JSON.stringify(this.prefs));
         return {} as R;
+      case "run.providers":
+        return {
+          providers: ["claude", "deepseek", "gemini"],
+          defaultRouting: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
+        } as R;
+      case "run.start": {
+        this.runCancelled = false;
+        void this.streamRun();
+        return { runId: "mock-1" } as R;
+      }
+      case "run.cancel":
+        this.runCancelled = true;
+        this.emit("run.finished", { runId: "mock-1", status: "cancelled" });
+        return {} as R;
+      case "run.applyProposals": {
+        const wanted = new Set((params as { paths: string[] }).paths);
+        const applied: string[] = [];
+        for (const p of this.mockProposals) {
+          if (wanted.has(p.path)) {
+            vfs.writeFile(p.path, p.new);
+            applied.push(p.path);
+          }
+        }
+        this.mockProposals = this.mockProposals.filter((p) => !wanted.has(p.path));
+        return { applied, errors: [] } as R;
+      }
+      case "run.rejectProposals":
+        this.mockProposals = [];
+        return {} as R;
+      case "history.list":
+        return {
+          items: [
+            { ts: Date.now() / 1000 - 3600, task: "utils.py'deki tarih biçimini ISO 8601 yap", verdict: "APPROVED", tokens: 1031, cost_usd: 0.0294, files: ["src/utils.ts"] },
+            { ts: Date.now() / 1000 - 86400, task: "config.py'ye loglama seviyesi ekle", verdict: "NEEDS_FIX", tokens: 2140, cost_usd: 0.041, files: ["config.py", "main.py"] },
+          ],
+        } as R;
       default:
         console.warn("[mock] karşılıksız metot:", method, params);
         return {} as R;
+    }
+  }
+
+  /** senaryoya göre koşu olaylarını zamanlamalı akıt */
+  private async streamRun() {
+    const seq = this.scenario === "running" ? RUN_PARTIAL : RUN_FULL;
+    const errorAt = this.scenario === "error" ? 5 : -1; // plan metriği sonrası patla
+    let i = 0;
+    for (const [delay, ev] of seq) {
+      await new Promise((r) => setTimeout(r, delay));
+      if (this.runCancelled) return;
+      if (i === errorAt) {
+        this.emit("run.finished", {
+          runId: "mock-1", status: "failed",
+          error: "DeepSeek API: 429 Too Many Requests (kota aşıldı)",
+        });
+        return;
+      }
+      if (ev.type === "proposal") {
+        this.mockProposals = (ev.proposals as Proposal[]) ?? [];
+      }
+      this.emit("run.event", { runId: "mock-1", ev });
+      i++;
+    }
+    if (this.scenario !== "running") {
+      this.emit("run.finished", { runId: "mock-1", status: "done" });
     }
   }
 

@@ -92,6 +92,25 @@ def test_event_envelope(bridge):
 
 # ---------------- settings domain'i ----------------
 
+def test_run_providers(bridge):
+    import webhost.api.run  # noqa: F401 — handler kaydı
+    r = rpc(bridge, "run.providers")
+    assert r["ok"]
+    assert set(r["result"]["providers"]) >= {"claude", "deepseek", "gemini"}
+    assert r["result"]["defaultRouting"]["coder"] == "deepseek"
+
+
+def test_run_and_history_require_project(bridge):
+    import webhost.api.run      # noqa: F401
+    import webhost.api.history  # noqa: F401
+    from webhost import state
+    state._active = None  # projeyi sıfırla
+    r = rpc(bridge, "run.start", {"task": "x"})
+    assert r["ok"] is False and r["error"]["code"] == "no_project"
+    r = rpc(bridge, "history.list")
+    assert r["ok"] is False and r["error"]["code"] == "no_project"
+
+
 def test_settings_roundtrip(bridge, tmp_path, monkeypatch):
     monkeypatch.setattr(ui_prefs, "_DIR", str(tmp_path))
     monkeypatch.setattr(ui_prefs, "_PATH", str(tmp_path / "prefs.json"))
