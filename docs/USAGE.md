@@ -51,8 +51,13 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 5. Alt çubukta toplam token/maliyet sayaçla akar; ⏱ (saat) ikonu geçmiş koşuları açar —
    tıkla → görev composer'a geri gelir. Ctrl+J paneli gizler/gösterir.
 
-**Yol haritası (sonraki fazlar):** entegre terminal (ConPTY, P3), global arama + ayarlar
-(P4), cutover (P5). Bkz. [WEB-SHELL-PLAN.md](WEB-SHELL-PLAN.md).
+**Entegre terminal (P3 — gerçek PTY):**
+- **Ctrl+`** panel aç/kapat, **Ctrl+Shift+`** yeni terminal (sekmeli). Gerçek ConPTY
+  PowerShell: ok tuşları, renkler, `python` REPL, interaktif programlar — hepsi çalışır
+  (classic'in komut-başına terminalinde imkânsızdı). Proje köküne açılır; UTF-8.
+
+**Yol haritası (sonraki fazlar):** global arama + ayarlar + cila (P4), cutover (P5).
+Bkz. [WEB-SHELL-PLAN.md](WEB-SHELL-PLAN.md).
 
 > **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
 > gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +

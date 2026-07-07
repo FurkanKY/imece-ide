@@ -23,6 +23,7 @@ export class MockBridge implements Bridge {
   private maximized = false;
   private runCancelled = false;
   private mockProposals: Proposal[] = [];
+  private termCounter = 0;
   private prefs: Prefs = (() => {
     try {
       const raw = localStorage.getItem("magent.prefs");
@@ -144,6 +145,28 @@ export class MockBridge implements Bridge {
             { ts: Date.now() / 1000 - 86400, task: "config.py'ye loglama seviyesi ekle", verdict: "NEEDS_FIX", tokens: 2140, cost_usd: 0.041, files: ["config.py", "main.py"] },
           ],
         } as R;
+      case "terminal.create": {
+        const id = `mock-t${++this.termCounter}`;
+        setTimeout(() => {
+          this.emit("terminal.data", {
+            termId: id,
+            data: "Windows PowerShell (mock)\r\n\x1b[38;2;106;161;255mPS C:\\Projeler\\demo-api>\x1b[0m ",
+          });
+        }, 120);
+        return { termId: id } as R;
+      }
+      case "terminal.write": {
+        const { termId, data } = params as { termId: string; data: string };
+        // basit echo: Enter'da sahte prompt bas
+        const echoed = data === "\r"
+          ? "\r\n\x1b[38;2;139;143;155m(mock çıktı)\x1b[0m\r\n\x1b[38;2;106;161;255mPS C:\\Projeler\\demo-api>\x1b[0m "
+          : data;
+        setTimeout(() => this.emit("terminal.data", { termId, data: echoed }), 10);
+        return {} as R;
+      }
+      case "terminal.resize":
+      case "terminal.kill":
+        return {} as R;
       default:
         console.warn("[mock] karşılıksız metot:", method, params);
         return {} as R;

@@ -76,6 +76,15 @@ export interface Api {
   };
   "run.rejectProposals": { params: {}; result: {} };
   "history.list": { params: {}; result: { items: HistoryItem[] } };
+
+  // ---- terminal (P3, ConPTY) ----
+  "terminal.create": {
+    params: { cwd?: string; cols: number; rows: number };
+    result: { termId: string };
+  };
+  "terminal.write": { params: { termId: string; data: string }; result: {} };
+  "terminal.resize": { params: { termId: string; cols: number; rows: number }; result: {} };
+  "terminal.kill": { params: { termId: string }; result: {} };
 }
 
 export type Role = "planner" | "coder" | "reviewer";
