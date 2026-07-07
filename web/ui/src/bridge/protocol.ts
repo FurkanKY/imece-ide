@@ -62,6 +62,39 @@ export interface Api {
   "fs.createFolder": { params: { rel: string }; result: { rel: string } };
   "fs.rename": { params: { rel: string; newName: string }; result: { rel: string } };
   "fs.delete": { params: { rel: string }; result: {} };
+
+  // ---- run / history (P2) ----
+  "run.providers": {
+    params: {};
+    result: { providers: string[]; defaultRouting: Routing };
+  };
+  "run.start": { params: { task: string; routing: Routing }; result: { runId: string } };
+  "run.cancel": { params: { runId?: string }; result: {} };
+  "run.applyProposals": {
+    params: { paths: string[] };
+    result: { applied: string[]; errors: { path: string; message: string }[] };
+  };
+  "run.rejectProposals": { params: {}; result: {} };
+  "history.list": { params: {}; result: { items: HistoryItem[] } };
+}
+
+export type Role = "planner" | "coder" | "reviewer";
+export type Routing = Record<Role, string>;
+
+export interface HistoryItem {
+  ts: number;
+  task: string;
+  verdict: string;
+  tokens: number;
+  cost_usd: number;
+  files: string[];
+}
+
+export interface Proposal {
+  path: string;
+  new: string;
+  diff: string;
+  is_new: boolean;
 }
 
 export interface DirEntry {
