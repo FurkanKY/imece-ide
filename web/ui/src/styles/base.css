@@ -45,7 +45,8 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--window-radius);
-  overflow: hidden;
+  /* clip: programatik kaydırmayı da engeller (xterm/monaco focus() pencereyi kaydıramaz) */
+  overflow: clip;
 }
 #root > .window.maximized {
   border-radius: 0;

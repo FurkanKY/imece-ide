@@ -148,10 +148,15 @@ class ShellWindow(QMainWindow):
         g = self.normalGeometry()
         ui_prefs.save({"window": {"x": g.x(), "y": g.y(), "w": g.width(),
                                   "h": g.height(), "maximized": self.isMaximized()}})
-        # koşan ajan thread'ini iptal et (zombi önleme)
+        # koşan ajan thread'i + PTY'leri kapat (zombi önleme)
         try:
             from webhost.api import run as run_api
             run_api.shutdown()
+        except Exception:
+            pass
+        try:
+            from webhost.api import terminal as term_api
+            term_api.shutdown()
         except Exception:
             pass
         super().closeEvent(ev)

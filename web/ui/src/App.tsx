@@ -16,6 +16,7 @@ import { Palette } from "@/components/palette/Palette";
 import { ToastHost } from "@/components/toasts/ToastHost";
 import { DialogHost } from "@/components/dialogs/DialogHost";
 import { AiPanel } from "@/components/aipanel/AiPanel";
+import { BottomPanel } from "@/components/bottompanel/BottomPanel";
 import { useEditor } from "@/state/editor";
 import { useUi } from "@/state/ui";
 import { useRun } from "@/state/run";
@@ -30,6 +31,7 @@ function Workspace() {
   const hasDiff = useEditor((s) => s.diff !== null);
   const sidebarVisible = useUi((s) => s.sidebarVisible);
   const aiPanelVisible = useUi((s) => s.aiPanelVisible);
+  const bottomVisible = useUi((s) => s.bottomVisible);
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -45,15 +47,23 @@ function Workspace() {
         )}
       </aside>
       )}
-      {hasTabs || hasDiff ? (
-        <Editor />
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center justify-center bg-panel">
-          <p className="text-faint" style={{ fontSize: "var(--t-body)" }}>
-            Soldan bir dosya seç — ya da sağdan ekibe bir görev ver.
-          </p>
-        </div>
-      )}
+      {/* orta kolon: editör ↕ terminal */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {hasTabs || hasDiff ? (
+          <Editor />
+        ) : (
+          <div className="flex min-h-0 flex-1 items-center justify-center bg-panel">
+            <p className="text-faint" style={{ fontSize: "var(--t-body)" }}>
+              Soldan bir dosya seç — ya da sağdan ekibe bir görev ver.
+            </p>
+          </div>
+        )}
+        {bottomVisible && (
+          <div className="h-[240px] shrink-0">
+            <BottomPanel />
+          </div>
+        )}
+      </div>
       {aiPanelVisible && <AiPanel />}
     </div>
   );

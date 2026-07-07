@@ -13,7 +13,8 @@ function combo(e: KeyboardEvent): string {
   if (e.ctrlKey || e.metaKey) parts.push("mod");
   if (e.shiftKey) parts.push("shift");
   if (e.altKey) parts.push("alt");
-  parts.push(e.key.toLowerCase());
+  // backquote: shift'li kombinasyonlarda e.key düzene göre değişir ("~") → code kullan
+  parts.push(e.code === "Backquote" ? "`" : e.key.toLowerCase());
   return parts.join("+");
 }
 
@@ -45,6 +46,16 @@ const MAP: Record<string, Handler> = {
   "mod+j": (e) => {
     e.preventDefault();
     useUi.getState().toggleAiPanel();
+  },
+  "mod+`": (e) => {
+    e.preventDefault();
+    useUi.getState().toggleBottom();
+  },
+  "mod+shift+`": async (e) => {
+    e.preventDefault();
+    if (!useUi.getState().bottomVisible) useUi.getState().toggleBottom();
+    const { useTerminals } = await import("@/state/terminal");
+    void useTerminals.getState().create();
   },
 };
 

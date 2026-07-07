@@ -2,7 +2,8 @@
    keymap → commands → store'lar). */
 
 import {
-  FolderOpen, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft, X,
+  FolderOpen, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft, PanelRight,
+  TerminalSquare, X,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -45,6 +46,23 @@ function buildCommands(): Command[] {
     {
       id: "toggle-sidebar", label: "Gezgini Aç/Kapat", hint: "Ctrl+B",
       Icon: PanelLeft, run: () => ui.toggleSidebar(),
+    },
+    {
+      id: "toggle-aipanel", label: "AI Panelini Aç/Kapat", hint: "Ctrl+J",
+      Icon: PanelRight, run: () => ui.toggleAiPanel(),
+    },
+    {
+      id: "toggle-terminal", label: "Terminal Aç/Kapat", hint: "Ctrl+`",
+      Icon: TerminalSquare, run: () => ui.toggleBottom(),
+    },
+    {
+      id: "new-terminal", label: "Yeni Terminal", hint: "Ctrl+Shift+`",
+      Icon: TerminalSquare,
+      run: async () => {
+        if (!ui.bottomVisible) ui.toggleBottom();
+        const { useTerminals } = await import("@/state/terminal");
+        void useTerminals.getState().create();
+      },
     },
   ];
   if (ws.root) {
