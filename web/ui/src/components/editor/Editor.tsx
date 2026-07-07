@@ -23,12 +23,12 @@ function TabBar() {
             key={t.rel}
             onClick={() => activate(t.rel)}
             className={
-              "group flex cursor-pointer items-center gap-1.5 border-r border-border-w px-3 " +
-              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-card")
+              "group relative flex cursor-pointer items-center gap-1.5 border-r border-border-w px-3 transition-colors duration-100 " +
+              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-card hover:text-text2")
             }
             style={{ fontSize: "var(--t-label)" }}
           >
-            {on && <span className="absolute inset-x-0 top-0 h-[2px]" />}
+            {on && <span className="absolute inset-x-0 top-0 h-[2px] bg-accent" />}
             <Icon size={14} strokeWidth={1.8} style={{ color }} className="shrink-0" />
             <span className="max-w-[160px] truncate">{t.name}</span>
             <button
@@ -48,6 +48,27 @@ function TabBar() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function Breadcrumb() {
+  const activeRel = useEditor((s) => s.activeRel);
+  const diff = useEditor((s) => s.diff);
+  const path = diff?.path ?? activeRel;
+  if (!path) return null;
+  const parts = path.split("/");
+  return (
+    <div
+      className="flex h-6 shrink-0 items-center gap-1 overflow-hidden border-b border-border-w bg-panel px-3 text-faint"
+      style={{ fontSize: "var(--t-caption)" }}
+    >
+      {parts.map((p, i) => (
+        <span key={i} className="flex min-w-0 items-center gap-1">
+          {i > 0 && <span className="shrink-0 opacity-50">›</span>}
+          <span className={"truncate " + (i === parts.length - 1 ? "text-text2" : "")}>{p}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -149,6 +170,7 @@ export function Editor() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel">
       <TabBar />
+      <Breadcrumb />
       {/* diff açıkken editör gizlenir (dispose edilmez — model/scroll korunur) */}
       <div ref={hostRef} className={diff ? "hidden" : "min-h-0 flex-1"} />
       {diff && <DiffView path={diff.path} original={diff.original} modified={diff.modified} />}

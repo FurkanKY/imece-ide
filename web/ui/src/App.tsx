@@ -1,6 +1,7 @@
 /* App — pencere kabuğu + çalışma alanı. Proje açıksa workspace, değilse welcome. */
 
 import { lazy, Suspense, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { bridge } from "@/bridge";
 import { useSettings } from "@/state/settings";
 import { useWorkspace } from "@/state/workspace";
@@ -33,20 +34,33 @@ function Workspace() {
   const aiPanelVisible = useUi((s) => s.aiPanelVisible);
   const bottomVisible = useUi((s) => s.bottomVisible);
 
+  const ease = [0.33, 1, 0.68, 1] as const;
+
   return (
     <div className="flex min-h-0 flex-1">
       <ActivityBar active={view} onSelect={setView} onSettings={() => {}} />
-      {sidebarVisible && (
-      <aside className="w-[240px] shrink-0 border-r border-border-w bg-side">
-        {view === "explorer" ? (
-          <Explorer />
-        ) : (
-          <div className="p-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            Bu görünüm sonraki fazda gelecek.
-          </div>
+      <AnimatePresence initial={false}>
+        {sidebarVisible && (
+          <motion.aside
+            key="sidebar"
+            initial={{ width: 0 }}
+            animate={{ width: 240 }}
+            exit={{ width: 0 }}
+            transition={{ duration: 0.18, ease }}
+            className="shrink-0 overflow-hidden border-r border-border-w bg-side"
+          >
+            <div className="h-full w-[240px]">
+              {view === "explorer" ? (
+                <Explorer />
+              ) : (
+                <div className="p-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+                  Bu görünüm sonraki fazda gelecek.
+                </div>
+              )}
+            </div>
+          </motion.aside>
         )}
-      </aside>
-      )}
+      </AnimatePresence>
       {/* orta kolon: editör ↕ terminal */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {hasTabs || hasDiff ? (
@@ -58,13 +72,37 @@ function Workspace() {
             </p>
           </div>
         )}
-        {bottomVisible && (
-          <div className="h-[240px] shrink-0">
-            <BottomPanel />
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {bottomVisible && (
+            <motion.div
+              key="bottom"
+              initial={{ height: 0 }}
+              animate={{ height: 240 }}
+              exit={{ height: 0 }}
+              transition={{ duration: 0.18, ease }}
+              className="shrink-0 overflow-hidden"
+            >
+              <div className="h-[240px]">
+                <BottomPanel />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      {aiPanelVisible && <AiPanel />}
+      <AnimatePresence initial={false}>
+        {aiPanelVisible && (
+          <motion.div
+            key="aipanel"
+            initial={{ width: 0 }}
+            animate={{ width: 340 }}
+            exit={{ width: 0 }}
+            transition={{ duration: 0.18, ease }}
+            className="shrink-0 overflow-hidden"
+          >
+            <AiPanel />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

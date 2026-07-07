@@ -1,53 +1,92 @@
-/* Welcome — proje açık değilken karşılama + son projeler. */
+/* Welcome — proje açık değilken karşılama: marka + accent glow + hızlı eylemler +
+   kbd ipuçları + kart görünümlü son projeler. Uygulamanın "vitrini". */
 
-import { FolderOpen, Clock } from "lucide-react";
+import { motion } from "motion/react";
+import { FolderOpen, ArrowRight } from "lucide-react";
 import { useWorkspace } from "@/state/workspace";
 import { useSettings } from "@/state/settings";
+import { Logo } from "@/components/brand/Logo";
 import { S } from "@/lib/strings.tr";
 
 const NO_RECENT: { path: string; name: string; lastOpened: string }[] = [];
 
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd
+      className="rounded-[5px] border border-border-w bg-card px-1.5 py-0.5 text-muted"
+      style={{ fontSize: "10.5px", fontFamily: "var(--font-ui)", boxShadow: "var(--bevel)" }}
+    >
+      {children}
+    </kbd>
+  );
+}
+
 export function Welcome() {
   const pickAndOpen = useWorkspace((s) => s.pickAndOpen);
   const openProject = useWorkspace((s) => s.openProject);
-  // selector STABİL referans dönmeli (yeni [] → sonsuz döngü)
   const recent = useSettings((s) => s.prefs?.recentProjects ?? NO_RECENT);
 
   return (
-    <main className="flex flex-1 items-center justify-center bg-bg">
-      <div className="flex w-full max-w-md flex-col items-center gap-3 px-6 text-center">
+    <main className="relative flex flex-1 items-center justify-center overflow-hidden bg-bg">
+      {/* accent glow orb — sahnenin ışığı */}
+      <div
+        className="pointer-events-none absolute left-1/2 top-[8%] size-[520px] -translate-x-1/2 rounded-full opacity-60"
+        style={{
+          background:
+            "radial-gradient(circle, color-mix(in srgb, var(--accent) 9%, transparent), transparent 65%)",
+        }}
+      />
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.33, 1, 0.68, 1] }}
+        className="relative flex w-full max-w-md flex-col items-center gap-3 px-6 text-center"
+      >
         <div
-          className="flex size-16 items-center justify-center rounded-[var(--r-xl)] border border-border-w bg-card"
-          style={{ boxShadow: "var(--shadow-2)" }}
-        >
-          <span className="text-accent" style={{ fontSize: 28 }}>⌘</span>
-        </div>
-        <h1
-          className="text-text"
+          className="flex size-[68px] items-center justify-center rounded-[var(--r-xl)] border border-border-w"
           style={{
-            fontSize: "var(--t-display)",
-            fontWeight: "var(--w-display)",
-            letterSpacing: "var(--ls-display)",
+            background: "linear-gradient(to bottom, var(--card2), var(--card))",
+            boxShadow: "var(--bevel-strong), var(--shadow-2), var(--glow-accent-soft)",
           }}
         >
-          {S.welcome.title}
-        </h1>
-        <p className="text-muted" style={{ fontSize: "var(--t-body)" }}>
-          {S.welcome.subtitle}
-        </p>
+          <Logo size={34} />
+        </div>
+
+        <div>
+          <h1
+            className="text-text"
+            style={{
+              fontSize: "22px",
+              fontWeight: "var(--w-display)",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {S.welcome.title}
+          </h1>
+          <p className="mt-1 text-muted" style={{ fontSize: "var(--t-body)" }}>
+            {S.welcome.subtitle}
+          </p>
+        </div>
+
         <button
-          className="mt-2 flex items-center gap-2 rounded-[var(--r-sm)] border border-border-w2 bg-card px-4 py-2 text-text2 transition-colors duration-[var(--dur-fast)] hover:bg-card2 hover:text-text"
-          style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
+          className="group mt-2 flex items-center gap-2 rounded-[var(--r-sm)] bg-accent px-4 py-2 text-on-accent transition-all duration-[var(--dur-fast)] hover:bg-accent2 active:scale-[0.98]"
+          style={{
+            fontSize: "var(--t-label)",
+            fontWeight: "var(--w-label)",
+            boxShadow: "var(--shadow-1), var(--glow-accent-soft)",
+          }}
           onClick={() => void pickAndOpen()}
         >
           <FolderOpen size={15} />
           {S.welcome.openFolder}
+          <ArrowRight size={13} className="opacity-60 transition-transform group-hover:translate-x-0.5" />
         </button>
 
         {recent.length > 0 && (
-          <div className="mt-4 w-full">
+          <div className="mt-5 w-full">
             <div
-              className="mb-1 px-1 text-left text-faint"
+              className="mb-1.5 px-1 text-left text-faint"
               style={{
                 fontSize: "var(--t-overline)",
                 fontWeight: "var(--w-overline)",
@@ -56,30 +95,42 @@ export function Welcome() {
             >
               SON PROJELER
             </div>
-            <div className="flex flex-col gap-0.5">
-              {recent.slice(0, 5).map((p) => (
-                <button
+            <div className="flex flex-col gap-1">
+              {recent.slice(0, 4).map((p, i) => (
+                <motion.button
                   key={p.path}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.08 + i * 0.05, duration: 0.25 }}
                   onClick={() => void openProject(p.path)}
-                  className="flex items-center gap-2 rounded-[var(--r-xs)] px-2 py-1.5 text-left text-text2 transition-colors hover:bg-card"
+                  className="group flex items-center gap-2.5 rounded-[var(--r-md)] border border-border-w bg-card px-3 py-2 text-left transition-all duration-[var(--dur-fast)] hover:border-border-w2 hover:bg-card2"
+                  style={{ boxShadow: "var(--bevel)" }}
                 >
-                  <Clock size={13} className="shrink-0 text-faint" />
-                  <span className="shrink-0" style={{ fontSize: "var(--t-label)" }}>
-                    {p.name}
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-[var(--r-xs)] bg-accentdim text-accent"
+                        style={{ fontSize: "12px", fontWeight: 700 }}>
+                    {p.name.slice(0, 1).toLocaleUpperCase("tr")}
                   </span>
-                  <span className="truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
-                    {p.path}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-text2" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
+                      {p.name}
+                    </span>
+                    <span className="block truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
+                      {p.path}
+                    </span>
                   </span>
-                </button>
+                  <ArrowRight size={13} className="shrink-0 text-faint opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100" />
+                </motion.button>
               ))}
             </div>
           </div>
         )}
 
-        <p className="mt-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          {S.welcome.hintShortcuts}
-        </p>
-      </div>
+        <div className="mt-4 flex items-center gap-3 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+          <span className="flex items-center gap-1.5"><Kbd>Ctrl K</Kbd> komutlar</span>
+          <span className="flex items-center gap-1.5"><Kbd>Ctrl P</Kbd> dosyalar</span>
+          <span className="flex items-center gap-1.5"><Kbd>Ctrl `</Kbd> terminal</span>
+        </div>
+      </motion.div>
     </main>
   );
 }

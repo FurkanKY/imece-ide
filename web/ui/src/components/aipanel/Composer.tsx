@@ -5,6 +5,7 @@ import { BrainCircuit, Code2, SearchCheck, Play, Square, type LucideIcon } from 
 import { useRun } from "@/state/run";
 import { useSettings } from "@/state/settings";
 import { Role } from "@/bridge";
+import { Select } from "@/components/ui/Select";
 
 const ROLE_ICONS: Record<Role, LucideIcon> = {
   planner: BrainCircuit,
@@ -19,24 +20,13 @@ function RoleSelect({ role }: { role: Role }) {
   const Icon = ROLE_ICONS[role];
 
   return (
-    <label
-      className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-1"
-      title={role}
-    >
-      <Icon size={13} className="shrink-0 text-muted" strokeWidth={1.9} />
-      <select
-        value={value}
-        onChange={(e) => setRouting(role, e.target.value)}
-        className="w-full min-w-0 cursor-pointer appearance-none bg-transparent text-text2 outline-none"
-        style={{ fontSize: "var(--t-caption)" }}
-      >
-        {providers.map((p) => (
-          <option key={p} value={p} className="bg-panel text-text">
-            {p}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      value={value}
+      options={providers}
+      onChange={(v) => setRouting(role, v)}
+      ariaLabel={role}
+      icon={<Icon size={13} className="shrink-0 text-muted" strokeWidth={1.9} />}
+    />
   );
 }
 
