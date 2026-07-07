@@ -106,8 +106,11 @@ export function Pipeline() {
         {status === "cancelled" && <span className="text-warn">DURDURULDU</span>}
       </div>
       <div className="relative">
-        {/* bağlayıcı dikey çizgi */}
+        {/* bağlayıcı dikey çizgi (+ koşu sırasında akan accent) */}
         <span className="absolute bottom-4 left-[13px] top-4 w-px bg-line" />
+        {status === "running" && (
+          <span className="flow-line absolute bottom-4 left-[13px] top-4 w-px" />
+        )}
         {roles.map((r) => (
           <StageNode key={r} info={stages[r]} routedTo={routing[r]} />
         ))}

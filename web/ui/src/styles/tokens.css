@@ -74,6 +74,18 @@
   --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
   --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.4), 0 18px 52px rgba(0, 0, 0, 0.5);
 
+  /* ---- Derinlik dili (theme.py grad()/bevel'in CSS karşılığı) ----
+     bevel: yüzeyin üst kenarında 1px'lik iç parıltı — "fiziksellik" hissi.
+     Kullanım: box-shadow: var(--bevel), <dış gölge>; */
+  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --bevel-strong: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --surface-grad: linear-gradient(to bottom, rgba(255, 255, 255, 0.025), transparent 28%);
+
+  /* accent parlaması (aktif/koşan öğeler) */
+  --glow-accent: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+                 0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
+  --glow-accent-soft: 0 0 14px color-mix(in srgb, var(--accent) 12%, transparent);
+
   /* ---- Pencere ---- */
   --titlebar-h: 42px;
   --window-radius: 8px; /* maximize'da 0'a düşer (.maximized) */

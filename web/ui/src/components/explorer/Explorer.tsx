@@ -1,7 +1,7 @@
-/* Explorer — lazy dosya ağacı. Klasör tıkla → genişle (fs.listDir); dosya tıkla →
-   editörde aç. Token'lı hover/seçili durumları; boş/yükleniyor durumları. */
+/* Explorer — lazy dosya ağacı. Girinti kılavuzları, başlıkta hover eylemleri,
+   aktif dosyada sol accent şeridi. Klasör tıkla → genişle; dosya tıkla → aç. */
 
-import { ChevronRight, Folder, FolderOpen, Loader2 } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, FilePlus2, FolderPlus, Folder, FolderOpen, Loader2, RefreshCw } from "lucide-react";
 import { DirEntry } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
 import { useEditor } from "@/state/editor";
@@ -35,13 +35,23 @@ function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
         onClick={onClick}
         title={entry.name}
         className={
-          "flex w-full items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pr-2 text-left transition-colors duration-100 " +
-          (isActive
-            ? "bg-accentdim text-text"
-            : "text-text2 hover:bg-card")
+          "group relative flex w-full items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pr-2 text-left transition-colors duration-100 " +
+          (isActive ? "bg-accentdim text-text" : "text-text2 hover:bg-card")
         }
         style={{ paddingLeft: depth * INDENT + 6 }}
       >
+        {/* girinti kılavuzları */}
+        {Array.from({ length: depth }).map((_, i) => (
+          <span
+            key={i}
+            className="pointer-events-none absolute bottom-0 top-0 w-px bg-line"
+            style={{ left: i * INDENT + 12 }}
+          />
+        ))}
+        {/* aktif dosya accent şeridi */}
+        {isActive && (
+          <span className="absolute bottom-1 left-0 top-1 w-[2px] rounded-r bg-accent" />
+        )}
         <span className="flex size-4 shrink-0 items-center justify-center">
           {entry.isDir ? (
             isLoading ? (
@@ -49,7 +59,10 @@ function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
             ) : (
               <ChevronRight
                 size={13}
-                className={"text-faint transition-transform " + (isOpen ? "rotate-90" : "")}
+                className={
+                  "text-faint transition-transform duration-[var(--dur-fast)] " +
+                  (isOpen ? "rotate-90" : "")
+                }
               />
             )
           ) : null}
@@ -68,21 +81,47 @@ function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
   );
 }
 
+function HeaderAction({ Icon, label, onClick }: {
+  Icon: typeof FilePlus2;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="rounded p-1 text-faint opacity-0 transition-all hover:bg-card hover:text-text2 group-hover/head:opacity-100"
+    >
+      <Icon size={13} strokeWidth={1.9} />
+    </button>
+  );
+}
+
 export function Explorer() {
-  const { name, children } = useWorkspace();
+  const { name, children, newFile, newFolder, loadDir } = useWorkspace();
   const roots = children[""] ?? [];
+
+  const collapseAll = () =>
+    useWorkspace.setState({ expanded: new Set() });
 
   return (
     <div className="flex h-full flex-col">
-      <div
-        className="flex h-8 items-center px-3 text-muted"
-        style={{
-          fontSize: "var(--t-overline)",
-          fontWeight: "var(--w-overline)",
-          letterSpacing: "var(--ls-overline)",
-        }}
-      >
-        {(name ?? "GEZGİN").toLocaleUpperCase("tr")}
+      <div className="group/head flex h-8 shrink-0 items-center pl-3 pr-1.5">
+        <span
+          className="min-w-0 flex-1 truncate text-muted"
+          style={{
+            fontSize: "var(--t-overline)",
+            fontWeight: "var(--w-overline)",
+            letterSpacing: "var(--ls-overline)",
+          }}
+        >
+          {(name ?? "GEZGİN").toLocaleUpperCase("tr")}
+        </span>
+        <HeaderAction Icon={FilePlus2} label="Yeni Dosya" onClick={() => void newFile("")} />
+        <HeaderAction Icon={FolderPlus} label="Yeni Klasör" onClick={() => void newFolder("")} />
+        <HeaderAction Icon={RefreshCw} label="Yenile" onClick={() => void loadDir("")} />
+        <HeaderAction Icon={ChevronsDownUp} label="Tümünü Daralt" onClick={collapseAll} />
       </div>
       <ExplorerMenu entry={null}>
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
