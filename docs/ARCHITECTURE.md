@@ -1,14 +1,20 @@
 # Mimari
 
+> **Aktif dönüşüm (2026-07, `web-shell` branch):** masaüstü arayüzü QWidgets/QSS'ten
+> **tek `QWebEngineView` içinde web-shell'e** taşınıyor (`shell.py` + `webhost/` + `web/ui/`).
+> Uygulama yerleşik Windows programı kalır; motor değişmez. Aşağıdaki "Web-shell katmanı"
+> bölümüne bakın. Eski `desktop.py` + widget modülleri cutover'a (P5) dek `--classic`
+> olarak yaşar, sonra silinir. Plan: `.claude/plans/web-shell-ui.md`.
+
 ## Genel bakış
 
 Sistem üç katmandan oluşur:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  ARAYÜZLER   orchestrator.py (CLI) · app.py (web) · desktop.py │
-│              desktop.py = mini-IDE: dosya gezgini + Monaco     │
-│              editör (editor_panel.py + web/editor/) + ajan akışı│
+│  ARAYÜZLER   orchestrator.py (CLI) · app.py (web) · shell.py   │
+│              shell.py = web-shell mini-IDE (webhost/ + web/ui/)│
+│              [eski: desktop.py + widget modülleri → cutover'da]│
 ├─────────────────────────────────────────────────────────────┤
 │  ORKESTRASYON   runner.py (üretim)  ·  project_runner.py (proje)│
 │                 → olay (event) üreten generator'lar            │
@@ -16,13 +22,12 @@ Sistem üç katmandan oluşur:
 │  AJANLAR     agents.py (rol + routing)                        │
 │  ADAPTÖRLER  adapters.py (claude / deepseek / gemini)         │
 │  ARAÇLAR     project.py (dosya listele/oku/diff/uygula)       │
-│  EDİTÖR      editor_panel.py + web/editor/ (Monaco, QWebChannel)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
 Temel tasarım ilkesi: **her katman bir alttakine bağımlı, üsttekinden habersiz.**
 Arayüzler orkestratörü çağırır; orkestratör ajanları; ajanlar adaptörleri. Bu sayede
-aynı motor üç farklı arayüzde değişmeden kullanılır.
+aynı motor tüm arayüzlerde değişmeden kullanılır.
 
 ---
 
@@ -112,10 +117,55 @@ Yardımcılar: `_parse_requested_files` (Planner'ın FILES listesi),
 
 **Olay tipleri:** `info`, `stage`, `metric`, `output`, `diff`, `proposal`.
 
-## Katman — Editör (`editor_panel.py` + `web/editor/`)
+## Katman — Web-shell arayüzü (`shell.py` + `webhost/` + `web/ui/`) ★ yeni
 
-Masaüstü mini-IDE'nin kod editörü, `QWebEngineView` içine gömülü **Monaco** (VS Code'un
-editörü). Python ile JavaScript arasında **QWebChannel** köprüsü kurulur:
+Yeni masaüstü arayüzü, **tüm UI'ı tek bir `QWebEngineView` içinde web teknolojisiyle**
+çizer (Cursor/VS Code'un Electron modeli; ama host native PySide6). Motor Python'da kalır,
+tek bir **RPC köprüsü** üzerinden konuşulur.
+
+```
+web/ui/  (React 19 + TS + Vite + Tailwind v4)      webhost/  (PySide6 host)
+  titlebar · activitybar · explorer · editor          shell.py         giriş (--dev / --classic)
+  (Monaco) · statusbar · welcome · toasts             scheme.py        app:// özel şeması (dist servis)
+    ▲                                                 window.py        frameless pencere + webview
+    │ bridge/{protocol,qt,mock}.ts                    bridge.py        RPC dispatcher (@handler)
+    │  call(method,params) → Promise                  state.py         aktif Project tekili
+    │  on(channel, cb)     → olay akışı               api/app.py       window/app/clipboard/pickFolder
+    ▼                                                 api/settings.py  ui_prefs v2 sarmalayıcı
+  QWebChannel  ◀──── host.call / reply / event ────▶  api/project.py   project.open / listFiles
+                                                      api/fs.py        listDir/readFile/writeFile/…
+```
+
+**Köprü sözleşmesi (tek doğruluk kaynağı `web/ui/src/bridge/protocol.ts`):** zarf
+`{id, method, params}` → `{id, ok, result|error}`; olaylar `{channel, payload}`. Python
+tarafında `@handler("domain.metot")` ile kaydedilir; uzun işler QThread'e alınıp sinyalle
+çözülür. Domain'ler: `window · app · settings · project · fs` (P1); `run · terminal ·
+history · search` (P2–P4).
+
+**app:// özel şeması** (`scheme.py`): Vite ES modülleri/worker'ları `file://` altında
+CORS'a takıldığı için `SecureScheme|CorsEnabled|FetchApiAllowed` bayraklı özel şema
+kullanılır; `web/ui/dist/`'i diskten servis eder. `--dev` modunda bunun yerine Vite dev
+sunucusu (`localhost:5173`, HMR) yüklenir — **gerçek köprüyle**.
+
+**Frameless mekanik:** HTML titlebar `pointerdown` → köprü `window.startSystemMove()`
+(chrome.py deseninin portu; native snap/move korunur). Kenar tutamaçları →
+`startSystemResize(edge)`. Kısayol sahipliği %100 web (`lib/keymap.ts`).
+
+**Mock bridge** (`bridge/mock/`): aynı UI sahte veri + sanal FS ile düz tarayıcıda çalışır
+(`?scenario=…`) → geliştirme + `tools/webshot.mjs` (Playwright) ile görsel doğrulama.
+Bu, offscreen render edemeyen `tools/uishot.py`'nin yerini alır (Monaco/xterm dahil her
+şey artık görünür).
+
+**Durum yönetimi (web, zustand):** `state/workspace.ts` (proje + lazy ağaç),
+`state/editor.ts` (sekmeler/dirty/kaydet), `state/settings.ts` (prefs → `<html data-*>`).
+Tokenlar `web/ui/src/styles/tokens.css`'te (theme.py'nin CSS portu; bkz. DESIGN.md).
+
+## Katman — Editör (eski: `editor_panel.py` + `web/editor/`) — cutover'da silinir
+
+Eski masaüstü mini-IDE'nin kod editörü, `QWebEngineView` içine gömülü **Monaco** (VS Code'un
+editörü). Python ile JavaScript arasında **QWebChannel** köprüsü kurulur. (Web-shell'de
+Monaco doğrudan `web/ui` içinden npm paketiyle yüklenir; bu AMD kopyası yalnız `--classic`
+sayfasında kullanılır.)
 
 ```
 editor_panel.py (Python)                 web/editor/ (JavaScript)
@@ -146,9 +196,12 @@ editor_panel.py (Python)                 web/editor/ (JavaScript)
 
 ---
 
-## Katman — Arayüz (masaüstü, `desktop.py` + widget modülleri)
+## Katman — Eski masaüstü arayüzü (`desktop.py` + widget modülleri) — cutover'da silinir
 
-Masaüstü mini-IDE, tek bir `desktop.py::MainWindow` altında bir dizi widget modülünü birleştirir:
+> Bu bölüm **classic** arayüzü belgeler; web-shell cutover'ında (P5) tüm bu modüller
+> silinecek. Yeni arayüz için üstteki "Web-shell arayüzü" bölümüne bakın.
+
+Eski masaüstü mini-IDE, tek bir `desktop.py::MainWindow` altında bir dizi widget modülünü birleştirir:
 
 | Modül | İş |
 |-------|----|

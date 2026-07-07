@@ -1,0 +1,91 @@
+/* App — pencere kabuğu + çalışma alanı. Proje açıksa workspace, değilse welcome. */
+
+import { lazy, Suspense, useEffect, useState } from "react";
+import { bridge } from "@/bridge";
+import { useSettings } from "@/state/settings";
+import { useWorkspace } from "@/state/workspace";
+import { installKeymap } from "@/lib/keymap";
+import { Titlebar } from "@/components/titlebar/Titlebar";
+import { ResizeEdges } from "@/components/window/ResizeEdges";
+import { ActivityBar, View } from "@/components/activitybar/ActivityBar";
+import { Explorer } from "@/components/explorer/Explorer";
+import { Editor } from "@/components/editor/Editor";
+import { StatusBar } from "@/components/statusbar/StatusBar";
+import { Welcome } from "@/components/welcome/Welcome";
+import { useEditor } from "@/state/editor";
+
+const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
+const smokeMode = new URLSearchParams(location.search).get("smoke");
+const scenario = new URLSearchParams(location.search).get("scenario");
+
+function Workspace() {
+  const [view, setView] = useState<View>("explorer");
+  const hasTabs = useEditor((s) => s.tabs.length > 0);
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <ActivityBar active={view} onSelect={setView} onSettings={() => {}} />
+      <aside className="w-[240px] shrink-0 border-r border-border-w bg-side">
+        {view === "explorer" ? (
+          <Explorer />
+        ) : (
+          <div className="p-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+            Bu görünüm sonraki fazda gelecek.
+          </div>
+        )}
+      </aside>
+      {hasTabs ? (
+        <Editor />
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center justify-center bg-panel">
+          <p className="text-faint" style={{ fontSize: "var(--t-body)" }}>
+            Soldan bir dosya seç.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const [maximized, setMaximized] = useState(false);
+  const loadSettings = useSettings((s) => s.load);
+  const root = useWorkspace((s) => s.root);
+  const openProject = useWorkspace((s) => s.openProject);
+
+  useEffect(() => {
+    installKeymap();
+    const off = bridge.on("window.state", (s) => setMaximized(s.maximized));
+    void (async () => {
+      await loadSettings();
+      // mock senaryosu: otomatik proje aç (webshot/geliştirme)
+      if (!bridge.isNative && (scenario === "project" || scenario === "editor")) {
+        await openProject("C:/Projeler/demo-api");
+        if (scenario === "editor") await useEditor.getState().open("src/App.tsx");
+      }
+      document.documentElement.dataset.ready = "1";
+    })();
+    return off;
+  }, [loadSettings, openProject]);
+
+  if (smokeMode === "monaco") {
+    return (
+      <div className={"window" + (maximized ? " maximized" : "")}>
+        <ResizeEdges maximized={maximized} />
+        <Titlebar maximized={maximized} />
+        <Suspense fallback={null}>
+          <div className="min-h-0 flex-1"><MonacoSmoke /></div>
+        </Suspense>
+      </div>
+    );
+  }
+
+  return (
+    <div className={"window" + (maximized ? " maximized" : "")}>
+      <ResizeEdges maximized={maximized} />
+      <Titlebar maximized={maximized} />
+      {root ? <Workspace /> : <Welcome />}
+      <StatusBar />
+    </div>
+  );
+}

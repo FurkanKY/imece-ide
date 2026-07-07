@@ -1,0 +1,44 @@
+"""
+shell.py — yeni web-shell girişi (bkz. .claude/plans/web-shell-ui.md).
+
+  python shell.py            web/ui/dist derlemesini app:// üzerinden yükler
+  python shell.py --dev      http://localhost:5173 (Vite HMR) + F12 DevTools
+  python shell.py --classic  eski Qt arayüzü (desktop.py) — cutover'a dek yedek
+
+Eski arayüz bağımsız olarak `python desktop.py` ile de açılabilir.
+"""
+
+import os
+import sys
+
+
+def main() -> int:
+    if "--classic" in sys.argv:
+        import desktop
+        return desktop.main()
+
+    dev = "--dev" in sys.argv
+
+    # Şema kaydı QApplication'dan ÖNCE olmalı.
+    from webhost.scheme import register_scheme, UI_DIST
+    register_scheme()
+
+    from PySide6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+
+    if not dev and not os.path.exists(os.path.join(UI_DIST, "index.html")):
+        print("web/ui/dist bulunamadı. Önce derleyin:  cd web/ui && npm run build")
+        print("(Gelistirme icin:  python shell.py --dev  +  cd web/ui && npm run dev)")
+        return 1
+
+    from webhost.api import register_all
+    register_all()
+
+    from webhost.window import ShellWindow
+    win = ShellWindow(dev=dev)
+    win.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

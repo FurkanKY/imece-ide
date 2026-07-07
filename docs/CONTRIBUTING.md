@@ -22,9 +22,12 @@ Amaç: kod ile doküman arasındaki farkın hiçbir zaman birikmemesi.
 |-----------|---------------|
 | Yeni model/sağlayıcı, fiyat, model adı | `docs/MODELS.md` |
 | Yeni modül, katman, olay tipi, veri akışı | `docs/ARCHITECTURE.md` |
+| Yeni köprü metodu/olayı (webhost ↔ web/ui) | `web/ui/src/bridge/protocol.ts` (tek kaynak) + `docs/ARCHITECTURE.md` |
+| Yeni tasarım tokenı / değeri | `web/ui/src/styles/tokens.css` + `docs/DESIGN.md` |
 | Yeni arayüz özelliği / kullanım biçimi | `docs/USAGE.md` |
 | Yeni optimizasyon tekniği veya durumu | `docs/OPTIMIZATIONS.md` |
 | Kurulum, bağımlılık, ortam tuzağı | `docs/SETUP.md` + `requirements.txt` |
+| Web-shell faz ilerlemesi | `docs/HANDOFF.md` + `.claude/plans/web-shell-ui.md` |
 | Yol haritası ilerlemesi / faz durumu | `docs/ROADMAP.md` |
 | **Her değişiklik (istisnasız)** | `docs/CHANGELOG.md` |
 
@@ -58,8 +61,12 @@ istiyor; "yeterince iyi" ile yetinme. Uygulama:
 
 ## Doğrulama alışkanlığı
 
-- Motor/protokol kısımları **headless** test edilir (script ile), GUI görseli kullanıcı
-  tarafından `python desktop.py` ile onaylanır.
+- **Web-shell UI görseli:** `node tools/webshot.mjs` mock-bridge'li UI'ı gerçek Chromium'da
+  açıp `.uishots/*.png` üretir (Monaco/xterm dahil — her şey görünür). Ekran görüntüsü
+  incelenmeden UI işi "bitti" sayılmaz. Gerçek uygulama: `python shell.py --dev` +
+  `QTWEBENGINE_REMOTE_DEBUGGING` → CDP.
+- **Köprü/motor:** `pytest tests/test_bridge.py` (webview'suz sözleşme testleri) +
+  motor headless script.
 - Alt-süreçlerde daima `encoding="utf-8", errors="replace"` ve gerektiğinde
   `PYTHONUTF8=1` (bkz. `docs/SETUP.md` — cp1254 tuzağı).
 - Python komutları için gerçek yorumlayıcı yolu / PowerShell (bkz. `docs/SETUP.md`).

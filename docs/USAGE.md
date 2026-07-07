@@ -1,19 +1,54 @@
 # Kullanım
 
-Üç arayüz de aynı motoru kullanır; hangisini seçeceğin işine bağlı.
+Arayüzler aynı motoru kullanır; hangisini seçeceğin işine bağlı.
 
 | Arayüz | En iyi olduğu iş |
 |--------|------------------|
-| **Masaüstü** (`desktop.py`) | Var olan bir projede çalışmak (diff öner → uygula) |
+| **Web-shell** (`shell.py`) ★ | Yeni masaüstü mini-IDE (web-shell); var olan projede çalışmak |
+| **Masaüstü classic** (`desktop.py`) | Eski Qt arayüzü — cutover'a dek yedek (`shell.py --classic`) |
 | **Web** (`app.py`) | Sıfırdan tek dosya üretmek, akışı canlı izlemek |
 | **Terminal** (`orchestrator.py`) | Hızlı, otomasyona uygun tek dosya üretimi |
 
 ---
 
-## Masaüstü uygulaması (mini-IDE) — lokal projede çalışma
+## Web-shell mini-IDE (`shell.py`) ★ yeni
 
 ```bash
-python desktop.py
+# önce bir kez derle (bkz. SETUP.md 2b):
+cd web/ui && npm ci && npm run build && cd ../..
+
+python shell.py            # web/ui/dist'i app:// üzerinden yükler
+python shell.py --dev      # Vite dev sunucusu (HMR) + F12 DevTools — geliştirme
+python shell.py --classic  # eski Qt arayüzü (desktop.py)
+```
+
+Düzen: üstte **web titlebar** (frameless — sürükle/çift-tık maximize, kendi min/max/kapat),
+solda **aktivite çubuğu** + **dosya gezgini** (lazy ağaç), ortada **Monaco editör** (çok
+sekmeli, dirty noktası), altta **durum çubuğu**.
+
+**Şu an çalışan (P0+P1 çekirdeği):**
+- **Klasör Aç** (karşılama ekranı veya son projeler) → gezgin ağacı gelir.
+- Klasöre tıkla → genişler; **dosyaya tıkla** → Monaco'da sekmede açılır (sözdizimi
+  renklendirmeli). **Ctrl+S** ile kaydet (sekmede • = kaydedilmemiş), **Ctrl+W** kapat.
+- Pencere geometrisi ve son projeler oturumlar arası hatırlanır.
+
+**Yol haritası (sonraki fazlar):** sağ-tık dosya işlemleri + temalı diyaloglar, Ctrl+P/
+Ctrl+K paletleri, AI paneli + canlı pipeline + diff incelemesi (P2), entegre terminal
+(ConPTY, P3), global arama + ayarlar (P4). Bkz. `.claude/plans/web-shell-ui.md`.
+
+> **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
+> gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +
+> `QTWEBENGINE_REMOTE_DEBUGGING` ile gerçek uygulamanın webview'i de CDP'den görüntülenebilir.
+
+---
+
+## Masaüstü classic (`desktop.py`) — lokal projede çalışma (eski arayüz)
+
+> Bu, web-shell'e taşınmakta olan **eski** Qt arayüzüdür; cutover'da kaldırılacak.
+> Yeni arayüz için üstteki "Web-shell mini-IDE" bölümüne bakın.
+
+```bash
+python desktop.py          # veya: python shell.py --classic
 ```
 
 Düzen (Cursor benzeri): üstte **özel başlık/komut çubuğu** (frameless — kendi min/max/

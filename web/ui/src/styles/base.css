@@ -1,0 +1,85 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* ---- Gömülü fontlar (assets/fonts kopyası → public/fonts) ---- */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter.ttf") format("truetype-variations");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono.ttf") format("truetype-variations");
+  font-weight: 100 800;
+  font-display: block;
+}
+
+/* ---- Taban ---- */
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--t-body);
+  font-weight: var(--w-body);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv01" on, "ss03" on, "zero" on; /* Inter — Linear reçetesi */
+  user-select: none; /* masaüstü hissi: metin seçimi yalnız içerik alanlarında */
+  cursor: default;
+}
+.selectable, input, textarea {
+  user-select: text;
+  cursor: auto;
+}
+
+/* Pencere gövdesi: yuvarlak köşe + hairline kenar (maximize'da düzleşir) */
+#root > .window {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--window-radius);
+  overflow: hidden;
+}
+#root > .window.maximized {
+  border-radius: 0;
+  border-color: transparent;
+}
+
+/* ---- Scrollbar (tüm yüzeylerde tek dil) ---- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 24%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---- Odak halkası (klavye erişilebilirliği — eski UI'da hiç yoktu) ---- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
+}
+
+/* ---- Animasyon tercihi ---- */
+[data-animations="off"] *, [data-animations="off"] *::before, [data-animations="off"] *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}
