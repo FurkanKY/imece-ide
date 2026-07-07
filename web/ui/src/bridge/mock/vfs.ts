@@ -66,6 +66,37 @@ export function writeFile(rel: string, content: string) {
   cur[name] = content;
 }
 
+export function createNode(rel: string, isDir: boolean) {
+  const parts = rel.split("/");
+  const name = parts.pop()!;
+  let cur = VFS;
+  for (const p of parts) {
+    if (typeof cur[p] !== "object") cur[p] = {};
+    cur = cur[p] as VNode;
+  }
+  if (cur[name] !== undefined) throw new Error(`Zaten var: ${rel}`);
+  cur[name] = isDir ? {} : "";
+}
+
+export function renameNode(rel: string, newName: string): string {
+  const parts = rel.split("/");
+  const oldName = parts.pop()!;
+  let cur = VFS;
+  for (const p of parts) cur = cur[p] as VNode;
+  if (cur[newName] !== undefined) throw new Error(`Zaten var: ${newName}`);
+  cur[newName] = cur[oldName];
+  delete cur[oldName];
+  return [...parts, newName].join("/");
+}
+
+export function deleteNode(rel: string) {
+  const parts = rel.split("/");
+  const name = parts.pop()!;
+  let cur = VFS;
+  for (const p of parts) cur = cur[p] as VNode;
+  delete cur[name];
+}
+
 export function listAllFiles(rel = "", acc: string[] = []): string[] {
   const node = resolve(rel);
   if (typeof node !== "object" || node === undefined) return acc;

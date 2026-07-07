@@ -17,6 +17,11 @@ def _open(params, ctx):
     proj = state.set_project(path)
     name = os.path.basename(proj.root)
 
+    from webhost import watcher
+    w = watcher.get()
+    if w:
+        w.reset(proj.root)
+
     # son projeler + last_project kalıcılığı (prefs v2)
     prefs = ui_prefs.load()
     recent = [p for p in (prefs.get("recent_projects") or []) if p.get("path") != proj.root]

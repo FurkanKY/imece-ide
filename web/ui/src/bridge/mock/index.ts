@@ -45,6 +45,17 @@ export class MockBridge implements Bridge {
       case "window.close":
       case "window.startSystemMove":
       case "window.startSystemResize":
+      case "window.confirmClose":
+      case "window.ready":
+        return {} as R;
+      case "session.get":
+        try {
+          return JSON.parse(sessionStorage.getItem("magent.session") ?? "") as R;
+        } catch {
+          return { openTabs: [], activeTab: null } as R;
+        }
+      case "session.save":
+        sessionStorage.setItem("magent.session", JSON.stringify(params));
         return {} as R;
       case "window.toggleMaximize":
         this.maximized = !this.maximized;
@@ -67,6 +78,27 @@ export class MockBridge implements Bridge {
         vfs.writeFile(p.rel, p.content);
         return {} as R;
       }
+      case "fs.createFile": {
+        const p = params as { rel: string };
+        vfs.createNode(p.rel, false);
+        return { rel: p.rel } as R;
+      }
+      case "fs.createFolder": {
+        const p = params as { rel: string };
+        vfs.createNode(p.rel, true);
+        return { rel: p.rel } as R;
+      }
+      case "fs.rename": {
+        const p = params as { rel: string; newName: string };
+        return { rel: vfs.renameNode(p.rel, p.newName) } as R;
+      }
+      case "fs.delete":
+        vfs.deleteNode((params as { rel: string }).rel);
+        return {} as R;
+      case "app.clipboardWrite":
+      case "app.revealInOS":
+      case "app.openExternal":
+        return {} as R;
       case "settings.get":
         return this.prefs as R;
       case "settings.set":

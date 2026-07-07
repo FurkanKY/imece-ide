@@ -21,6 +21,10 @@ interface EditorState {
   setDraft: (rel: string, draft: string) => void;
   save: (rel: string) => Promise<void>;
   saveActive: () => Promise<void>;
+  /** yeniden adlandırma/taşıma sonrası açık sekmelerin yollarını günceller */
+  renamePath: (oldRel: string, newRel: string) => void;
+  /** silinen dosya/klasörün sekmelerini kapatır */
+  closeDeleted: (rel: string) => void;
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -80,4 +84,33 @@ export const useEditor = create<EditorState>((set, get) => ({
     const { activeRel } = get();
     if (activeRel) await get().save(activeRel);
   },
+
+  renamePath: (oldRel, newRel) =>
+    set((s) => ({
+      // hem dosyanın kendisi hem taşınan klasörün altındakiler
+      tabs: s.tabs.map((t) => {
+        const moved =
+          t.rel === oldRel ? newRel :
+          t.rel.startsWith(oldRel + "/") ? newRel + t.rel.slice(oldRel.length) : null;
+        return moved
+          ? { ...t, rel: moved, name: moved.split("/").pop() ?? moved }
+          : t;
+      }),
+      activeRel:
+        s.activeRel === oldRel ? newRel :
+        s.activeRel?.startsWith(oldRel + "/")
+          ? newRel + s.activeRel.slice(oldRel.length)
+          : s.activeRel,
+    })),
+
+  closeDeleted: (rel) =>
+    set((s) => {
+      const gone = (r: string) => r === rel || r.startsWith(rel + "/");
+      const tabs = s.tabs.filter((t) => !gone(t.rel));
+      const activeRel =
+        s.activeRel && gone(s.activeRel)
+          ? tabs[tabs.length - 1]?.rel ?? null
+          : s.activeRel;
+      return { tabs, activeRel };
+    }),
 }));

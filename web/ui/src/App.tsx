@@ -12,7 +12,11 @@ import { Explorer } from "@/components/explorer/Explorer";
 import { Editor } from "@/components/editor/Editor";
 import { StatusBar } from "@/components/statusbar/StatusBar";
 import { Welcome } from "@/components/welcome/Welcome";
+import { Palette } from "@/components/palette/Palette";
+import { ToastHost } from "@/components/toasts/ToastHost";
+import { DialogHost } from "@/components/dialogs/DialogHost";
 import { useEditor } from "@/state/editor";
+import { useUi } from "@/state/ui";
 
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
 const smokeMode = new URLSearchParams(location.search).get("smoke");
@@ -21,10 +25,12 @@ const scenario = new URLSearchParams(location.search).get("scenario");
 function Workspace() {
   const [view, setView] = useState<View>("explorer");
   const hasTabs = useEditor((s) => s.tabs.length > 0);
+  const sidebarVisible = useUi((s) => s.sidebarVisible);
 
   return (
     <div className="flex min-h-0 flex-1">
       <ActivityBar active={view} onSelect={setView} onSettings={() => {}} />
+      {sidebarVisible && (
       <aside className="w-[240px] shrink-0 border-r border-border-w bg-side">
         {view === "explorer" ? (
           <Explorer />
@@ -34,6 +40,7 @@ function Workspace() {
           </div>
         )}
       </aside>
+      )}
       {hasTabs ? (
         <Editor />
       ) : (
@@ -57,6 +64,8 @@ export default function App() {
     installKeymap();
     const off = bridge.on("window.state", (s) => setMaximized(s.maximized));
     void (async () => {
+      const { installSessionPersistence } = await import("@/lib/session");
+      installSessionPersistence();
       await loadSettings();
       // mock senaryosu: otomatik proje aç (webshot/geliştirme)
       if (!bridge.isNative && (scenario === "project" || scenario === "editor")) {
@@ -64,6 +73,7 @@ export default function App() {
         if (scenario === "editor") await useEditor.getState().open("src/App.tsx");
       }
       document.documentElement.dataset.ready = "1";
+      void bridge.call("window.ready", {}); // kapatma koruması aktive
     })();
     return off;
   }, [loadSettings, openProject]);
@@ -86,6 +96,9 @@ export default function App() {
       <Titlebar maximized={maximized} />
       {root ? <Workspace /> : <Welcome />}
       <StatusBar />
+      <Palette />
+      <DialogHost />
+      <ToastHost />
     </div>
   );
 }

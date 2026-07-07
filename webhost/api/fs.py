@@ -43,6 +43,13 @@ def _list_dir(params, ctx):
         raise BridgeError("io", str(e))
     dirs.sort(key=lambda e: e["name"].lower())
     files.sort(key=lambda e: e["name"].lower())
+
+    # gezginde açılan klasör izlenir → dış değişiklikte fs.changed yayınlanır
+    from webhost import watcher
+    w = watcher.get()
+    if w:
+        w.watch_dir(base)
+
     return {"entries": dirs + files}
 
 

@@ -31,12 +31,19 @@ export interface Api {
   "window.close": { params: {}; result: {} };
   "window.startSystemMove": { params: {}; result: {} };
   "window.startSystemResize": { params: { edge: ResizeEdge }; result: {} };
+  "window.confirmClose": { params: {}; result: {} };
+  "window.ready": { params: {}; result: {} };
+
+  // session (proje-içi .magent/session.json)
+  "session.get": { params: {}; result: SessionData };
+  "session.save": { params: SessionData; result: {} };
 
   // app
   "app.info": { params: {}; result: { version: string; platform: string; chromium: string } };
   "app.openExternal": { params: { url: string }; result: {} };
   "app.pickFolder": { params: {}; result: { path: string | null } };
-  "app.revealInOS": { params: { rel: string }; result: {} };
+  "app.revealInOS": { params: { path: string }; result: {} };
+  "app.clipboardWrite": { params: { text: string }; result: {} };
 
   // settings
   "settings.get": { params: {}; result: Prefs };
@@ -62,6 +69,11 @@ export interface DirEntry {
   rel: string;
   isDir: boolean;
   ext: string;
+}
+
+export interface SessionData {
+  openTabs: string[];
+  activeTab: string | null;
 }
 
 // ---- Olay kanalları ----
