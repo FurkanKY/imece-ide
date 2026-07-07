@@ -28,7 +28,10 @@ const SCENARIOS = {
   "project": { query: "?scenario=project", ready: "html[data-ready]" },
   "editor": { query: "?scenario=editor", ready: "html[data-ready]" },
   "monaco-smoke": { query: "?smoke=monaco", ready: "html[data-monaco-ready]" },
-  // P2+: palette, running, result, error, terminal, diff
+  // P2 koşu senaryoları: görev başlatılır, akış beklenir (bkz. App.tsx scenario işleme)
+  "running": { query: "?scenario=running", ready: "html[data-ready]", settleMs: 3500 },
+  "result": { query: "?scenario=result", ready: "html[data-ready]", settleMs: 8000 },
+  "error": { query: "?scenario=error", ready: "html[data-ready]", settleMs: 3500 },
 };
 
 const argScen = process.argv.find((a) => a.startsWith("--scenario="));
@@ -75,7 +78,7 @@ async function main() {
     }
     await page.goto(BASE + "/" + sc.query, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(sc.ready, { timeout: 20000 });
-    await page.waitForTimeout(350); // font/animasyon otursun
+    await page.waitForTimeout(sc.settleMs ?? 350); // font/animasyon/koşu akışı otursun
     const file = path.join(OUT, `${name}.png`);
     await page.screenshot({ path: file });
     console.log("✓", path.relative(ROOT, file));

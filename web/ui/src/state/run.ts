@@ -175,6 +175,7 @@ export const useRun = create<RunState>((set, get) => ({
       }
       for (const e of errors) toast.err(`${e.path}: ${e.message}`);
       set({ diffs: [], proposals: [] });
+      (await import("@/state/editor")).useEditor.getState().closeDiff();
     } catch (e) {
       toast.err(e instanceof Error ? e.message : "Uygulanamadı.");
     }
@@ -183,6 +184,7 @@ export const useRun = create<RunState>((set, get) => ({
   reject: async () => {
     await bridge.call("run.rejectProposals", {});
     set({ diffs: [], proposals: [] });
+    (await import("@/state/editor")).useEditor.getState().closeDiff();
     toast.info("Değişiklikler reddedildi.");
   },
 

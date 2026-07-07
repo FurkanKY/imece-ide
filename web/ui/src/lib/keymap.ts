@@ -42,6 +42,10 @@ const MAP: Record<string, Handler> = {
     e.preventDefault();
     useUi.getState().toggleSidebar();
   },
+  "mod+j": (e) => {
+    e.preventDefault();
+    useUi.getState().toggleAiPanel();
+  },
 };
 
 let bound = false;
