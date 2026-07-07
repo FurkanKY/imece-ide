@@ -85,6 +85,20 @@ export interface Api {
   "terminal.write": { params: { termId: string; data: string }; result: {} };
   "terminal.resize": { params: { termId: string; cols: number; rows: number }; result: {} };
   "terminal.kill": { params: { termId: string }; result: {} };
+
+  // ---- search (P4) ----
+  "search.start": {
+    params: { query: string; regex?: boolean; caseSensitive?: boolean };
+    result: { searchId: string };
+  };
+  "search.cancel": { params: { searchId?: string }; result: {} };
+}
+
+export interface SearchMatch {
+  path: string;
+  line: number;
+  col: number;
+  preview: string;
 }
 
 export type Role = "planner" | "coder" | "reviewer";
@@ -127,6 +141,8 @@ export interface Events {
   "run.finished": { runId: string; status: "done" | "failed" | "cancelled"; error?: string };
   "terminal.data": { termId: string; data: string };
   "terminal.exit": { termId: string; code: number };
+  "search.results": { searchId: string; matches: SearchMatch[] };
+  "search.done": { searchId: string; total: number; limitHit: boolean };
 }
 
 export interface Bridge {

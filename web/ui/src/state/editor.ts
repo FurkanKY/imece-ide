@@ -29,6 +29,10 @@ interface EditorState {
   diff: { path: string; original: string; modified: string } | null;
   openDiff: (path: string) => Promise<void>;
   closeDiff: () => void;
+  /** dosyayı aç + satır/sütuna git (arama sonuçları) */
+  openAt: (rel: string, line: number, col: number) => Promise<void>;
+  pendingReveal: { rel: string; line: number; col: number } | null;
+  clearReveal: () => void;
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -137,4 +141,14 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   closeDiff: () => set({ diff: null }),
+
+  pendingReveal: null,
+
+  openAt: async (rel, line, col) => {
+    set({ diff: null }); // diff açıksa kapat — dosyaya gidiyoruz
+    await get().open(rel);
+    set({ pendingReveal: { rel, line, col } });
+  },
+
+  clearReveal: () => set({ pendingReveal: null }),
 }));

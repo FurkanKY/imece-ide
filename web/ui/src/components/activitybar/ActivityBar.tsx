@@ -2,8 +2,7 @@
    P2/P4'te sohbet-paneli/arama görünümleri eklenir. */
 
 import { Files, Search, GitBranch, Bot, Settings } from "lucide-react";
-
-export type View = "explorer" | "search" | "scm" | "agent";
+import type { SideView as View } from "@/state/ui";
 
 const TOP: { id: View; Icon: typeof Files; label: string }[] = [
   { id: "explorer", Icon: Files, label: "Gezgin" },

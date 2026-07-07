@@ -153,6 +153,19 @@ export function Editor() {
     ed.focus();
   }, [activeRel, tabs]);
 
+  // satıra git isteği (arama sonucundan)
+  const pendingReveal = useEditor((s) => s.pendingReveal);
+  const clearReveal = useEditor((s) => s.clearReveal);
+  useEffect(() => {
+    const ed = edRef.current;
+    if (!ed || !pendingReveal || pendingReveal.rel !== activeRel) return;
+    const { line, col } = pendingReveal;
+    ed.setPosition({ lineNumber: line, column: col });
+    ed.revealLineInCenter(line);
+    ed.focus();
+    clearReveal();
+  }, [pendingReveal, activeRel, clearReveal]);
+
   // kapanan sekmelerin modellerini temizle
   useEffect(() => {
     const live = new Set(tabs.map((t) => t.rel));

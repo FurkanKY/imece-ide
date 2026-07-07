@@ -51,6 +51,15 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 5. Alt çubukta toplam token/maliyet sayaçla akar; ⏱ (saat) ikonu geçmiş koşuları açar —
    tıkla → görev composer'a geri gelir. Ctrl+J paneli gizler/gösterir.
 
+**Projede arama (P4):**
+- **Ctrl+Shift+F** → kenar çubuğunda ARA görünümü. Aa (büyük/küçük) ve .* (regex)
+  toggle'ları; sonuçlar dosyaya gruplu; satıra tıkla → editörde o satıra gider.
+  ripgrep kuruluysa onunla (çok hızlı), değilse Python taramasıyla çalışır.
+
+**Ayarlar (P4):**
+- Aktivite çubuğu dişli ikonu veya Ctrl+K → "Ayarlar". Vurgu rengi (6 seçenek, anında
+  uygulanır), yoğunluk (Rahat/Sıkı), Enter davranışı, animasyonlar.
+
 **Entegre terminal (P3 — gerçek PTY):**
 - **Ctrl+`** panel aç/kapat, **Ctrl+Shift+`** yeni terminal (sekmeli). Gerçek ConPTY
   PowerShell: ok tuşları, renkler, `python` REPL, interaktif programlar — hepsi çalışır

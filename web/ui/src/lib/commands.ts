@@ -3,7 +3,7 @@
 
 import {
   FolderOpen, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft, PanelRight,
-  TerminalSquare, X,
+  Search, Settings, TerminalSquare, X,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -42,6 +42,19 @@ function buildCommands(): Command[] {
     {
       id: "goto-file", label: "Dosyaya Git…", hint: "Ctrl+P",
       Icon: FileSearch, run: () => openFilesPalette(),
+    },
+    {
+      id: "global-search", label: "Projede Ara…", hint: "Ctrl+Shift+F",
+      Icon: Search,
+      run: async () => {
+        ui.showSideView("search");
+        const { useSearch } = await import("@/state/search");
+        useSearch.getState().requestFocus();
+      },
+    },
+    {
+      id: "settings", label: "Ayarlar", hint: "accent · yoğunluk · animasyon",
+      Icon: Settings, run: () => ui.setSettingsOpen(true),
     },
     {
       id: "toggle-sidebar", label: "Gezgini Aç/Kapat", hint: "Ctrl+B",
