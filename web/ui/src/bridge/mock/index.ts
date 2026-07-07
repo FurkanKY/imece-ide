@@ -167,6 +167,28 @@ export class MockBridge implements Bridge {
       case "terminal.resize":
       case "terminal.kill":
         return {} as R;
+      case "search.start": {
+        const p = params as { query: string; caseSensitive?: boolean };
+        const id = `mock-s${++this.termCounter}`;
+        setTimeout(() => {
+          const matches: { path: string; line: number; col: number; preview: string }[] = [];
+          for (const path of vfs.listAllFiles()) {
+            const { content } = vfs.readFile(path);
+            const lines = content.split("\n");
+            for (let i = 0; i < lines.length; i++) {
+              const hay = p.caseSensitive ? lines[i] : lines[i].toLowerCase();
+              const needle = p.caseSensitive ? p.query : p.query.toLowerCase();
+              const col = hay.indexOf(needle);
+              if (col >= 0) matches.push({ path, line: i + 1, col: col + 1, preview: lines[i].trim() });
+            }
+          }
+          this.emit("search.results", { searchId: id, matches });
+          this.emit("search.done", { searchId: id, total: matches.length, limitHit: false });
+        }, 250);
+        return { searchId: id } as R;
+      }
+      case "search.cancel":
+        return {} as R;
       default:
         console.warn("[mock] karşılıksız metot:", method, params);
         return {} as R;

@@ -8,14 +8,16 @@ import { useWorkspace } from "@/state/workspace";
 import { installKeymap } from "@/lib/keymap";
 import { Titlebar } from "@/components/titlebar/Titlebar";
 import { ResizeEdges } from "@/components/window/ResizeEdges";
-import { ActivityBar, View } from "@/components/activitybar/ActivityBar";
+import { ActivityBar } from "@/components/activitybar/ActivityBar";
 import { Explorer } from "@/components/explorer/Explorer";
+import { SearchView } from "@/components/search/SearchView";
 import { Editor } from "@/components/editor/Editor";
 import { StatusBar } from "@/components/statusbar/StatusBar";
 import { Welcome } from "@/components/welcome/Welcome";
 import { Palette } from "@/components/palette/Palette";
 import { ToastHost } from "@/components/toasts/ToastHost";
 import { DialogHost } from "@/components/dialogs/DialogHost";
+import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { AiPanel } from "@/components/aipanel/AiPanel";
 import { BottomPanel } from "@/components/bottompanel/BottomPanel";
 import { useEditor } from "@/state/editor";
@@ -27,7 +29,9 @@ const smokeMode = new URLSearchParams(location.search).get("smoke");
 const scenario = new URLSearchParams(location.search).get("scenario");
 
 function Workspace() {
-  const [view, setView] = useState<View>("explorer");
+  const view = useUi((s) => s.sideView);
+  const setView = useUi((s) => s.setSideView);
+  const setSettingsOpen = useUi((s) => s.setSettingsOpen);
   const hasTabs = useEditor((s) => s.tabs.length > 0);
   const hasDiff = useEditor((s) => s.diff !== null);
   const sidebarVisible = useUi((s) => s.sidebarVisible);
@@ -38,7 +42,7 @@ function Workspace() {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <ActivityBar active={view} onSelect={setView} onSettings={() => {}} />
+      <ActivityBar active={view} onSelect={setView} onSettings={() => setSettingsOpen(true)} />
       <AnimatePresence initial={false}>
         {sidebarVisible && (
           <motion.aside
@@ -52,6 +56,8 @@ function Workspace() {
             <div className="h-full w-[240px]">
               {view === "explorer" ? (
                 <Explorer />
+              ) : view === "search" ? (
+                <SearchView />
               ) : (
                 <div className="p-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
                   Bu görünüm sonraki fazda gelecek.
@@ -159,6 +165,7 @@ export default function App() {
       <StatusBar />
       <Palette />
       <DialogHost />
+      <SettingsDialog />
       <ToastHost />
     </div>
   );

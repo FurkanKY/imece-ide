@@ -57,6 +57,12 @@ const MAP: Record<string, Handler> = {
     const { useTerminals } = await import("@/state/terminal");
     void useTerminals.getState().create();
   },
+  "mod+shift+f": async (e) => {
+    e.preventDefault();
+    useUi.getState().showSideView("search");
+    const { useSearch } = await import("@/state/search");
+    useSearch.getState().requestFocus();
+  },
 };
 
 let bound = false;
