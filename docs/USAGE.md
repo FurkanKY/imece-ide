@@ -26,15 +26,22 @@ Düzen: üstte **web titlebar** (frameless — sürükle/çift-tık maximize, ke
 solda **aktivite çubuğu** + **dosya gezgini** (lazy ağaç), ortada **Monaco editör** (çok
 sekmeli, dirty noktası), altta **durum çubuğu**.
 
-**Şu an çalışan (P0+P1 çekirdeği):**
+**Şu an çalışan (P0+P1 tamam):**
 - **Klasör Aç** (karşılama ekranı veya son projeler) → gezgin ağacı gelir.
 - Klasöre tıkla → genişler; **dosyaya tıkla** → Monaco'da sekmede açılır (sözdizimi
-  renklendirmeli). **Ctrl+S** ile kaydet (sekmede • = kaydedilmemiş), **Ctrl+W** kapat.
-- Pencere geometrisi ve son projeler oturumlar arası hatırlanır.
+  renklendirmeli). **Ctrl+S** kaydet (sekmede • = kaydedilmemiş), **Ctrl+W** kapat.
+- **Sağ-tık** (gezgin): Yeni Dosya/Klasör, Yeniden Adlandır, Sil, Yolu Kopyala, Sistemde
+  Göster — hepsi koyu temalı diyaloglarla (native beyaz pencere yok).
+- **Ctrl+P** dosyaya git (fuzzy), **Ctrl+K** komut paleti, **Ctrl+B** gezgini aç/kapat.
+- İşlem sonuçları sağ altta **toast** olarak görünür.
+- **Kapatma koruması:** kaydedilmemiş sekme varken pencereyi kapatınca onay sorulur.
+- **Oturum:** açık sekmeler + aktif sekme proje-içi `.magent/session.json`'da; yeniden
+  açılışta geri gelir. Pencere geometrisi ve son projeler de hatırlanır.
+- Dosyalar dışarıdan değişirse (başka editör/git) gezgin kendini tazeler.
 
-**Yol haritası (sonraki fazlar):** sağ-tık dosya işlemleri + temalı diyaloglar, Ctrl+P/
-Ctrl+K paletleri, AI paneli + canlı pipeline + diff incelemesi (P2), entegre terminal
-(ConPTY, P3), global arama + ayarlar (P4). Bkz. `.claude/plans/web-shell-ui.md`.
+**Yol haritası (sonraki fazlar):** AI paneli + canlı pipeline + diff incelemesi (P2),
+entegre terminal (ConPTY, P3), global arama + ayarlar (P4), cutover (P5).
+Bkz. [WEB-SHELL-PLAN.md](WEB-SHELL-PLAN.md).
 
 > **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
 > gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +

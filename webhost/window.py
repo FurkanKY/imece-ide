@@ -28,6 +28,8 @@ class ShellWindow(QMainWindow):
     def __init__(self, dev: bool = False, dev_url: str = "http://localhost:5173"):
         super().__init__()
         self._dev = dev
+        self._web_ready = False       # JS köprüsü canlı mı (kapatma koruması için)
+        self._close_confirmed = False
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowTitle("Multi-Agent IDE")
         self.setMinimumSize(720, 480)
@@ -47,6 +49,10 @@ class ShellWindow(QMainWindow):
         self._channel.registerObject("host", self.bridge)
         self.view.page().setWebChannel(self._channel)
         self._register_window_handlers()
+
+        # ---- dosya sistemi izleyicisi ----
+        from webhost import watcher
+        watcher.init(self.bridge, self)
 
         # ---- geometri geri yükleme ----
         self._restore_geometry()
@@ -76,6 +82,19 @@ class ShellWindow(QMainWindow):
         @handler("window.close")
         def _close(params, ctx):
             self.close()
+            return {}
+
+        @handler("window.confirmClose")
+        def _confirm_close(params, ctx):
+            # web tarafı (kaydedilmemişleri sorup) kapatmayı onayladı
+            self._close_confirmed = True
+            QTimer.singleShot(0, self.close)
+            return {}
+
+        @handler("window.ready")
+        def _ready(params, ctx):
+            # web kabuğu mount oldu → kapatma koruması devreye girebilir
+            self._web_ready = True
             return {}
 
         @handler("window.startSystemMove")
@@ -119,6 +138,13 @@ class ShellWindow(QMainWindow):
             self.resize(1320, 880)
 
     def closeEvent(self, ev):
+        # Kaydedilmemiş-değişiklik koruması: kapatmayı web tarafına sor.
+        # Web dirty sekmeleri kontrol eder; onaylarsa window.confirmClose çağırır.
+        # Web hiç yüklenmediyse (çökme/boş sayfa) koruma atlanır — pencere kilitlenmesin.
+        if self._web_ready and not getattr(self, "_close_confirmed", False):
+            ev.ignore()
+            self.bridge.emit_event("window.closeRequested", {})
+            return
         g = self.normalGeometry()
         ui_prefs.save({"window": {"x": g.x(), "y": g.y(), "w": g.width(),
                                   "h": g.height(), "maximized": self.isMaximized()}})

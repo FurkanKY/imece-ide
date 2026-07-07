@@ -89,13 +89,16 @@ app.py + templates/  web arayüzü
 
 # --- ★ Yeni web-shell masaüstü arayüzü (shell.py) ---
 shell.py           web-shell girişi (--dev / --classic)
-webhost/           PySide6 host: scheme (app://) · bridge (RPC) · window (frameless) ·
-                   state (aktif proje) · api/ (app·settings·project·fs domain handler'ları)
+webhost/           PySide6 host: scheme (app://) · bridge (RPC) · window (frameless +
+                   kapatma koruması) · state (aktif proje) · watcher (fs.changed) ·
+                   api/ (app·settings·project·fs·session domain handler'ları)
 web/ui/            React+TS+Vite+Tailwind UI: bridge/ (protocol+qt+mock) · state/ (zustand)
-                   · components/ (titlebar·activitybar·explorer·editor·statusbar·welcome)
-                   · styles/tokens.css (theme.py CSS portu) · lib/ (monaco·keymap·fileIcons)
+                   · components/ (titlebar·activitybar·explorer·editor·statusbar·welcome·
+                   palette·dialogs·toasts) · styles/tokens.css (theme.py CSS portu) ·
+                   lib/ (monaco·keymap·fileIcons·fuzzy·commands·session)
 ui_prefs.py        arayüz tercihleri kalıcılığı v2 (accent·window·son projeler)
 tools/webshot.mjs  görsel öz-doğrulama (Playwright + mock bridge → .uishots/*.png)
+tools/webshot-interact.mjs  etkileşim görüntüleri (palet·menü·diyalog·toast)
 tests/test_bridge.py  köprü sözleşme testleri (webview'suz, pytest)
 assets/fonts/      gömülü fontlar (Inter UI + JetBrains Mono, SIL OFL)
 

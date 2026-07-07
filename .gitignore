@@ -20,3 +20,4 @@ web/ui/dist/
 
 # Claude Code yerel IDE ayarları (makineye özgü mutlak yollar içerir)
 .claude/
+web/ui/*.tsbuildinfo
