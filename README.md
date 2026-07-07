@@ -5,8 +5,15 @@ gibi çalıştıran, çok-modelli bir kodlama asistanı. Her model bir role atan
 (planlama / kod yazma / inceleme), bir orkestratör onları sırayla çalıştırır ve
 aralarında bilgi taşır.
 
-Üç arayüzü var: **terminal**, **web** ve **masaüstü (PySide6)**. Hedef, bunu içinde
-multi-agent sistemi olan modern bir mini-IDE'ye dönüştürmek ([yol haritası](docs/ROADMAP.md)).
+Arayüzleri: **web-shell masaüstü (`shell.py`)** ★, **terminal**, **web** ve eski
+**masaüstü classic (`desktop.py`)**. Hedef, bunu içinde multi-agent sistemi olan modern
+bir mini-IDE'ye dönüştürmek.
+
+> **⚠️ Aktif dönüşüm (`web-shell` branch):** masaüstü arayüzü QWidgets/QSS'ten **tek
+> `QWebEngineView` içinde web-shell'e** (React+TS+Vite+Tailwind) taşınıyor; uygulama
+> yerleşik Windows programı kalır, motor değişmez. Neden ve plan: `.claude/plans/
+> web-shell-ui.md` + [docs/HANDOFF.md](docs/HANDOFF.md). Eski `desktop.py` cutover'a dek
+> `python shell.py --classic` ile çalışır.
 
 ---
 
@@ -16,7 +23,9 @@ multi-agent sistemi olan modern bir mini-IDE'ye dönüştürmek ([yol haritası]
 pip install -r requirements.txt
 # .env dosyasını doldur (DEEPSEEK_API_KEY, GEMINI_API_KEY). Claude için anahtar gerekmez.
 
-python desktop.py                 # masaüstü uygulaması (lokal projede çalışmak için)
+cd web/ui && npm ci && npm run build && cd ../..   # web-shell arayüzünü derle (bir kez)
+python shell.py                   # ★ web-shell masaüstü mini-IDE
+python shell.py --classic         # eski Qt arayüzü (desktop.py)
 python app.py                     # web arayüzü  -> http://127.0.0.1:5000
 python orchestrator.py "..." --run  # terminal (sıfırdan tek dosya üret + çalıştır)
 ```
@@ -68,37 +77,40 @@ Ayrıntı → [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)
 ## Dosya haritası
 
 ```
+# --- Motor (tüm arayüzler paylaşır; DOKUNULMAZ) ---
 adapters.py        modellere bağlanan fonksiyonlar (metin + token + maliyet)
 agents.py          rol talimatları + routing
 runner.py          sıfırdan üretim orkestrasyonu (execution grounding)
 project.py         lokal proje araçları (listele/oku/diff/uygula, yol güvenliği)
 project_runner.py  proje üzerinde çalışma orkestrasyonu (diff öner)
+history.py         oturum geçmişi kalıcılığı (proje-içi .magent/history.json)
 orchestrator.py    terminal arayüzü
 app.py + templates/  web arayüzü
-desktop.py         masaüstü mini-IDE (PySide6): gezgin + Monaco editör + sağ AI paneli
-editor_panel.py    Monaco editör köprüsü (QWebEngineView + QWebChannel)
-agent_pipeline.py  canlı EKİP timeline (Planner→Coder→Reviewer, yatay/dikey)
-changes_panel.py   dosya bazında kabul/ret + Reviewer verdict rozeti + diff
-theme.py           palet + gradyan/derinlik + ikon/font yükleyici
-anim.py            premium hareket katmanı (fade, kayan gösterge, nefes, count-up; set_enabled)
-chrome.py          frameless özel başlık çubuğu (Qt6 startSystemMove/Resize)
-chat_view.py       kart tabanlı sohbet akışı (aşama kartları, streaming, verdict)
-command_palette.py Ctrl+K komut / Ctrl+P dosya paleti (fuzzy overlay)
-settings_panel.py  Ayarlar overlay'i (accent · yoğunluk · Enter · animasyon)
-ui_prefs.py        arayüz tercihleri kalıcılığı (JSON, ~/.multi_agent_ide/prefs.json)
-history.py         oturum geçmişi kalıcılığı (proje-içi .magent/history.json)
-history_panel.py   geçmiş overlay'i (görev→sonuç→maliyet; tıkla→geri yükle)
-terminal.py        entegre terminal çekirdeği (QProcess, canlı çıktı, geçmiş, cd)
-bottom_panel.py    alt panel (çok sekmeli terminal; Ctrl+`)
-tools/uishot.py    görsel öz-doğrulama (offscreen render → .uishots/*.png)
-web/editor/        Monaco editör web-uygulaması (index.html, editor.js, vs/)
+
+# --- ★ Yeni web-shell masaüstü arayüzü (shell.py) ---
+shell.py           web-shell girişi (--dev / --classic)
+webhost/           PySide6 host: scheme (app://) · bridge (RPC) · window (frameless) ·
+                   state (aktif proje) · api/ (app·settings·project·fs domain handler'ları)
+web/ui/            React+TS+Vite+Tailwind UI: bridge/ (protocol+qt+mock) · state/ (zustand)
+                   · components/ (titlebar·activitybar·explorer·editor·statusbar·welcome)
+                   · styles/tokens.css (theme.py CSS portu) · lib/ (monaco·keymap·fileIcons)
+ui_prefs.py        arayüz tercihleri kalıcılığı v2 (accent·window·son projeler)
+tools/webshot.mjs  görsel öz-doğrulama (Playwright + mock bridge → .uishots/*.png)
+tests/test_bridge.py  köprü sözleşme testleri (webview'suz, pytest)
 assets/fonts/      gömülü fontlar (Inter UI + JetBrains Mono, SIL OFL)
+
+# --- Eski masaüstü classic (cutover'da silinecek) ---
+desktop.py · editor_panel.py · agent_pipeline.py · changes_panel.py · chat_view.py ·
+command_palette.py · settings_panel.py · history_panel.py · terminal.py · bottom_panel.py ·
+theme.py · anim.py · chrome.py · tools/uishot.py · web/editor/
+
 .env               API anahtarları (gizli)
 docs/              bu dokümantasyon
 ```
 
 ## Gereksinimler
 
-Python 3.14 · Claude Code CLI (Pro/Max aboneliği) · DeepSeek ve Gemini API anahtarları ·
-`requirements.txt` (requests, python-dotenv, flask, PySide6, qtawesome) ·
-Monaco editör (npm ile yerele indirilir, bkz. SETUP).
+Python 3.14 · **PySide6 ≥ 6.11.1** (Py3.14) · Claude Code CLI (Pro/Max aboneliği) ·
+DeepSeek ve Gemini API anahtarları · `requirements.txt` (requests, python-dotenv, flask,
+PySide6, qtawesome, pywinpty) · **Node ≥ 20 + npm** (web-shell arayüzü `web/ui`'ı derlemek
+için, bkz. [SETUP](docs/SETUP.md) 2b).

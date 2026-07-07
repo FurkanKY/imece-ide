@@ -18,6 +18,10 @@ DEFAULTS = {
     "density": "comfortable",   # comfortable | compact
     "enter_to_send": True,      # Enter gönderir / Shift+Enter yeni satır
     "animations": True,         # mikro-animasyonlar açık mı
+    # ---- v2 (web-shell, bkz. .claude/plans/web-shell-ui.md) ----
+    "window": None,             # {x, y, w, h, maximized} | None
+    "last_project": None,       # son açık proje kökü | None
+    "recent_projects": [],      # [{path, name, last_opened}]
 }
 
 
@@ -32,10 +36,12 @@ def load() -> dict:
 
 
 def save(prefs: dict) -> None:
-    """Tercihleri diske yaz (yalnız bilinen anahtarlar)."""
+    """Tercihleri diske yaz. Var olan dosyayla BİRLEŞTİRİR: çağıranın vermediği
+    bilinen anahtarlar korunur (classic ↔ web-shell birbirinin alanını ezmesin)."""
     try:
         os.makedirs(_DIR, exist_ok=True)
-        clean = {k: prefs.get(k, DEFAULTS[k]) for k in DEFAULTS}
+        current = load()
+        clean = {k: prefs.get(k, current[k]) for k in DEFAULTS}
         with open(_PATH, "w", encoding="utf-8") as f:
             json.dump(clean, f, indent=2)
     except OSError:

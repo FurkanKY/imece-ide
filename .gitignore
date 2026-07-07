@@ -8,6 +8,9 @@ output/
 web/editor/vs/
 node_modules/
 
+# Yeni web-shell UI derleme çıktısı (bkz. .claude/plans/web-shell-ui.md)
+web/ui/dist/
+
 # Proje başına çalıştırma yapılandırması (Faz 2)
 .magent.json
 

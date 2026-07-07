@@ -1,0 +1,137 @@
+/* tokens.css — TEK doğruluk kaynağı. theme.py C/SP/RADIUS/TYPE/MOTION/ACCENTS portu.
+   Kural: bileşenlerde ASLA ham hex/px kullanma; her değer buradaki var()'lardan gelir.
+   (Eski QSS katmanının çöküş nedeni token kaçaklarıydı — bkz. .claude/plans/web-shell-ui.md) */
+
+:root {
+  /* ---- Yüzey kademeleri: bg < activity/side < panel < card < card2 ---- */
+  --bg: #0a0b0d;
+  --activity: #0c0d10;
+  --side: #0e0f12;
+  --panel: #131418;
+  --panel2: #17181d;
+  --editor: #1e1e1e;
+  --composer: #131418;
+  --card: #191b21;
+  --card2: #20232b;
+  --field: #0b0c0f;
+  --status: #0a0b0d;
+  --line: #1b1d23;
+
+  /* ---- Kenarlar: ASTRYX/Linear tekniği — yarı saydam beyaz ---- */
+  --border: rgba(255, 255, 255, 0.1);
+  --border2: rgba(255, 255, 255, 0.16);
+  --hair: rgba(52, 56, 67, 0.25);
+
+  /* ---- Metin hiyerarşisi ---- */
+  --text: #f2f3f6;
+  --text2: #c6cad3;
+  --muted: #8b8f9b;
+  --faint: #565a63;
+
+  /* ---- Semantik ---- */
+  --green: #4bd48a;
+  --red: #ff6b74;
+  --amber: #e9b45a;
+
+  /* ---- Aralık (4px grid, density katsayısıyla ölçeklenir) ---- */
+  --density: 1;
+  --sp-1: calc(4px * var(--density));
+  --sp-2: calc(8px * var(--density));
+  --sp-3: calc(12px * var(--density));
+  --sp-4: calc(16px * var(--density));
+  --sp-5: calc(20px * var(--density));
+  --sp-6: calc(24px * var(--density));
+  --sp-7: calc(32px * var(--density));
+  --sp-8: calc(40px * var(--density));
+
+  /* ---- Radius ---- */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 11px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-pill: 999px;
+
+  /* ---- Tipografi (rol → boyut/ağırlık/letter-spacing) ---- */
+  --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --t-display: 20px; --w-display: 800; --ls-display: 0.01em;
+  --t-title: 14px;   --w-title: 700;   --ls-title: 0.014em;
+  --t-body: 13px;    --w-body: 400;    --ls-body: 0;
+  --t-label: 12px;   --w-label: 600;   --ls-label: 0.008em;
+  --t-caption: 11px; --w-caption: 500; --ls-caption: 0.009em;
+  --t-overline: 10px; --w-overline: 800; --ls-overline: 0.14em;
+  --t-mono: 11.5px;  --w-mono: 500;
+
+  /* ---- Hareket ---- */
+  --dur-fast: 150ms;
+  --dur-base: 230ms;
+  --dur-slow: 340ms;
+  --ease: cubic-bezier(0.33, 1, 0.68, 1); /* OutCubic */
+
+  /* ---- Yükseklik (gerçek gölgeler — QSS'te imkânsızdı) ---- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.4), 0 18px 52px rgba(0, 0, 0, 0.5);
+
+  /* ---- Pencere ---- */
+  --titlebar-h: 42px;
+  --window-radius: 8px; /* maximize'da 0'a düşer (.maximized) */
+}
+
+/* ---- Accent varyantları (theme.py ACCENTS portu) ---- */
+:root, [data-accent="blue"] {
+  --accent: #6aa1ff; --accent2: #5891f6; --accentdim: #26344f; --on-accent: #06122b;
+}
+[data-accent="indigo"] {
+  --accent: #8b8cf0; --accent2: #7a7be6; --accentdim: #2b2c4a; --on-accent: #0c0b26;
+}
+[data-accent="violet"] {
+  --accent: #b07cf0; --accent2: #9d68e6; --accentdim: #33244d; --on-accent: #180a2b;
+}
+[data-accent="green"] {
+  --accent: #4bd48a; --accent2: #3cc47b; --accentdim: #193a2a; --on-accent: #04180e;
+}
+[data-accent="amber"] {
+  --accent: #e9b45a; --accent2: #e0a740; --accentdim: #3a2e18; --on-accent: #241703;
+}
+[data-accent="rose"] {
+  --accent: #ff7a8a; --accent2: #f0637a; --accentdim: #3d2028; --on-accent: #2b0a12;
+}
+
+[data-density="compact"] {
+  --density: 0.82;
+}
+
+/* ---- Tailwind v4 tema eşlemesi ---- */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-activity: var(--activity);
+  --color-side: var(--side);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-card: var(--card);
+  --color-card2: var(--card2);
+  --color-field: var(--field);
+  --color-line: var(--line);
+  --color-border-w: var(--border);
+  --color-border-w2: var(--border2);
+  --color-text: var(--text);
+  --color-text2: var(--text2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent2: var(--accent2);
+  --color-accentdim: var(--accentdim);
+  --color-on-accent: var(--on-accent);
+  --color-ok: var(--green);
+  --color-err: var(--red);
+  --color-warn: var(--amber);
+  --font-ui: var(--font-ui);
+  --font-mono: var(--font-mono);
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+}
