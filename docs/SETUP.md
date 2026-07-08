@@ -16,7 +16,8 @@ pip install -r requirements.txt
 ```
 
 İçerik: `requests`, `python-dotenv`, `flask` (web arayüzü), `PySide6 ≥ 6.11.1`
-(masaüstü; Python 3.14 gerekliliği), `pywinpty` (entegre terminal, ConPTY).
+(masaüstü; Python 3.14 gerekliliği), `pywinpty` (entegre terminal, ConPTY),
+`basedpyright` (Python IntelliSense — Node gömülü gelir, ek kurulum istemez).
 
 **Gömülü fontlar:** arayüz Inter (UI) + JetBrains Mono (kod) fontlarını
 `web/ui/public/fonts/` altından yükler (SIL OFL; depoya dahil) — ek kurulum gerekmez.
