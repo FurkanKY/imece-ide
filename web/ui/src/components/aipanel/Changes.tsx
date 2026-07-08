@@ -40,7 +40,12 @@ export function Changes() {
           return (
             <div
               key={d.path}
+              role="button"
+              tabIndex={0}
               onClick={() => void openDiff(d.path)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void openDiff(d.path); }
+              }}
               className={
                 "flex cursor-pointer items-center gap-2 rounded-[var(--r-sm)] px-2 py-1.5 " +
                 (active ? "bg-accentdim" : "hover:bg-card")

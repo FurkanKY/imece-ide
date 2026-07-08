@@ -37,7 +37,7 @@ export function BottomPanel() {
   }, [terms.length]);
 
   return (
-    <section className="flex h-full flex-col border-t border-border-w bg-[#0b0c0f]">
+    <section className="flex h-full flex-col bg-field">
       {/* sekme şeridi */}
       <div className="flex h-8 shrink-0 items-center border-b border-border-w bg-side px-1">
         <span
@@ -50,7 +50,15 @@ export function BottomPanel() {
           {terms.map((t) => (
             <div
               key={t.id}
+              role="tab"
+              aria-selected={t.id === activeId}
+              tabIndex={0}
               onClick={() => activate(t.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(t.id); }
+                if (e.key === "Delete") void kill(t.id);
+              }}
+              onAuxClick={(e) => { if (e.button === 1) void kill(t.id); }} // orta tık → kapat
               className={
                 "group flex cursor-pointer items-center gap-1.5 rounded-[var(--r-xs)] px-2 py-1 " +
                 (t.id === activeId ? "bg-card text-text" : "text-muted hover:bg-card/50")
@@ -64,7 +72,7 @@ export function BottomPanel() {
                   void kill(t.id);
                 }}
                 aria-label="Terminali kapat"
-                className="rounded p-0.5 opacity-0 hover:bg-card2 group-hover:opacity-100"
+                className="rounded p-0.5 opacity-0 hover:bg-card2 focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <X size={11} />
               </button>

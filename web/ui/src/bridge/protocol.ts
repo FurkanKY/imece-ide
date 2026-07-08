@@ -127,9 +127,21 @@ export interface DirEntry {
   ext: string;
 }
 
+/** kabuk düzeni (P4): panel görünürlükleri + boyutları + aktif kenar görünümü */
+export interface SessionLayout {
+  sideView?: string;
+  sidebarVisible?: boolean;
+  aiPanelVisible?: boolean;
+  bottomVisible?: boolean;
+  sidebarWidth?: number;
+  aiPanelWidth?: number;
+  bottomHeight?: number;
+}
+
 export interface SessionData {
   openTabs: string[];
   activeTab: string | null;
+  layout?: SessionLayout | null;
 }
 
 // ---- Olay kanalları ----

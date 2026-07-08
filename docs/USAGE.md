@@ -35,8 +35,12 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 - **Ctrl+P** dosyaya git (fuzzy), **Ctrl+K** komut paleti, **Ctrl+B** gezgini aç/kapat.
 - İşlem sonuçları sağ altta **toast** olarak görünür.
 - **Kapatma koruması:** kaydedilmemiş sekme varken pencereyi kapatınca onay sorulur.
-- **Oturum:** açık sekmeler + aktif sekme proje-içi `.magent/session.json`'da; yeniden
-  açılışta geri gelir. Pencere geometrisi ve son projeler de hatırlanır.
+- **Oturum:** açık sekmeler + aktif sekme + **kabuk düzeni** (panel görünürlük/boyutları,
+  aktif kenar görünümü) proje-içi `.magent/session.json`'da; yeniden açılışta geri gelir.
+  Pencere geometrisi ve son projeler de hatırlanır.
+- **Panel boyutlandırma:** gezgin/AI paneli/terminal kenarlarından **sürüklenerek**
+  boyutlanır (üzerine gelince accent çizgisi belirir); ayırıcıya Tab ile odaklanıp
+  ok tuşlarıyla da ayarlanabilir. Boyutlar oturumla saklanır.
 - Dosyalar dışarıdan değişirse (başka editör/git) gezgin kendini tazeler.
 
 **Ajanlarla değişiklik (P2 — sağdaki AI EKİBİ paneli):**

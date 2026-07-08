@@ -1,5 +1,6 @@
 """session.* — proje-içi oturum kalıcılığı (.magent/session.json).
-Açık sekmeler + aktif sekme; history.py ile aynı .magent klasörünü paylaşır."""
+Açık sekmeler + aktif sekme + kabuk düzeni (panel görünürlük/boyutları, kenar
+görünümü — P4); history.py ile aynı .magent klasörünü paylaşır."""
 
 import json
 import os
@@ -7,7 +8,7 @@ import os
 from webhost import state
 from webhost.bridge import handler
 
-_DEFAULT = {"openTabs": [], "activeTab": None}
+_DEFAULT = {"openTabs": [], "activeTab": None, "layout": None}
 
 
 def _path() -> str | None:

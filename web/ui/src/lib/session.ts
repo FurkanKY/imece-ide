@@ -1,14 +1,27 @@
 /* session.ts — oturum geri yükleme/kaydetme + pencere kapatma koruması.
-   Proje açılınca sekmeleri geri yükler; sekme değişimlerini debounce'la kaydeder;
-   window.closeRequested olayında dirty kontrolü yapıp kapatmayı onaylar. */
+   Proje açılınca sekmeleri + kabuk düzenini (panel görünürlük/boyut, kenar görünümü)
+   geri yükler; değişimleri debounce'la kaydeder; window.closeRequested olayında
+   dirty kontrolü yapıp kapatmayı onaylar. */
 
 import { bridge } from "@/bridge";
 import { useEditor } from "@/state/editor";
+import { useUi, layoutSnapshot, SideView } from "@/state/ui";
 import { confirmDialog } from "@/components/dialogs/dialogs";
+
+const SIDE_VIEWS: SideView[] = ["explorer", "search", "scm", "agent"];
 
 export async function restoreSession() {
   try {
-    const { openTabs, activeTab } = await bridge.call("session.get", {});
+    const { openTabs, activeTab, layout } = await bridge.call("session.get", {});
+    // kabuk düzeni (P4) — bilinmeyen sideView değerlerine düşme
+    if (layout) {
+      useUi.getState().applyLayout({
+        ...layout,
+        sideView: SIDE_VIEWS.includes(layout.sideView as SideView)
+          ? (layout.sideView as SideView)
+          : undefined,
+      });
+    }
     for (const rel of openTabs) {
       try {
         await useEditor.getState().open(rel);
@@ -30,6 +43,7 @@ async function saveSession() {
     await bridge.call("session.save", {
       openTabs: tabs.map((t) => t.rel),
       activeTab: activeRel,
+      layout: layoutSnapshot(),
     });
   } catch {
     // kritik değil
@@ -39,6 +53,11 @@ async function saveSession() {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let installed = false;
 
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => void saveSession(), 600);
+}
+
 export function installSessionPersistence() {
   if (installed) return;
   installed = true;
@@ -46,8 +65,24 @@ export function installSessionPersistence() {
   // sekme listesi/aktif sekme değişince debounce'la kaydet
   useEditor.subscribe((s, prev) => {
     if (s.tabs === prev.tabs && s.activeRel === prev.activeRel) return;
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void saveSession(), 600);
+    scheduleSave();
+  });
+
+  // kabuk düzeni değişince de kaydet (splitter/panel toggle/kenar görünümü)
+  useUi.subscribe((s, prev) => {
+    if (s.resizing) return; // sürükleme sırasında değil; bırakınca tek kayıt
+    if (
+      s.sideView === prev.sideView &&
+      s.sidebarVisible === prev.sidebarVisible &&
+      s.aiPanelVisible === prev.aiPanelVisible &&
+      s.bottomVisible === prev.bottomVisible &&
+      s.sidebarWidth === prev.sidebarWidth &&
+      s.aiPanelWidth === prev.aiPanelWidth &&
+      s.bottomHeight === prev.bottomHeight &&
+      s.resizing === prev.resizing
+    )
+      return;
+    scheduleSave();
   });
 
   // dış dosya değişikliği → yüklü klasörleri tazele

@@ -51,6 +51,19 @@ export function initMonaco() {
       "scrollbarSlider.background": "#ffffff14",
       "scrollbarSlider.hoverBackground": "#ffffff24",
       "editorOverviewRuler.border": "#00000000",
+      // ---- diff editörü: tokens.css semantik paletine bağlı (green/red) ----
+      "diffEditor.insertedTextBackground": "#4bd48a2b", // --green %17
+      "diffEditor.removedTextBackground": "#ff6b7428", // --red %16
+      "diffEditor.insertedLineBackground": "#4bd48a14",
+      "diffEditor.removedLineBackground": "#ff6b7412",
+      "diffEditorGutter.insertedLineBackground": "#4bd48a1f",
+      "diffEditorGutter.removedLineBackground": "#ff6b741c",
+      "diffEditorOverview.insertedForeground": "#4bd48a80",
+      "diffEditorOverview.removedForeground": "#ff6b7480",
+      "diffEditor.unchangedRegionBackground": "#131418",
+      "diffEditor.unchangedRegionForeground": "#8b8f9b",
+      "diffEditor.unchangedCodeBackground": "#00000000",
+      "diffEditor.border": "#ffffff1a",
     },
   });
 
