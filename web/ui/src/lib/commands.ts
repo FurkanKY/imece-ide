@@ -53,7 +53,7 @@ function buildCommands(): Command[] {
       },
     },
     {
-      id: "scm", label: "Kaynak Denetimi", hint: "git status · stage · commit",
+      id: "scm", label: "Kaynak Denetimi", hint: "Ctrl+Shift+G",
       Icon: GitBranch, run: () => ui.showSideView("scm"),
     },
     {

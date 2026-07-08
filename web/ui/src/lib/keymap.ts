@@ -63,6 +63,10 @@ const MAP: Record<string, Handler> = {
     const { useSearch } = await import("@/state/search");
     useSearch.getState().requestFocus();
   },
+  "mod+shift+g": (e) => {
+    e.preventDefault();
+    useUi.getState().showSideView("scm"); // VS Code standardı
+  },
 };
 
 let bound = false;
