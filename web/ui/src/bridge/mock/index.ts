@@ -59,6 +59,16 @@ export class MockBridge implements Bridge {
       case "window.confirmClose":
       case "window.ready":
         return {} as R;
+      // ---- lsp (P7): tarayıcıda dil sunucusu yok — zararsız no-op ----
+      case "lsp.start":
+        return { running: false, ready: false } as R;
+      case "lsp.stop":
+      case "lsp.notify":
+        return {} as R;
+      case "lsp.status":
+        return { running: false, ready: false, server: "mock" } as R;
+      case "lsp.request":
+        return { result: null } as R;
       case "session.get":
         try {
           return JSON.parse(sessionStorage.getItem("magent.session") ?? "") as R;

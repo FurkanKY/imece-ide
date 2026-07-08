@@ -174,6 +174,8 @@ export default function App() {
       installSessionPersistence();
       const { installScm } = await import("@/state/scm");
       installScm();
+      const { installLsp } = await import("@/lib/lsp");
+      installLsp(); // P7: Python dil sunucusu (native'de; mock'ta no-op)
       useRun.getState().install();
       void useRun.getState().loadProviders();
       await loadSettings();
@@ -191,6 +193,15 @@ export default function App() {
       // kayıtlı UI zoom'unu uygula (P6.6)
       const z = useUi.getState().zoom;
       if (z !== 1) void bridge.call("window.setZoom", { factor: z });
+      if (import.meta.env.DEV) {
+        // --dev E2E kancası: CDP'den store'lara erişim (üretim build'ine girmez)
+        (window as unknown as Record<string, unknown>).__magent = {
+          openProject,
+          editor: () => useEditor.getState(),
+          monaco: () => import("@/lib/monaco").then((m) => m.initMonaco()),
+          bridge,
+        };
+      }
       document.documentElement.dataset.ready = "1";
       void bridge.call("window.ready", {}); // kapatma koruması aktive
     })();
