@@ -72,29 +72,32 @@ Ayrıntı → [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)
 ## Dosya haritası
 
 ```
-# --- Motor (tüm arayüzler paylaşır; DOKUNULMAZ) ---
+# --- Motor (tüm arayüzler paylaşır; yalnız geriye-uyumlu genişletilebilir) ---
 adapters.py        modellere bağlanan fonksiyonlar (metin + token + maliyet)
 agents.py          rol talimatları + routing
 runner.py          sıfırdan üretim orkestrasyonu (execution grounding)
 project.py         lokal proje araçları (listele/oku/diff/uygula, yol güvenliği)
 project_runner.py  proje üzerinde çalışma orkestrasyonu (diff öner)
 history.py         oturum geçmişi kalıcılığı (proje-içi .magent/history.json)
+runconfig.py       F5 "çalıştır" komut sezgisi (.magent/run.json)
 orchestrator.py    terminal arayüzü
 app.py + templates/  web arayüzü
 
 # --- ★ Masaüstü mini-IDE (shell.py) ---
 shell.py           giriş (--dev = Vite HMR + DevTools)
-webhost/           PySide6 host: scheme (app://) · bridge (RPC) · window (frameless +
-                   kapatma koruması) · state (aktif proje) · watcher (fs.changed) ·
-                   api/ (app·settings·project·fs·session·run·history·terminal·search·scm)
+webhost/           PySide6 host: scheme (app://) · bridge (RPC) · jsonrpc (LSP/DAP
+                   çerçeveleme) · window (frameless + kapatma koruması) · state (aktif
+                   proje) · watcher (fs.changed) · api/ (app·settings·project·fs·session·
+                   run·history·terminal·search·scm·lsp·exec)
 web/ui/            React+TS+Vite+Tailwind UI: bridge/ (protocol+qt+mock) · state/ (zustand)
                    · components/ (titlebar·activitybar·explorer·editor·scm·search·aipanel·
                    bottompanel·statusbar·welcome·palette·dialogs·toasts·settings) ·
-                   styles/tokens.css (tasarım tokenları) · lib/ (monaco·keymap·commands…)
+                   styles/tokens.css (tasarım tokenları) · lib/ (monaco·lsp·keymap·commands…)
 ui_prefs.py        arayüz tercihleri kalıcılığı (accent·window·son projeler)
 tools/webshot.mjs  görsel öz-doğrulama (Playwright + mock bridge → .uishots/*.png)
 tools/webshot-interact.mjs  etkileşim görüntüleri (palet·menü·diyalog·toast)
-tests/test_bridge.py  köprü sözleşme testleri (webview'suz, pytest)
+tests/             pytest: test_bridge (köprü sözleşmesi) · test_jsonrpc (çerçeveleme +
+                   canlı basedpyright el sıkışması) · test_runconfig (komut sezgisi)
 
 .env               API anahtarları (gizli)
 docs/              bu dokümantasyon
@@ -104,5 +107,5 @@ docs/              bu dokümantasyon
 
 Python 3.14 · **PySide6 ≥ 6.11.1** (Py3.14) · Claude Code CLI (Pro/Max aboneliği) ·
 DeepSeek ve Gemini API anahtarları · `requirements.txt` (requests, python-dotenv, flask,
-PySide6, pywinpty) · **Node ≥ 20 + npm** (arayüzü `web/ui`'da derlemek için,
-bkz. [SETUP](docs/SETUP.md) 2b).
+PySide6, pywinpty, basedpyright) · **Node ≥ 20 + npm** (arayüzü `web/ui`'da derlemek
+için, bkz. [SETUP](docs/SETUP.md) 2b).

@@ -133,9 +133,31 @@ web/ui/  (React 19 + TS + Vite + Tailwind v4)      webhost/  (PySide6 host)
 `{id, method, params}` → `{id, ok, result|error}`; olaylar `{channel, payload}`. Python
 tarafında `@handler("domain.metot")` ile kaydedilir; uzun işler QThread'e alınıp sinyalle
 çözülür. Domain'ler: `window · app · settings · project · fs · session` (P1); `run ·
-terminal · history · search · scm` (P2–P4). `scm` (api/scm.py) git CLI alt-süreçleriyle
-status/diff/stage/unstage/discard/commit sağlar (UTF-8 + `stdin=DEVNULL`; kenar çubuğu
-KAYNAK DENETİMİ görünümü buradan beslenir, satır diff'i merkez Monaco'da açılır).
+terminal · history · search · scm` (P2–P4); `lsp · exec` (P7–P8, IDE+). `scm`
+(api/scm.py) git CLI alt-süreçleriyle status/diff/stage/unstage/discard/commit sağlar
+(UTF-8 + `stdin=DEVNULL`; kenar çubuğu KAYNAK DENETİMİ görünümü buradan beslenir,
+satır diff'i merkez Monaco'da açılır).
+
+**Dil zekâsı (P7 — `webhost/jsonrpc.py` + `api/lsp.py` + `web/ui/src/lib/lsp.ts`):**
+Python için **basedpyright** dil sunucusu köprüden bağlanır. `jsonrpc.py` Content-Length
+çerçevelemesini çözer (LSP ve P8.2 DAP'ın ortak tel biçimi); `api/lsp.py` sunucu yaşam
+döngüsünü yönetir (proje açılınca `initialize`, proje değişince yeniden başlatma,
+kapanışta shutdown; sunucudan gelen `workspace/configuration` isteklerine asgari yanıt).
+Web'de `lib/lsp.ts` **el yazımı ince istemci**dir (monaco-languageclient kullanılmaz):
+Monaco model yaşam döngüsünden belge senkronu (didOpen/didChange 200ms debounce),
+tamamlama·hover·tanıma-git·imza-yardımı provider'ları, `publishDiagnostics` →
+`setModelMarkers` (hata alt çizgileri). URI çevirisi (`file:///<rel>` ↔ mutlak LSP URI)
+iki yönde de bu modülde. TS/JS aynı özellikleri Monaco'nun kendi worker servisinden alır
+(`lib/monaco.ts`: eagerModelSync + compilerOptions; F12 başka dosyaya `registerEditorOpener`
+ile sekme açar).
+
+**F5 çalıştır (P8.1 — `runconfig.py` + `api/exec.py`):** `runconfig.py` motor-yanı
+komut sezgisidir (dosya: uzantıdan; proje: `.magent/run.json` kaydı > npm/cargo/go/
+main.py sezgisi). `api/exec.py` komutu kabuk üzerinden koşar, çıktıyı 16ms birleştirmeli
+`exec.output` olayıyla akıtır (terminal deseni) ve `exec.exited {code, durationS}` ile
+kapatır — çıktı YAKALANIR (alt panel ÇIKTI sekmesi, salt-okunur xterm; ham metin P9.2
+"hatayı ekibe gönder" için `state/exec.ts`'te saklanır). Tek eşzamanlı koşu; Windows'ta
+süreç ağacı `taskkill /T /F` ile temizlenir.
 
 **app:// özel şeması** (`scheme.py`): Vite ES modülleri/worker'ları `file://` altında
 CORS'a takıldığı için `SecureScheme|CorsEnabled|FetchApiAllowed` bayraklı özel şema
