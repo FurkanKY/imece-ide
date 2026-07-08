@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, User, Info, AlertCircle, CheckCircle2, BrainCircuit, Code2, SearchCheck } from "lucide-react";
 import { useRun, STAGE_ROLE, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
+import { Markdown } from "./Markdown";
 
 const STAGE_META: Record<string, { label: string; Icon: typeof Code2 }> = {
   plan: { label: "Plan", Icon: BrainCircuit },
@@ -55,12 +56,19 @@ function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
         )}
       </button>
       {open && info.output && (
-        <pre
-          className="selectable max-h-56 overflow-auto whitespace-pre-wrap border-t border-border-w px-3 py-2 text-text2"
-          style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-mono)" }}
-        >
-          {info.output}
-        </pre>
+        running ? (
+          // akış sırasında düz mono (hızlı); bitince markdown işlenir
+          <pre
+            className="selectable max-h-56 overflow-auto whitespace-pre-wrap border-t border-border-w px-3 py-2 text-text2"
+            style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-mono)" }}
+          >
+            {info.output}
+          </pre>
+        ) : (
+          <div className="max-h-72 overflow-auto border-t border-border-w px-3 py-2">
+            <Markdown text={info.output} />
+          </div>
+        )
       )}
     </div>
   );

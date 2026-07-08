@@ -45,7 +45,9 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 1. Görev kutusuna yaz (ör. *"utils.py'deki tarih biçimini ISO 8601 yap"*), istersen
    rol→model seçimlerini değiştir, **▶** (veya Enter).
 2. **EKİP hattı** canlı işler: aktif ajan nefes alır, biten aşamada model·süre·token·
-   maliyet görünür. **Akış** sekmesinde aşama kartları + çıktılar; hata olursa kırmızı kart.
+   maliyet görünür. **Akış** sekmesinde aşama kartları + çıktılar; hata olursa kırmızı
+   kart. Aşama bitince çıktı **markdown** olarak işlenir — kod blokları editör temasında
+   renklenir, üzerine gelince kopyala düğmesi çıkar.
 3. Öneri gelince **Değişiklikler** sekmesi açılır + **merkez inline diff** kendiliğinden
    gelir (⇄ sekmesi). Satırlara tıklayıp dosya dosya incele; istemediklerinin işaretini kaldır.
 4. **Uygula (n)** → dosyalar yazılır (.bak yedekli), açık sekmeler + ağaç tazelenir.
