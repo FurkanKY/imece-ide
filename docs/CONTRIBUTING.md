@@ -57,7 +57,7 @@ istiyor; "yeterince iyi" ile yetinme. Uygulama:
 - Görsel değişiklikler **canlı ekran görüntüsüyle** doğrulanır; kod yollarında mümkünse
   headless testle regresyon önlenir.
 - Python 3.14 gibi çok yeni ortamlarda wheel bulunmayan paketler için elle/native yol
-  uygulanabilir (ör. frameless pencere `chrome.py`'de Qt6 `startSystemMove/Resize` ile).
+  uygulanabilir (ör. frameless pencere: HTML titlebar → köprü `startSystemMove/Resize`).
 
 ## Doğrulama alışkanlığı
 

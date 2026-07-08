@@ -16,16 +16,15 @@ pip install -r requirements.txt
 ```
 
 İçerik: `requests`, `python-dotenv`, `flask` (web arayüzü), `PySide6 ≥ 6.11.1`
-(masaüstü; Python 3.14 gerekliliği), `qtawesome` (classic ikonları), `pywinpty`
-(web-shell terminali, ConPTY).
+(masaüstü; Python 3.14 gerekliliği), `pywinpty` (entegre terminal, ConPTY).
 
-**Gömülü fontlar:** masaüstü arayüzü Inter (UI) + JetBrains Mono (metrik/kod) fontlarını
-`assets/fonts/` altından yükler (SIL OFL; depoya dahil). Bulunamazsa Segoe UI / Consolas'a
-düşer — ek kurulum gerekmez.
+**Gömülü fontlar:** arayüz Inter (UI) + JetBrains Mono (kod) fontlarını
+`web/ui/public/fonts/` altından yükler (SIL OFL; depoya dahil) — ek kurulum gerekmez.
 
-## 2b. Yeni web-shell arayüzü (`shell.py` — bkz. `.claude/plans/web-shell-ui.md`)
+## 2b. Masaüstü arayüzü (`shell.py`)
 
-Yeni arayüz `web/ui/` altında Vite ile derlenir (Node ≥ 20 gerekir):
+Arayüz `web/ui/` altında Vite ile derlenir (Node ≥ 20 gerekir; Monaco/xterm dahil tüm
+web bağımlılıkları npm ile gelir):
 
 ```bash
 cd web/ui
@@ -36,21 +35,6 @@ npm run build     # → web/ui/dist  (python shell.py bunu app:// üzerinden yü
 Geliştirme: `npm run dev` (HMR, mock-bridge ile düz tarayıcıda) + `python shell.py --dev`
 (aynı arayüz gerçek köprüyle yerleşik pencerede). Görsel doğrulama:
 `node tools/webshot.mjs` → `.uishots/*.png`.
-
-## 3. Monaco editörü (classic masaüstü — cutover'a dek)
-
-Masaüstü uygulaması (`desktop.py`) kod editörü olarak Monaco (VS Code'un editörü)
-kullanır. QtWebEngine, `PySide6` ile birlikte gelir. Monaco'nun kendisi `web/editor/vs/`
-altına **yerele indirilir** (offline çalışır, git'e girmez). Bir kez indir:
-
-```bash
-# geçici bir klasörde:
-npm init -y && npm i monaco-editor@0.52.2
-# min/vs klasörünü projeye kopyala:
-cp -r node_modules/monaco-editor/min/vs "<proje>/web/editor/vs"
-```
-
-`web/editor/vs/loader.js` ve `web/editor/vs/editor/editor.main.js` oluştuysa hazırdır.
 
 ## 4. API anahtarları (.env)
 
