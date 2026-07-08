@@ -171,6 +171,11 @@ class ShellWindow(QMainWindow):
             lsp_api.shutdown()
         except Exception:
             pass
+        try:
+            from webhost.api import exec as exec_api
+            exec_api.shutdown()
+        except Exception:
+            pass
         super().closeEvent(ev)
 
     # ---------------- devtools (--dev) ----------------

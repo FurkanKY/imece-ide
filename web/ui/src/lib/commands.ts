@@ -2,8 +2,9 @@
    keymap → commands → store'lar). */
 
 import {
-  FolderOpen, GitBranch, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft,
-  PanelRight, Search, Settings, TerminalSquare, WrapText, X, ZoomIn, ZoomOut,
+  FolderOpen, GitBranch, Play, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft,
+  PanelRight, Search, Settings, SlidersHorizontal, Square, TerminalSquare,
+  WrapText, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -108,10 +109,54 @@ function buildCommands(): Command[] {
         id: "new-folder", label: "Yeni Klasör", hint: "kökte",
         Icon: FolderPlus, run: () => ws.newFolder(""),
       },
+      // ---- F5 çalıştır (P8.1) ----
+      {
+        id: "run-project", label: "Çalıştır: Proje", hint: "Ctrl+F5",
+        Icon: Play,
+        run: async () => {
+          const { useExec } = await import("@/state/exec");
+          void useExec.getState().run();
+        },
+      },
+      {
+        id: "run-stop", label: "Koşuyu Durdur", hint: "Shift+F5",
+        Icon: Square,
+        run: async () => {
+          const { useExec } = await import("@/state/exec");
+          void useExec.getState().stop();
+        },
+      },
+      {
+        id: "run-config", label: "Çalıştırma Komutunu Değiştir…", hint: ".magent/run.json",
+        Icon: SlidersHorizontal,
+        run: async () => {
+          const { promptDialog } = await import("@/components/dialogs/dialogs");
+          const { command } = await bridge.call("exec.getCommand", {});
+          const next = await promptDialog({
+            title: "Proje çalıştırma komutu",
+            message: "Ctrl+F5 bu komutu proje kökünde koşar.",
+            initial: command ?? "",
+            okLabel: "Kaydet",
+            placeholder: 'ör. python "main.py" · npm run dev',
+          });
+          if (next?.trim()) {
+            await bridge.call("exec.setCommand", { command: next.trim() });
+            toast.ok("Çalıştırma komutu kaydedildi.");
+          }
+        },
+      },
     );
   }
   if (ed.activeRel) {
     cmds.push(
+      {
+        id: "run-file", label: "Çalıştır: Aktif Dosya", hint: "F5",
+        Icon: Play,
+        run: async () => {
+          const { useExec } = await import("@/state/exec");
+          void useExec.getState().run(useEditor.getState().activeRel);
+        },
+      },
       {
         id: "save", label: "Kaydet", hint: "Ctrl+S",
         Icon: Save, run: () => ed.saveActive(),

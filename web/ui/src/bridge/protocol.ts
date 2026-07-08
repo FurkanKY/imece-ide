@@ -95,6 +95,16 @@ export interface Api {
   };
   "search.cancel": { params: { searchId?: string }; result: {} };
 
+  // ---- exec / F5 çalıştır (P8.1) ----
+  /** rel verilirse dosya, verilmezse proje komutu; command ile geçersiz kılınır */
+  "exec.run": {
+    params: { rel?: string | null; command?: string };
+    result: { execId: string; command: string };
+  };
+  "exec.stop": { params: {}; result: {} };
+  "exec.getCommand": { params: {}; result: { command: string | null } };
+  "exec.setCommand": { params: { command: string }; result: {} };
+
   // ---- lsp (P7 — Python dil sunucusu, basedpyright) ----
   "lsp.start": { params: {}; result: { running: boolean; ready: boolean } };
   "lsp.stop": { params: {}; result: {} };
@@ -198,6 +208,8 @@ export interface Events {
   "search.done": { searchId: string; total: number; limitHit: boolean };
   /** LSP sunucu bildirimleri (publishDiagnostics, $/magentReady, $/magentExited) */
   "lsp.event": { method: string; params: unknown };
+  "exec.output": { execId: string; data: string };
+  "exec.exited": { execId: string; code: number; durationS: number };
 }
 
 export interface Bridge {

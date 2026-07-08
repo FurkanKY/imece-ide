@@ -56,6 +56,13 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 - **TS/JS** — aynı dörtlü Monaco'nun kendi dil servisinden; tanıma-git açık sekmeler
   arasında çalışır.
 
+**Çalıştır (P8.1 — F5):**
+- **F5** aktif dosyayı koşar (py/js/mjs), **Ctrl+F5** projeyi (npm dev/start,
+  cargo, go veya main/app.py — sezgisel; paletten "Çalıştırma Komutunu Değiştir…"
+  ile kalıcı özelleştir → `.magent/run.json`). Titlebar'daki **▶** de aynı işi yapar.
+- Çıktı alt paneldeki **ÇIKTI** sekmesine akar (renkli); bitince yeşil/kırmızı
+  **çıkış kodu rozeti** + süre. **Shift+F5** veya ■ koşuyu durdurur.
+
 **Ajanlarla değişiklik (P2 — sağdaki AI EKİBİ paneli):**
 1. Görev kutusuna yaz (ör. *"utils.py'deki tarih biçimini ISO 8601 yap"*), istersen
    rol→model seçimlerini değiştir, **▶** (veya Enter).

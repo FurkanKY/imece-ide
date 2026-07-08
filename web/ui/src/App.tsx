@@ -176,6 +176,8 @@ export default function App() {
       installScm();
       const { installLsp } = await import("@/lib/lsp");
       installLsp(); // P7: Python dil sunucusu (native'de; mock'ta no-op)
+      const { useExec } = await import("@/state/exec");
+      useExec.getState().install(); // P8.1: exec.output/exited abonelikleri
       useRun.getState().install();
       void useRun.getState().loadProviders();
       await loadSettings();
@@ -198,6 +200,7 @@ export default function App() {
         (window as unknown as Record<string, unknown>).__magent = {
           openProject,
           editor: () => useEditor.getState(),
+          exec: () => import("@/state/exec").then((m) => m.useExec.getState()),
           monaco: () => import("@/lib/monaco").then((m) => m.initMonaco()),
           bridge,
         };

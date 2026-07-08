@@ -2,12 +2,41 @@
    deseni; tık → Ctrl+K paleti) + pencere düğmeleri. Sürükleme: pointerdown →
    bridge window.startSystemMove (Tauri deseni; chrome.py portu). */
 
-import { Minus, Square, Copy, X, Search } from "lucide-react";
+import { Minus, Play, Square, Copy, X, Search } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
+import { useEditor } from "@/state/editor";
+import { useExec } from "@/state/exec";
 import { openCommandsPalette } from "@/lib/commands";
 import { Logo } from "@/components/brand/Logo";
 import { S } from "@/lib/strings.tr";
+
+/** P8.1: ▶ koş / ■ durdur — proje açıkken görünür (F5 kısayolunun görünür yüzü) */
+function RunButton() {
+  const project = useWorkspace((s) => s.root);
+  const running = useExec((s) => s.running);
+  if (!project) return null;
+  return (
+    <button
+      data-no-drag
+      onClick={() => {
+        const ex = useExec.getState();
+        if (running) void ex.stop();
+        else void ex.run(useEditor.getState().activeRel);
+      }}
+      title={running ? "Koşuyu durdur (Shift+F5)" : "Çalıştır (F5)"}
+      aria-label={running ? "Koşuyu durdur" : "Çalıştır"}
+      className={
+        "ml-2 flex h-[26px] w-[30px] items-center justify-center rounded-[var(--r-sm)] border transition-colors " +
+        (running
+          ? "border-err/40 text-err hover:bg-err/10"
+          : "border-border-w text-muted hover:border-border-w2 hover:bg-card hover:text-accent")
+      }
+    >
+      {running ? <Square size={11} strokeWidth={2.5} /> : <Play size={12} strokeWidth={2.5} />}
+    </button>
+  );
+}
 
 function WinButton(props: {
   label: string;
@@ -94,6 +123,7 @@ export function Titlebar({ maximized }: { maximized: boolean }) {
           Ctrl K
         </kbd>
       </button>
+      <RunButton />
 
       {/* Esnek sürükleme alanı (sağ) */}
       <div className="min-w-2 flex-1 self-stretch" />
