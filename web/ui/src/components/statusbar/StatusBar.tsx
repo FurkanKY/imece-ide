@@ -1,10 +1,12 @@
-/* StatusBar — alt durum çubuğu: proje adı, koşu HUD'u (token/maliyet count-up),
-   aktif dosya dili. desktop.py HUD'unun halefi. */
+/* StatusBar — alt durum çubuğu: proje adı, git dalı (P6), koşu HUD'u
+   (token/maliyet count-up), aktif dosya dili. */
 
-import { Coins, Cpu } from "lucide-react";
+import { Coins, Cpu, GitBranch } from "lucide-react";
 import { useWorkspace } from "@/state/workspace";
 import { useEditor } from "@/state/editor";
 import { useRun } from "@/state/run";
+import { useScm } from "@/state/scm";
+import { useUi } from "@/state/ui";
 import { langForPath } from "@/lib/monaco";
 import { CountUp } from "./CountUp";
 
@@ -14,6 +16,11 @@ export function StatusBar() {
   const dirty = useEditor((s) => s.tabs.find((t) => t.rel === s.activeRel)?.dirty);
   const totals = useRun((s) => s.totals);
   const status = useRun((s) => s.status);
+  const isRepo = useScm((s) => s.isRepo);
+  const branch = useScm((s) => s.branch);
+  const ahead = useScm((s) => s.ahead);
+  const changeCount = useScm((s) => s.staged.length + s.unstaged.length);
+  const showSideView = useUi((s) => s.showSideView);
 
   return (
     <footer
@@ -21,6 +28,20 @@ export function StatusBar() {
       style={{ fontSize: "var(--t-caption)" }}
     >
       {name && <span className="text-text2">{name}</span>}
+      {isRepo && (
+        <button
+          onClick={() => showSideView("scm")}
+          title="Kaynak denetimi (Ctrl+Shift+G)"
+          className="flex items-center gap-1 rounded px-1 transition-colors hover:bg-card hover:text-text2"
+        >
+          <GitBranch size={11} />
+          <span className="max-w-[160px] truncate">{branch}</span>
+          {ahead > 0 && <span className="text-faint">↑{ahead}</span>}
+          {changeCount > 0 && (
+            <span style={{ color: "var(--amber)" }}>●{changeCount}</span>
+          )}
+        </button>
+      )}
       {status === "running" && <span className="text-accent">● ekip çalışıyor…</span>}
       {totals && (
         <span className="flex items-center gap-2.5 text-text2">
