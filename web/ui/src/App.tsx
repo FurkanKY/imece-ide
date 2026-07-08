@@ -8,6 +8,7 @@ import { useWorkspace } from "@/state/workspace";
 import { installKeymap } from "@/lib/keymap";
 import { Titlebar } from "@/components/titlebar/Titlebar";
 import { ResizeEdges } from "@/components/window/ResizeEdges";
+import { Splitter } from "@/components/window/Splitter";
 import { ActivityBar } from "@/components/activitybar/ActivityBar";
 import { Explorer } from "@/components/explorer/Explorer";
 import { SearchView } from "@/components/search/SearchView";
@@ -21,7 +22,7 @@ import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { AiPanel } from "@/components/aipanel/AiPanel";
 import { BottomPanel } from "@/components/bottompanel/BottomPanel";
 import { useEditor } from "@/state/editor";
-import { useUi } from "@/state/ui";
+import { useUi, PANEL_LIMITS } from "@/state/ui";
 import { useRun } from "@/state/run";
 
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
@@ -37,8 +38,17 @@ function Workspace() {
   const sidebarVisible = useUi((s) => s.sidebarVisible);
   const aiPanelVisible = useUi((s) => s.aiPanelVisible);
   const bottomVisible = useUi((s) => s.bottomVisible);
+  const sidebarWidth = useUi((s) => s.sidebarWidth);
+  const aiPanelWidth = useUi((s) => s.aiPanelWidth);
+  const bottomHeight = useUi((s) => s.bottomHeight);
+  const setSidebarWidth = useUi((s) => s.setSidebarWidth);
+  const setAiPanelWidth = useUi((s) => s.setAiPanelWidth);
+  const setBottomHeight = useUi((s) => s.setBottomHeight);
+  const resizing = useUi((s) => s.resizing);
 
   const ease = [0.33, 1, 0.68, 1] as const;
+  // splitter sürüklerken animasyon devre dışı — boyut anında izler
+  const tr = { duration: resizing ? 0 : 0.18, ease };
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -48,12 +58,12 @@ function Workspace() {
           <motion.aside
             key="sidebar"
             initial={{ width: 0 }}
-            animate={{ width: 240 }}
+            animate={{ width: sidebarWidth }}
             exit={{ width: 0 }}
-            transition={{ duration: 0.18, ease }}
-            className="shrink-0 overflow-hidden border-r border-border-w bg-side"
+            transition={tr}
+            className="shrink-0 overflow-hidden bg-side"
           >
-            <div className="h-full w-[240px]">
+            <div className="h-full" style={{ width: sidebarWidth }}>
               {view === "explorer" ? (
                 <Explorer />
               ) : view === "search" ? (
@@ -67,6 +77,16 @@ function Workspace() {
           </motion.aside>
         )}
       </AnimatePresence>
+      {sidebarVisible && (
+        <Splitter
+          orientation="col"
+          value={sidebarWidth}
+          min={PANEL_LIMITS.sidebar.min}
+          max={PANEL_LIMITS.sidebar.max}
+          onChange={setSidebarWidth}
+          label="Kenar çubuğu genişliği"
+        />
+      )}
       {/* orta kolon: editör ↕ terminal */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {hasTabs || hasDiff ? (
@@ -78,34 +98,58 @@ function Workspace() {
             </p>
           </div>
         )}
+        {bottomVisible && (
+          <Splitter
+            orientation="row"
+            reverse
+            value={bottomHeight}
+            min={PANEL_LIMITS.bottom.min}
+            max={PANEL_LIMITS.bottom.max}
+            onChange={setBottomHeight}
+            label="Alt panel yüksekliği"
+          />
+        )}
         <AnimatePresence initial={false}>
           {bottomVisible && (
             <motion.div
               key="bottom"
               initial={{ height: 0 }}
-              animate={{ height: 240 }}
+              animate={{ height: bottomHeight }}
               exit={{ height: 0 }}
-              transition={{ duration: 0.18, ease }}
+              transition={tr}
               className="shrink-0 overflow-hidden"
             >
-              <div className="h-[240px]">
+              <div style={{ height: bottomHeight }}>
                 <BottomPanel />
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+      {aiPanelVisible && (
+        <Splitter
+          orientation="col"
+          reverse
+          value={aiPanelWidth}
+          min={PANEL_LIMITS.aiPanel.min}
+          max={PANEL_LIMITS.aiPanel.max}
+          onChange={setAiPanelWidth}
+          label="AI paneli genişliği"
+        />
+      )}
       <AnimatePresence initial={false}>
         {aiPanelVisible && (
           <motion.div
             key="aipanel"
             initial={{ width: 0 }}
-            animate={{ width: 340 }}
+            animate={{ width: aiPanelWidth }}
             exit={{ width: 0 }}
-            transition={{ duration: 0.18, ease }}
+            transition={tr}
             className="shrink-0 overflow-hidden"
           >
-            <AiPanel />
+            <div className="h-full" style={{ width: aiPanelWidth }}>
+              <AiPanel />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

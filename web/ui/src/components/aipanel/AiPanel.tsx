@@ -25,7 +25,7 @@ export function AiPanel() {
   }, [status, diffCount]);
 
   return (
-    <aside className="relative flex h-full w-[340px] shrink-0 flex-col border-l border-border-w bg-side">
+    <aside className="relative flex h-full w-full flex-col bg-side">
       {/* başlık */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border-w px-3">
         <span

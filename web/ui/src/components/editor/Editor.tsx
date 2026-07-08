@@ -21,7 +21,15 @@ function TabBar() {
         return (
           <div
             key={t.rel}
+            role="tab"
+            aria-selected={on}
+            tabIndex={0}
             onClick={() => activate(t.rel)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(t.rel); }
+              if (e.key === "Delete") close(t.rel);
+            }}
+            onAuxClick={(e) => { if (e.button === 1) close(t.rel); }} // orta tık → kapat
             className={
               "group relative flex cursor-pointer items-center gap-1.5 border-r border-border-w px-3 transition-colors duration-100 " +
               (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-card hover:text-text2")

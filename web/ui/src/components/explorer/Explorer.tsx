@@ -91,7 +91,7 @@ function HeaderAction({ Icon, label, onClick }: {
       title={label}
       aria-label={label}
       onClick={onClick}
-      className="rounded p-1 text-faint opacity-0 transition-all hover:bg-card hover:text-text2 group-hover/head:opacity-100"
+      className="rounded p-1 text-faint opacity-0 transition-all hover:bg-card hover:text-text2 focus-visible:opacity-100 group-hover/head:opacity-100"
     >
       <Icon size={13} strokeWidth={1.9} />
     </button>
