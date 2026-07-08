@@ -1,7 +1,7 @@
 /* mock — düz tarayıcıda geliştirme + görsel doğrulama için sahte host.
    Senaryo seçimi: ?scenario=empty|project|running|result|error (P2'de fixtures/run.ts genişler). */
 
-import { Api, Bridge, Events, Prefs, Proposal } from "../protocol";
+import { Api, Bridge, Events, Prefs, Proposal, ScmChange } from "../protocol";
 import * as vfs from "./vfs";
 import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
 
@@ -24,6 +24,13 @@ export class MockBridge implements Bridge {
   private runCancelled = false;
   private mockProposals: Proposal[] = [];
   private termCounter = 0;
+  // sahte git durumu — ScmView geliştirme/webshot senaryosu
+  private scmStaged: ScmChange[] = [{ path: "src/utils.ts", status: "M" }];
+  private scmUnstaged: ScmChange[] = [
+    { path: "src/App.tsx", status: "M" },
+    { path: "README.md", status: "M" },
+    { path: "src/notlar.md", status: "U" },
+  ];
   private prefs: Prefs = (() => {
     try {
       const raw = localStorage.getItem("magent.prefs");
@@ -189,6 +196,52 @@ export class MockBridge implements Bridge {
       }
       case "search.cancel":
         return {} as R;
+      case "scm.status":
+        return {
+          isRepo: true, branch: "web-shell", ahead: 2, behind: 0,
+          staged: [...this.scmStaged], unstaged: [...this.scmUnstaged],
+        } as R;
+      case "scm.diff": {
+        const p = params as { path: string };
+        let modified = "";
+        try { modified = vfs.readFile(p.path).content; } catch { /* vfs'te yok */ }
+        const original = modified
+          ? modified.replace(/ISO 8601|export/g, (m) => (m === "export" ? "// eski\nexport" : "eski biçim"))
+          : "";
+        return { original, modified: modified || "// yeni dosya (mock)" } as R;
+      }
+      case "scm.stage": {
+        const wanted = new Set((params as { paths: string[] }).paths);
+        const moving = this.scmUnstaged.filter((c) => wanted.has(c.path));
+        this.scmUnstaged = this.scmUnstaged.filter((c) => !wanted.has(c.path));
+        for (const c of moving) {
+          if (!this.scmStaged.some((s) => s.path === c.path)) {
+            this.scmStaged.push({ ...c, status: c.status === "U" ? "A" : c.status });
+          }
+        }
+        return {} as R;
+      }
+      case "scm.unstage": {
+        const wanted = new Set((params as { paths: string[] }).paths);
+        const moving = this.scmStaged.filter((c) => wanted.has(c.path));
+        this.scmStaged = this.scmStaged.filter((c) => !wanted.has(c.path));
+        for (const c of moving) {
+          if (!this.scmUnstaged.some((s) => s.path === c.path)) {
+            this.scmUnstaged.push({ ...c, status: c.status === "A" ? "U" : c.status });
+          }
+        }
+        return {} as R;
+      }
+      case "scm.discard": {
+        const p = params as { path: string };
+        this.scmUnstaged = this.scmUnstaged.filter((c) => c.path !== p.path);
+        return {} as R;
+      }
+      case "scm.commit": {
+        const n = this.scmStaged.length;
+        this.scmStaged = [];
+        return { summary: `[web-shell abc1234] mock commit (${n} dosya)` } as R;
+      }
       default:
         console.warn("[mock] karşılıksız metot:", method, params);
         return {} as R;

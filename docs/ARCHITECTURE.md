@@ -139,8 +139,10 @@ web/ui/  (React 19 + TS + Vite + Tailwind v4)      webhost/  (PySide6 host)
 **Köprü sözleşmesi (tek doğruluk kaynağı `web/ui/src/bridge/protocol.ts`):** zarf
 `{id, method, params}` → `{id, ok, result|error}`; olaylar `{channel, payload}`. Python
 tarafında `@handler("domain.metot")` ile kaydedilir; uzun işler QThread'e alınıp sinyalle
-çözülür. Domain'ler: `window · app · settings · project · fs` (P1); `run · terminal ·
-history · search` (P2–P4).
+çözülür. Domain'ler: `window · app · settings · project · fs · session` (P1); `run ·
+terminal · history · search · scm` (P2–P4). `scm` (api/scm.py) git CLI alt-süreçleriyle
+status/diff/stage/unstage/discard/commit sağlar (UTF-8 + `stdin=DEVNULL`; kenar çubuğu
+KAYNAK DENETİMİ görünümü buradan beslenir, satır diff'i merkez Monaco'da açılır).
 
 **app:// özel şeması** (`scheme.py`): Vite ES modülleri/worker'ları `file://` altında
 CORS'a takıldığı için `SecureScheme|CorsEnabled|FetchApiAllowed` bayraklı özel şema

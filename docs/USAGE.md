@@ -60,6 +60,12 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
   toggle'ları; sonuçlar dosyaya gruplu; satıra tıkla → editörde o satıra gider.
   ripgrep kuruluysa onunla (çok hızlı), değilse Python taramasıyla çalışır.
 
+**Kaynak denetimi / git (P4):**
+- Aktivite çubuğunda dal ikonu (veya Ctrl+K → "Kaynak Denetimi"). Dal + ileri/geri
+  sayaçları, değişiklik listeleri (durum harfi renkli: M/A/D/R/U). Satıra tıkla →
+  **merkez diff**; hover'da **+** hazırla, **−** çıkar, **↩** değişikliği at (onaylı).
+  Mesaj yaz + **Commit** (veya Ctrl+Enter). Dosya kaydettikçe görünüm kendini tazeler.
+
 **Ayarlar (P4):**
 - Aktivite çubuğu dişli ikonu veya Ctrl+K → "Ayarlar". Vurgu rengi (6 seçenek, anında
   uygulanır), yoğunluk (Rahat/Sıkı), Enter davranışı, animasyonlar.
