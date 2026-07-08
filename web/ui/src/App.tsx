@@ -188,6 +188,9 @@ export default function App() {
           void useRun.getState().start();
         }
       }
+      // kayıtlı UI zoom'unu uygula (P6.6)
+      const z = useUi.getState().zoom;
+      if (z !== 1) void bridge.call("window.setZoom", { factor: z });
       document.documentElement.dataset.ready = "1";
       void bridge.call("window.ready", {}); // kapatma koruması aktive
     })();

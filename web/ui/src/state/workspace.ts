@@ -32,6 +32,8 @@ interface WorkspaceState {
   newFile: (dirRel: string) => Promise<void>;
   newFolder: (dirRel: string) => Promise<void>;
   renameEntry: (entry: DirEntry) => Promise<void>;
+  /** sürükle-taşı: girdiyi başka klasöre taşı (P6.4) */
+  moveEntry: (rel: string, newDir: string) => Promise<void>;
   deleteEntry: (entry: DirEntry) => Promise<void>;
   copyPath: (rel: string) => Promise<void>;
   revealInOS: (rel: string) => Promise<void>;
@@ -165,6 +167,36 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       toast.ok(`Yeniden adlandırıldı: ${newRel}`);
     } catch (e) {
       toast.err(e instanceof BridgeError ? e.message : "Yeniden adlandırılamadı.");
+    }
+  },
+
+  moveEntry: async (rel, newDir) => {
+    const fromDir = parentOf(rel);
+    if (newDir === fromDir || newDir === rel || newDir.startsWith(rel + "/")) return;
+    try {
+      const { rel: newRel } = await bridge.call("fs.move", { rel, newDir });
+      useEditor.getState().renamePath(rel, newRel);
+      // genişletilmiş/yüklü anahtarları taşı (renameEntry ile aynı desen)
+      set((s) => {
+        const expanded = new Set(
+          [...s.expanded].map((r) =>
+            r === rel ? newRel :
+            r.startsWith(rel + "/") ? newRel + r.slice(rel.length) : r,
+          ),
+        );
+        const children: Record<string, DirEntry[]> = {};
+        for (const [k, v] of Object.entries(s.children)) {
+          const nk =
+            k === rel ? newRel :
+            k.startsWith(rel + "/") ? newRel + k.slice(rel.length) : k;
+          children[nk] = v;
+        }
+        return { expanded, children };
+      });
+      await Promise.all([get().loadDir(fromDir), get().loadDir(newDir)]);
+      toast.ok(`Taşındı: ${newRel}`);
+    } catch (e) {
+      toast.err(e instanceof BridgeError ? e.message : (e as Error)?.message || "Taşınamadı.");
     }
   },
 

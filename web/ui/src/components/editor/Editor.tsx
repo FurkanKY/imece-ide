@@ -1,17 +1,21 @@
 /* Editor — Monaco montajı + React sekme çubuğu. Model önbelleği: sekme başına
    bir monaco modeli; sekme değişince model swap edilir (içerik/scroll korunur). */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { X, Circle } from "lucide-react";
 import { initMonaco, langForPath } from "@/lib/monaco";
 import { fileIcon } from "@/lib/fileIcons";
 import { useEditor } from "@/state/editor";
+import { useUi } from "@/state/ui";
 import { DiffView, DiffTab } from "./DiffView";
+import { TabMenu } from "./TabMenu";
 
 function TabBar() {
-  const { tabs, activeRel, activate, close } = useEditor();
+  const { tabs, activeRel, activate, close, reorder } = useEditor();
   const diff = useEditor((s) => s.diff);
+  // sürükle-sırala (P6.3): HTML5 drag — sürüklenen sekmenin rel'i
+  const [dragRel, setDragRel] = useState<string | null>(null);
   return (
     <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border-w bg-side">
       {diff && <DiffTab path={diff.path} />}
@@ -19,11 +23,23 @@ function TabBar() {
         const on = t.rel === activeRel;
         const { Icon, color } = fileIcon(t.name);
         return (
+          <TabMenu key={t.rel} rel={t.rel}>
           <div
-            key={t.rel}
             role="tab"
             aria-selected={on}
             tabIndex={0}
+            draggable
+            onDragStart={(e) => {
+              setDragRel(t.rel);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(e) => {
+              if (dragRel && dragRel !== t.rel) {
+                e.preventDefault(); // bırakmaya izin ver
+                reorder(dragRel, t.rel); // canlı yer değiştir (VS Code hissi)
+              }
+            }}
+            onDragEnd={() => setDragRel(null)}
             onClick={() => activate(t.rel)}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(t.rel); }
@@ -32,7 +48,8 @@ function TabBar() {
             onAuxClick={(e) => { if (e.button === 1) close(t.rel); }} // orta tık → kapat
             className={
               "group relative flex cursor-pointer items-center gap-1.5 border-r border-border-w px-3 transition-colors duration-100 " +
-              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-card hover:text-text2")
+              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-card hover:text-text2") +
+              (dragRel === t.rel ? " opacity-50" : "")
             }
             style={{ fontSize: "var(--t-label)" }}
           >
@@ -54,6 +71,7 @@ function TabBar() {
               <X size={13} className={t.dirty ? "hidden group-hover:block" : ""} />
             </button>
           </div>
+          </TabMenu>
         );
       })}
     </div>
@@ -108,6 +126,7 @@ export function Editor() {
       renderLineHighlight: "line",
       cursorBlinking: "smooth",
       guides: { indentation: true },
+      wordWrap: useUi.getState().wordWrap ? "on" : "off",
     });
     edRef.current = ed;
     const sub = ed.onDidChangeModelContent(() => {
@@ -160,6 +179,12 @@ export function Editor() {
     if (vs) ed.restoreViewState(vs);
     ed.focus();
   }, [activeRel, tabs]);
+
+  // satır kaydırma değişince canlı uygula (Alt+Z)
+  const wordWrap = useUi((s) => s.wordWrap);
+  useEffect(() => {
+    edRef.current?.updateOptions({ wordWrap: wordWrap ? "on" : "off" });
+  }, [wordWrap]);
 
   // satıra git isteği (arama sonucundan)
   const pendingReveal = useEditor((s) => s.pendingReveal);

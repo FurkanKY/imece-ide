@@ -103,8 +103,15 @@ export class MockBridge implements Bridge {
         const p = params as { rel: string; newName: string };
         return { rel: vfs.renameNode(p.rel, p.newName) } as R;
       }
+      case "fs.move": {
+        const p = params as { rel: string; newDir: string };
+        return { rel: vfs.moveNode(p.rel, p.newDir) } as R;
+      }
       case "fs.delete":
         vfs.deleteNode((params as { rel: string }).rel);
+        return {} as R;
+      case "window.setZoom":
+        document.documentElement.style.zoom = String((params as { factor: number }).factor);
         return {} as R;
       case "app.clipboardWrite":
       case "app.revealInOS":

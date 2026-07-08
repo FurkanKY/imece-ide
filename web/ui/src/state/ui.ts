@@ -1,7 +1,9 @@
 /* ui store — kabuk görünürlük durumları + aktif kenar görünümü + panel boyutları
-   + ayarlar diyaloğu. Boyut/görünürlük değişimleri oturuma kaydedilir (lib/session.ts). */
+   + ayarlar diyaloğu + zoom/word-wrap (kullanıcı-global, localStorage).
+   Boyut/görünürlük değişimleri oturuma kaydedilir (lib/session.ts). */
 
 import { create } from "zustand";
+import { bridge } from "@/bridge";
 
 export type SideView = "explorer" | "search" | "scm" | "agent";
 
@@ -27,6 +29,14 @@ interface UiState extends LayoutState {
   settingsOpen: boolean;
   /** bir splitter sürükleniyor — panel animasyonları geçici kapalı */
   resizing: boolean;
+  /** merkez diff görünümü: yan-yana mı inline mı (P6.5) */
+  diffSideBySide: boolean;
+  toggleDiffSideBySide: () => void;
+  /** UI zoom (P6.6, Ctrl+± — native sayfa zoom'u) ve editör satır kaydırma */
+  zoom: number;
+  setZoom: (z: number) => void;
+  wordWrap: boolean;
+  toggleWordWrap: () => void;
   toggleSidebar: () => void;
   toggleAiPanel: () => void;
   toggleBottom: () => void;
@@ -54,6 +64,27 @@ export const useUi = create<UiState>((set) => ({
   bottomHeight: PANEL_LIMITS.bottom.def,
   settingsOpen: false,
   resizing: false,
+  diffSideBySide: localStorage.getItem("magent.diffSideBySide") === "1",
+  toggleDiffSideBySide: () =>
+    set((s) => {
+      const v = !s.diffSideBySide;
+      localStorage.setItem("magent.diffSideBySide", v ? "1" : "0");
+      return { diffSideBySide: v };
+    }),
+  zoom: Number(localStorage.getItem("magent.zoom")) || 1,
+  setZoom: (z) => {
+    const v = Math.round(clamp(z, 0.7, 1.6) * 10) / 10;
+    localStorage.setItem("magent.zoom", String(v));
+    void bridge.call("window.setZoom", { factor: v });
+    set({ zoom: v });
+  },
+  wordWrap: localStorage.getItem("magent.wordWrap") === "1",
+  toggleWordWrap: () =>
+    set((s) => {
+      const v = !s.wordWrap;
+      localStorage.setItem("magent.wordWrap", v ? "1" : "0");
+      return { wordWrap: v };
+    }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   toggleAiPanel: () => set((s) => ({ aiPanelVisible: !s.aiPanelVisible })),
   toggleBottom: () => set((s) => ({ bottomVisible: !s.bottomVisible })),

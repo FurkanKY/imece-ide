@@ -1,6 +1,7 @@
 /* Explorer — lazy dosya ağacı. Girinti kılavuzları, başlıkta hover eylemleri,
    aktif dosyada sol accent şeridi. Klasör tıkla → genişle; dosya tıkla → aç. */
 
+import { useState } from "react";
 import { ChevronRight, ChevronsDownUp, FilePlus2, FolderPlus, Folder, FolderOpen, Loader2, RefreshCw } from "lucide-react";
 import { DirEntry } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -14,10 +15,15 @@ const INDENT = 12;
 /** git dekorasyonları (P6): dosya → durum harfi, değişen klasör kümesi */
 type Deco = { files: Map<string, string>; dirs: Set<string> };
 
+/* sürükle-taşı (P6.4): sürüklenen girdinin rel'i — dragover'da dataTransfer
+   okunamadığı için modül değişkeni */
+let dragSrc: string | null = null;
+
 function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Deco }) {
-  const { expanded, children, loading, toggleDir } = useWorkspace();
+  const { expanded, children, loading, toggleDir, moveEntry } = useWorkspace();
   const openFile = useEditor((s) => s.open);
   const activeRel = useEditor((s) => s.activeRel);
+  const [dropOver, setDropOver] = useState(false);
 
   const isOpen = expanded.has(entry.rel);
   const isActive = !entry.isDir && activeRel === entry.rel;
@@ -41,9 +47,32 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
       <button
         onClick={onClick}
         title={entry.name}
+        draggable
+        onDragStart={(e) => {
+          dragSrc = entry.rel;
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => { dragSrc = null; }}
+        onDragOver={(e) => {
+          // yalnız klasörler hedef; kendine/kendi altına bırakılamaz
+          if (entry.isDir && dragSrc && dragSrc !== entry.rel && !entry.rel.startsWith(dragSrc + "/")) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDropOver(true);
+          }
+        }}
+        onDragLeave={() => setDropOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDropOver(false);
+          if (entry.isDir && dragSrc) void moveEntry(dragSrc, entry.rel);
+          dragSrc = null;
+        }}
         className={
           "group relative flex w-full items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pr-2 text-left transition-colors duration-100 " +
-          (isActive ? "bg-accentdim text-text" : "text-text2 hover:bg-card")
+          (isActive ? "bg-accentdim text-text" : "text-text2 hover:bg-card") +
+          (dropOver ? " outline outline-1 outline-accent" : "")
         }
         style={{ paddingLeft: depth * INDENT + 6 }}
       >
@@ -151,7 +180,20 @@ export function Explorer() {
         <HeaderAction Icon={ChevronsDownUp} label="Tümünü Daralt" onClick={collapseAll} />
       </div>
       <ExplorerMenu entry={null}>
-        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
+          onDragOver={(e) => {
+            // boş alana bırak → köke taşı (satır hedefleri stopPropagation yapar)
+            if (dragSrc && dragSrc.includes("/")) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (dragSrc && dragSrc.includes("/")) {
+              void useWorkspace.getState().moveEntry(dragSrc, "");
+            }
+            dragSrc = null;
+          }}
+        >
           {roots.length === 0 ? (
             <p className="px-3 py-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
               Boş klasör. Sağ-tık → Yeni Dosya.

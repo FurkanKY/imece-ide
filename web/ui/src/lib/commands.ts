@@ -3,7 +3,7 @@
 
 import {
   FolderOpen, GitBranch, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft,
-  PanelRight, Search, Settings, TerminalSquare, X,
+  PanelRight, Search, Settings, TerminalSquare, WrapText, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -80,6 +80,22 @@ function buildCommands(): Command[] {
         const { useTerminals } = await import("@/state/terminal");
         void useTerminals.getState().create();
       },
+    },
+    {
+      id: "zoom-in", label: "Yakınlaştır", hint: "Ctrl+=",
+      Icon: ZoomIn, run: () => ui.setZoom(ui.zoom + 0.1),
+    },
+    {
+      id: "zoom-out", label: "Uzaklaştır", hint: "Ctrl+-",
+      Icon: ZoomOut, run: () => ui.setZoom(ui.zoom - 0.1),
+    },
+    {
+      id: "zoom-reset", label: "Zoom'u Sıfırla", hint: "Ctrl+0",
+      Icon: ZoomOut, run: () => ui.setZoom(1),
+    },
+    {
+      id: "word-wrap", label: "Satır Kaydırmayı Aç/Kapat", hint: "Alt+Z",
+      Icon: WrapText, run: () => ui.toggleWordWrap(),
     },
   ];
   if (ws.root) {

@@ -89,6 +89,11 @@ def _rename(params, ctx):
     return {"rel": _require().rename(params.get("rel", ""), params.get("newName", ""))}
 
 
+@handler("fs.move")
+def _move(params, ctx):
+    return {"rel": _require().move(params.get("rel", ""), params.get("newDir", ""))}
+
+
 @handler("fs.delete")
 def _delete(params, ctx):
     _require().delete(params.get("rel", ""))

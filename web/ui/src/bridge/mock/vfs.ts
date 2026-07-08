@@ -89,6 +89,24 @@ export function renameNode(rel: string, newName: string): string {
   return [...parts, newName].join("/");
 }
 
+export function moveNode(rel: string, newDir: string): string {
+  if (newDir === rel || newDir.startsWith(rel + "/")) {
+    throw new Error("Klasör kendi altına taşınamaz.");
+  }
+  const node = resolve(rel);
+  if (node === undefined) throw new Error(`Yok: ${rel}`);
+  const target = resolve(newDir);
+  if (typeof target !== "object" || target === undefined) throw new Error(`Klasör değil: ${newDir}`);
+  const parts = rel.split("/");
+  const name = parts.pop()!;
+  if (target[name] !== undefined) throw new Error(`Hedefte zaten var: ${name}`);
+  let cur = VFS;
+  for (const p of parts) cur = cur[p] as VNode;
+  target[name] = node;
+  delete cur[name];
+  return newDir ? `${newDir}/${name}` : name;
+}
+
 export function deleteNode(rel: string) {
   const parts = rel.split("/");
   const name = parts.pop()!;
