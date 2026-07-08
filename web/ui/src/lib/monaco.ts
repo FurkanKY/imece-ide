@@ -94,6 +94,12 @@ export function initMonaco() {
   // global tema: editörler + colorize (sohbet kod blokları) aynı paleti kullanır
   monaco.editor.setTheme("magent-dark");
 
+  // İmleç kayması düzeltmesi: @font-face JetBrains Mono yüklenmeden Monaco karakter
+  // genişliği ölçerse imleç metnin içine kayar → fontlar hazır olunca yeniden ölç.
+  // (loadingdone: editör açıkken sonradan yüklenen ağırlıklar için ikinci ağ.)
+  document.fonts.ready.then(() => monaco.editor.remeasureFonts());
+  document.fonts.addEventListener("loadingdone", () => monaco.editor.remeasureFonts());
+
   return monaco;
 }
 
