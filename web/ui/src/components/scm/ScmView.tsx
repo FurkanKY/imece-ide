@@ -2,25 +2,15 @@
    Dal + ileri/geri, commit kutusu, Hazırlananlar/Değişiklikler grupları;
    satıra tık → merkez Monaco diff; +/−/geri-al satır eylemleri. */
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import {
   GitBranch, GitCommitHorizontal, RefreshCw, Plus, Minus, Undo2,
   ArrowUp, ArrowDown, FileQuestion,
 } from "lucide-react";
-import { bridge, ScmChange } from "@/bridge";
-import { useScm } from "@/state/scm";
+import { ScmChange } from "@/bridge";
+import { useScm, SCM_STATUS } from "@/state/scm";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
-
-/* status harfi → renk + açıklama */
-const STATUS: Record<string, { color: string; label: string }> = {
-  M: { color: "var(--amber)", label: "Değişti" },
-  A: { color: "var(--green)", label: "Eklendi" },
-  D: { color: "var(--red)", label: "Silindi" },
-  R: { color: "var(--accent)", label: "Adlandı" },
-  C: { color: "var(--accent)", label: "Kopya" },
-  U: { color: "var(--green)", label: "İzlenmiyor" },
-};
 
 function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
   const { stage, unstage, discard, openDiff } = useScm();
@@ -28,7 +18,7 @@ function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
   const name = change.path.split("/").pop() ?? change.path;
   const dir = change.path.slice(0, change.path.length - name.length).replace(/\/$/, "");
   const { Icon, color } = fileIcon(name);
-  const st = STATUS[change.status] ?? { color: "var(--muted)", label: change.status };
+  const st = SCM_STATUS[change.status] ?? { color: "var(--muted)", label: change.status };
   const active = activeDiff === change.path;
 
   return (
@@ -133,19 +123,10 @@ function Group({ title, changes, staged, action }: {
 export function ScmView() {
   const s = useScm();
   const canCommit = s.isRepo && s.staged.length > 0 && s.message.trim().length > 0 && !s.busy;
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // görünüm açılınca tazele + dosya sistemi değiştikçe debounce'la tazele
+  // görünüm açılınca tazele (fs.changed takibi global — state/scm.ts installScm)
   useEffect(() => {
     void s.refresh();
-    const off = bridge.on("fs.changed", () => {
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-      refreshTimer.current = setTimeout(() => void useScm.getState().refresh(), 400);
-    });
-    return () => {
-      off();
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

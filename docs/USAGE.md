@@ -63,6 +63,9 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
   sayaçları, değişiklik listeleri (durum harfi renkli: M/A/D/R/U). Satıra tıkla →
   **merkez diff**; hover'da **+** hazırla, **−** çıkar, **↩** değişikliği at (onaylı).
   Mesaj yaz + **Commit** (veya Ctrl+Enter). Dosya kaydettikçe görünüm kendini tazeler.
+- Git durumu her yerde: **gezginde** değişen dosya adları renklenir (M sarı, yeni yeşil)
+  ve değişiklik içeren klasörlerde nokta belirir; **durum çubuğunda** dal adı + ileri
+  sayacı + değişiklik sayısı görünür (tıkla → kaynak denetimi).
 
 **Ayarlar (P4):**
 - Aktivite çubuğu dişli ikonu veya Ctrl+K → "Ayarlar". Vurgu rengi (6 seçenek, anında

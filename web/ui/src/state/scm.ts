@@ -1,11 +1,24 @@
 /* scm store — git kaynak denetimi durumu (P4). status yenileme, stage/unstage,
-   discard (onaylı), commit; satıra tık → merkez Monaco diff. */
+   discard (onaylı), commit; satıra tık → merkez Monaco diff.
+   P6: global — proje açılınca/fs.changed'te tazelenir; gezgin dekorasyonları ve
+   statusbar dal göstergesi de buradan beslenir. */
 
+import { useMemo } from "react";
 import { create } from "zustand";
 import { bridge, BridgeError, ScmChange, ScmStatus } from "@/bridge";
 import { useEditor } from "@/state/editor";
 import { toast } from "@/components/toasts/toasts";
 import { confirmDialog } from "@/components/dialogs/dialogs";
+
+/* status harfi → renk + açıklama (ScmView + gezgin dekorasyonları ortak) */
+export const SCM_STATUS: Record<string, { color: string; label: string }> = {
+  M: { color: "var(--amber)", label: "Değişti" },
+  A: { color: "var(--green)", label: "Eklendi" },
+  D: { color: "var(--red)", label: "Silindi" },
+  R: { color: "var(--accent)", label: "Adlandı" },
+  C: { color: "var(--accent)", label: "Kopya" },
+  U: { color: "var(--green)", label: "İzlenmiyor" },
+};
 
 interface ScmState extends ScmStatus {
   loaded: boolean;
@@ -118,3 +131,52 @@ export const useScm = create<ScmState>((set, get) => ({
     }
   },
 }));
+
+let installed = false;
+
+/** Global scm yaşam döngüsü: proje açılınca tazele, fs.changed'te debounce'la tazele.
+    App.tsx bir kez çağırır; ScmView/gezgin/statusbar aynı store'dan okur. */
+export function installScm() {
+  if (installed) return;
+  installed = true;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const later = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void useScm.getState().refresh(), 400);
+  };
+  bridge.on("fs.changed", later);
+  void (async () => {
+    const { useWorkspace } = await import("@/state/workspace");
+    useWorkspace.subscribe((s, prev) => {
+      if (s.root !== prev.root) {
+        useScm.setState({
+          isRepo: false, branch: "", ahead: 0, behind: 0,
+          staged: [], unstaged: [], loaded: false, message: "",
+        });
+        if (s.root) void useScm.getState().refresh();
+      }
+    });
+    if (useWorkspace.getState().root) void useScm.getState().refresh();
+  })();
+}
+
+/** Gezgin dekorasyonları: dosya → durum harfi; değişiklik içeren klasör kümesi.
+    Çalışma-ağacı durumu staged'ı ezer (VS Code davranışı). */
+export function useScmDecorations() {
+  const staged = useScm((s) => s.staged);
+  const unstaged = useScm((s) => s.unstaged);
+  return useMemo(() => {
+    const files = new Map<string, string>();
+    for (const c of staged) files.set(c.path, c.status);
+    for (const c of unstaged) files.set(c.path, c.status);
+    const dirs = new Set<string>();
+    for (const p of files.keys()) {
+      let d = p;
+      for (let i = d.lastIndexOf("/"); i > 0; i = d.lastIndexOf("/")) {
+        d = d.slice(0, i);
+        dirs.add(d);
+      }
+    }
+    return { files, dirs };
+  }, [staged, unstaged]);
+}

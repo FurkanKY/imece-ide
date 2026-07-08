@@ -5,12 +5,16 @@ import { ChevronRight, ChevronsDownUp, FilePlus2, FolderPlus, Folder, FolderOpen
 import { DirEntry } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
 import { useEditor } from "@/state/editor";
+import { useScmDecorations, SCM_STATUS } from "@/state/scm";
 import { fileIcon } from "@/lib/fileIcons";
 import { ExplorerMenu } from "./ExplorerMenu";
 
 const INDENT = 12;
 
-function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
+/** git dekorasyonları (P6): dosya → durum harfi, değişen klasör kümesi */
+type Deco = { files: Map<string, string>; dirs: Set<string> };
+
+function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Deco }) {
   const { expanded, children, loading, toggleDir } = useWorkspace();
   const openFile = useEditor((s) => s.open);
   const activeRel = useEditor((s) => s.activeRel);
@@ -18,6 +22,9 @@ function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
   const isOpen = expanded.has(entry.rel);
   const isActive = !entry.isDir && activeRel === entry.rel;
   const isLoading = loading.has(entry.rel);
+  const scmStatus = entry.isDir ? null : deco.files.get(entry.rel) ?? null;
+  const scmColor = scmStatus ? SCM_STATUS[scmStatus]?.color : null;
+  const dirChanged = entry.isDir && deco.dirs.has(entry.rel);
 
   const onClick = () => {
     if (entry.isDir) void toggleDir(entry.rel);
@@ -68,14 +75,33 @@ function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
           ) : null}
         </span>
         <Icon size={15} strokeWidth={1.8} style={{ color }} className="shrink-0" />
-        <span className="truncate" style={{ fontSize: "var(--t-body)" }}>
+        <span
+          className="truncate"
+          style={{ fontSize: "var(--t-body)", color: scmColor ?? undefined }}
+        >
           {entry.name}
         </span>
+        {dirChanged && (
+          <span
+            className="ml-auto mr-1 size-[5px] shrink-0 rounded-full"
+            style={{ background: "var(--amber)", opacity: 0.8 }}
+            title="Bu klasörde git değişikliği var"
+          />
+        )}
+        {scmStatus && (
+          <span
+            className="ml-auto shrink-0 pr-0.5"
+            style={{ fontSize: "var(--t-caption)", fontWeight: 700, color: scmColor ?? undefined }}
+            title={SCM_STATUS[scmStatus]?.label ?? scmStatus}
+          >
+            {scmStatus}
+          </span>
+        )}
       </button>
       </ExplorerMenu>
       {entry.isDir && isOpen &&
         (children[entry.rel] ?? []).map((child) => (
-          <Row key={child.rel} entry={child} depth={depth + 1} />
+          <Row key={child.rel} entry={child} depth={depth + 1} deco={deco} />
         ))}
     </>
   );
@@ -101,6 +127,7 @@ function HeaderAction({ Icon, label, onClick }: {
 export function Explorer() {
   const { name, children, newFile, newFolder, loadDir } = useWorkspace();
   const roots = children[""] ?? [];
+  const deco = useScmDecorations();
 
   const collapseAll = () =>
     useWorkspace.setState({ expanded: new Set() });
@@ -130,7 +157,7 @@ export function Explorer() {
               Boş klasör. Sağ-tık → Yeni Dosya.
             </p>
           ) : (
-            roots.map((e) => <Row key={e.rel} entry={e} depth={0} />)
+            roots.map((e) => <Row key={e.rel} entry={e} depth={0} deco={deco} />)
           )}
         </div>
       </ExplorerMenu>

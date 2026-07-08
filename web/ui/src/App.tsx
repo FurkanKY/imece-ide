@@ -172,6 +172,8 @@ export default function App() {
     void (async () => {
       const { installSessionPersistence } = await import("@/lib/session");
       installSessionPersistence();
+      const { installScm } = await import("@/state/scm");
+      installScm();
       useRun.getState().install();
       void useRun.getState().loadProviders();
       await loadSettings();
