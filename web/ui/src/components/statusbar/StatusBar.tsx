@@ -8,7 +8,19 @@ import { useRun } from "@/state/run";
 import { useScm } from "@/state/scm";
 import { useUi } from "@/state/ui";
 import { langForPath } from "@/lib/monaco";
+import { useLsp } from "@/lib/lsp";
 import { CountUp } from "./CountUp";
+
+/** P7: Python dil sunucusu durumu — yalnız .py dosyası aktifken görünür. */
+function LspBadge({ activeRel }: { activeRel: string }) {
+  const status = useLsp((s) => s.status);
+  if (langForPath(activeRel) !== "python" || status === "off") return null;
+  return status === "starting" ? (
+    <span className="text-faint">dil sunucusu hazırlanıyor…</span>
+  ) : (
+    <span title="basedpyright hazır" style={{ color: "var(--green)" }}>⏻ Py</span>
+  );
+}
 
 export function StatusBar() {
   const name = useWorkspace((s) => s.name);
@@ -60,6 +72,7 @@ export function StatusBar() {
       {activeRel && (
         <>
           {dirty && <span className="text-warn">● kaydedilmedi</span>}
+          <LspBadge activeRel={activeRel} />
           <span>{langForPath(activeRel)}</span>
         </>
       )}

@@ -136,8 +136,28 @@ export function Editor() {
         setDraft(rel, model.getValue());
       }
     });
+    // P7: F12 tanıma-git başka dosyaya çıkarsa sekmede aç + satıra git.
+    const opener = monaco.editor.registerEditorOpener({
+      openCodeEditor(_source, resource, selectionOrPosition) {
+        if (resource.scheme !== "file") return false;
+        const rel = resource.path.replace(/^\//, "");
+        let line = 1, col = 1;
+        if (selectionOrPosition) {
+          if ("startLineNumber" in selectionOrPosition) {
+            line = selectionOrPosition.startLineNumber;
+            col = selectionOrPosition.startColumn;
+          } else {
+            line = selectionOrPosition.lineNumber;
+            col = selectionOrPosition.column;
+          }
+        }
+        void useEditor.getState().openAt(rel, line, col);
+        return true;
+      },
+    });
     return () => {
       sub.dispose();
+      opener.dispose();
       ed.dispose();
       modelsRef.current.forEach((m) => m.dispose());
       modelsRef.current.clear();

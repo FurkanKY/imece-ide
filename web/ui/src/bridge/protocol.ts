@@ -95,6 +95,18 @@ export interface Api {
   };
   "search.cancel": { params: { searchId?: string }; result: {} };
 
+  // ---- lsp (P7 — Python dil sunucusu, basedpyright) ----
+  "lsp.start": { params: {}; result: { running: boolean; ready: boolean } };
+  "lsp.stop": { params: {}; result: {} };
+  "lsp.status": {
+    params: {};
+    result: { running: boolean; ready: boolean; server: string };
+  };
+  /** LSP istek/yanıt geçidi — method LSP metodu (textDocument/completion vb.) */
+  "lsp.request": { params: { method: string; params?: unknown }; result: { result: unknown } };
+  /** tek yön bildirim (didOpen/didChange/didClose/didSave) */
+  "lsp.notify": { params: { method: string; params?: unknown }; result: {} };
+
   // ---- scm / git (P4) ----
   "scm.status": { params: {}; result: ScmStatus };
   "scm.diff": {
@@ -184,6 +196,8 @@ export interface Events {
   "terminal.exit": { termId: string; code: number };
   "search.results": { searchId: string; matches: SearchMatch[] };
   "search.done": { searchId: string; total: number; limitHit: boolean };
+  /** LSP sunucu bildirimleri (publishDiagnostics, $/magentReady, $/magentExited) */
+  "lsp.event": { method: string; params: unknown };
 }
 
 export interface Bridge {

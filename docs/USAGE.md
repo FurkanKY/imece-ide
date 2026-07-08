@@ -47,6 +47,15 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
   ok tuşlarıyla da ayarlanabilir. Boyutlar oturumla saklanır.
 - Dosyalar dışarıdan değişirse (başka editör/git) gezgin kendini tazeler.
 
+**IntelliSense / dil zekâsı (P7):**
+- **Python** — basedpyright dil sunucusu proje açılınca otomatik başlar (statusbar'da
+  sağ altta "dil sunucusu hazırlanıyor…" → yeşil **⏻ Py**). Yazarken **otomatik
+  tamamlama** (Ctrl+Space ile elle de tetiklenir), hatalı kodda **kırmızı alt çizgi**
+  (üzerine gel → mesaj), **F12 / Ctrl+tık** tanıma git (başka dosyaya da sekmede
+  açarak gider), hover'da **imza + docstring**, `(` yazınca **parametre yardımı**.
+- **TS/JS** — aynı dörtlü Monaco'nun kendi dil servisinden; tanıma-git açık sekmeler
+  arasında çalışır.
+
 **Ajanlarla değişiklik (P2 — sağdaki AI EKİBİ paneli):**
 1. Görev kutusuna yaz (ör. *"utils.py'deki tarih biçimini ISO 8601 yap"*), istersen
    rol→model seçimlerini değiştir, **▶** (veya Enter).

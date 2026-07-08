@@ -24,6 +24,31 @@ export function initMonaco() {
     },
   };
 
+  // ---- P7.1: TS/JS dil zekâsı (Monaco'nun kendi worker servisi) ----
+  // eagerModelSync: tüm açık modeller worker'a senkron → dosyalar arası tanıma-git/
+  // tamamlama açık sekmeler kapsamında çalışır (worker'ın doğal sınırı; tam proje
+  // grafiği değil — bilinçli kapsam, bkz. docs/IDE-PLUS-PLAN.md 7.1).
+  for (const d of [monaco.languages.typescript.typescriptDefaults,
+                   monaco.languages.typescript.javascriptDefaults]) {
+    d.setEagerModelSync(true);
+    d.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ESNext,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+      allowJs: true,
+      esModuleInterop: true,
+      allowNonTsExtensions: true, // uzantısız/diff modelleri worker'ı düşürmesin
+    });
+    d.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+      // 2307 "Cannot find module": harici importlar (react vb.) editörde çözülemez —
+      // sahte hata üretmesin; proje-içi görece importlar eagerModelSync ile çözülür.
+      diagnosticCodesToIgnore: [2307],
+    });
+  }
+
   // Token değerleriyle uyumlu koyu tema (Monaco hex ister — CSS var kullanamaz).
   monaco.editor.defineTheme("magent-dark", {
     base: "vs-dark",
