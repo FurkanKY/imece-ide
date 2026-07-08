@@ -43,7 +43,12 @@ export const RUN_PARTIAL: [number, RunEvent][] = [
 ];
 
 export const RUN_REST: [number, RunEvent][] = [
-  [1200, { type: "metric", stage: "code", provider: "deepseek", model: "deepseek-v4-pro", latency_s: 5.0, tokens: 650, cost_usd: 0.0004 }],
+  // gerçek Coder biçimi: ### FILE + fenced kod (sohbet markdown/renklendirme testi)
+  [900, {
+    type: "output", stage: "code",
+    text: "### FILE: utils.py\n```python\n" + NEW_UTILS + "```",
+  }],
+  [300, { type: "metric", stage: "code", provider: "deepseek", model: "deepseek-v4-pro", latency_s: 5.0, tokens: 650, cost_usd: 0.0004 }],
   [300, { type: "stage", stage: "review", provider: "gemini" }],
   [900, { type: "output", stage: "review", text: "VERDICT: APPROVED\nDönüşüm doğru; ISO 8601 round-trip korunmuş. Temiz iş." }],
   [400, { type: "metric", stage: "review", provider: "gemini", model: "gemini-3.5-flash", latency_s: 3.8, tokens: 205, cost_usd: 0.00002 }],

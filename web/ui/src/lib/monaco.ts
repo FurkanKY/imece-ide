@@ -66,6 +66,8 @@ export function initMonaco() {
       "diffEditor.border": "#ffffff1a",
     },
   });
+  // global tema: editörler + colorize (sohbet kod blokları) aynı paleti kullanır
+  monaco.editor.setTheme("magent-dark");
 
   return monaco;
 }
