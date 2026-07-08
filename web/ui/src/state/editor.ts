@@ -28,6 +28,8 @@ interface EditorState {
   /** merkez diff görünümü (Cursor deseni): öneri diff'i tam boy editörde */
   diff: { path: string; original: string; modified: string } | null;
   openDiff: (path: string) => Promise<void>;
+  /** hazır içerik çiftiyle merkez diff aç (SCM vb. — öneri deposundan bağımsız) */
+  showDiff: (path: string, original: string, modified: string) => void;
   closeDiff: () => void;
   /** dosyayı aç + satır/sütuna git (arama sonuçları) */
   openAt: (rel: string, line: number, col: number) => Promise<void>;
@@ -139,6 +141,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
     set({ diff: { path, original, modified: prop.new } });
   },
+
+  showDiff: (path, original, modified) => set({ diff: { path, original, modified } }),
 
   closeDiff: () => set({ diff: null }),
 

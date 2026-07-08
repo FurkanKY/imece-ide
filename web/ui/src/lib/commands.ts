@@ -2,8 +2,8 @@
    keymap → commands → store'lar). */
 
 import {
-  FolderOpen, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft, PanelRight,
-  Search, Settings, TerminalSquare, X,
+  FolderOpen, GitBranch, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft,
+  PanelRight, Search, Settings, TerminalSquare, X,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -51,6 +51,10 @@ function buildCommands(): Command[] {
         const { useSearch } = await import("@/state/search");
         useSearch.getState().requestFocus();
       },
+    },
+    {
+      id: "scm", label: "Kaynak Denetimi", hint: "git status · stage · commit",
+      Icon: GitBranch, run: () => ui.showSideView("scm"),
     },
     {
       id: "settings", label: "Ayarlar", hint: "accent · yoğunluk · animasyon",

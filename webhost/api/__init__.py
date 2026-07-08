@@ -12,3 +12,4 @@ def register_all() -> None:
     from webhost.api import history as _history    # noqa: F401
     from webhost.api import terminal as _terminal  # noqa: F401
     from webhost.api import search as _search      # noqa: F401
+    from webhost.api import scm as _scm            # noqa: F401

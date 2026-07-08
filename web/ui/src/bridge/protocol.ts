@@ -92,6 +92,33 @@ export interface Api {
     result: { searchId: string };
   };
   "search.cancel": { params: { searchId?: string }; result: {} };
+
+  // ---- scm / git (P4) ----
+  "scm.status": { params: {}; result: ScmStatus };
+  "scm.diff": {
+    params: { path: string; staged?: boolean };
+    result: { original: string; modified: string };
+  };
+  "scm.stage": { params: { paths: string[] }; result: {} };
+  "scm.unstage": { params: { paths: string[] }; result: {} };
+  "scm.discard": { params: { path: string; untracked?: boolean }; result: {} };
+  "scm.commit": { params: { message: string }; result: { summary: string } };
+}
+
+// status harfleri: M değişti, A eklendi, D silindi, R adlandı, C kopya, U izlenmiyor
+export interface ScmChange {
+  path: string;
+  status: string;
+  origPath?: string | null;
+}
+
+export interface ScmStatus {
+  isRepo: boolean;
+  branch: string;
+  ahead: number;
+  behind: number;
+  staged: ScmChange[];
+  unstaged: ScmChange[];
 }
 
 export interface SearchMatch {
