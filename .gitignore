@@ -4,11 +4,9 @@ __pycache__/
 output/
 .venv/
 
-# Vendored Monaco (npm ile indirilir — bkz. docs/SETUP.md)
-web/editor/vs/
 node_modules/
 
-# Yeni web-shell UI derleme çıktısı (bkz. .claude/plans/web-shell-ui.md)
+# Web UI derleme çıktısı (cd web/ui && npm run build)
 web/ui/dist/
 
 # Proje başına çalıştırma yapılandırması (Faz 2)

@@ -1,11 +1,8 @@
 """
-shell.py — yeni web-shell girişi (bkz. .claude/plans/web-shell-ui.md).
+shell.py — masaüstü mini-IDE girişi (web-shell mimarisi, bkz. docs/ARCHITECTURE.md).
 
   python shell.py            web/ui/dist derlemesini app:// üzerinden yükler
   python shell.py --dev      http://localhost:5173 (Vite HMR) + F12 DevTools
-  python shell.py --classic  eski Qt arayüzü (desktop.py) — cutover'a dek yedek
-
-Eski arayüz bağımsız olarak `python desktop.py` ile de açılabilir.
 """
 
 import os
@@ -13,10 +10,6 @@ import sys
 
 
 def main() -> int:
-    if "--classic" in sys.argv:
-        import desktop
-        return desktop.main()
-
     dev = "--dev" in sys.argv
 
     # Şema kaydı QApplication'dan ÖNCE olmalı.

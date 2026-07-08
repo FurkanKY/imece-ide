@@ -4,14 +4,13 @@ Arayüzler aynı motoru kullanır; hangisini seçeceğin işine bağlı.
 
 | Arayüz | En iyi olduğu iş |
 |--------|------------------|
-| **Web-shell** (`shell.py`) ★ | Yeni masaüstü mini-IDE (web-shell); var olan projede çalışmak |
-| **Masaüstü classic** (`desktop.py`) | Eski Qt arayüzü — cutover'a dek yedek (`shell.py --classic`) |
+| **Masaüstü mini-IDE** (`shell.py`) ★ | Var olan projede çalışmak — tam IDE deneyimi |
 | **Web** (`app.py`) | Sıfırdan tek dosya üretmek, akışı canlı izlemek |
 | **Terminal** (`orchestrator.py`) | Hızlı, otomasyona uygun tek dosya üretimi |
 
 ---
 
-## Web-shell mini-IDE (`shell.py`) ★ yeni
+## Masaüstü mini-IDE (`shell.py`) ★
 
 ```bash
 # önce bir kez derle (bkz. SETUP.md 2b):
@@ -19,7 +18,6 @@ cd web/ui && npm ci && npm run build && cd ../..
 
 python shell.py            # web/ui/dist'i app:// üzerinden yükler
 python shell.py --dev      # Vite dev sunucusu (HMR) + F12 DevTools — geliştirme
-python shell.py --classic  # eski Qt arayüzü (desktop.py)
 ```
 
 Düzen: üstte **web titlebar** (frameless — sürükle/çift-tık maximize, kendi min/max/kapat),
@@ -70,68 +68,17 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 - Aktivite çubuğu dişli ikonu veya Ctrl+K → "Ayarlar". Vurgu rengi (6 seçenek, anında
   uygulanır), yoğunluk (Rahat/Sıkı), Enter davranışı, animasyonlar.
 
-**Entegre terminal (P3 — gerçek PTY):**
+**Entegre terminal (gerçek PTY):**
 - **Ctrl+`** panel aç/kapat, **Ctrl+Shift+`** yeni terminal (sekmeli). Gerçek ConPTY
-  PowerShell: ok tuşları, renkler, `python` REPL, interaktif programlar — hepsi çalışır
-  (classic'in komut-başına terminalinde imkânsızdı). Proje köküne açılır; UTF-8.
+  PowerShell: ok tuşları, renkler, `python` REPL, interaktif programlar — hepsi çalışır.
+  Proje köküne açılır; UTF-8.
 
-**Yol haritası (sonraki fazlar):** global arama + ayarlar + cila (P4), cutover (P5).
-Bkz. [WEB-SHELL-PLAN.md](WEB-SHELL-PLAN.md).
+Güvenlik: ajanlar seçtiğin klasörün **dışına çıkamaz** (yol güvenliği `project.py`).
+Yol haritası için bkz. [ROADMAP.md](ROADMAP.md).
 
 > **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
 > gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +
 > `QTWEBENGINE_REMOTE_DEBUGGING` ile gerçek uygulamanın webview'i de CDP'den görüntülenebilir.
-
----
-
-## Masaüstü classic (`desktop.py`) — lokal projede çalışma (eski arayüz)
-
-> Bu, web-shell'e taşınmakta olan **eski** Qt arayüzüdür; cutover'da kaldırılacak.
-> Yeni arayüz için üstteki "Web-shell mini-IDE" bölümüne bakın.
-
-```bash
-python desktop.py          # veya: python shell.py --classic
-```
-
-Düzen (Cursor benzeri): üstte **özel başlık/komut çubuğu** (frameless — kendi min/max/
-kapat düğmeleri), solda **aktivite çubuğu** + **dosya gezgini**, ortada **Monaco editör**
-(tam boy, çok sekmeli), sağda **AI sohbet paneli**: dikey **EKİP timeline** (Planner→
-Coder→Reviewer, canlı model·süre·maliyet), **Akış** / **Değişiklikler** sekmeleri ve altta
-**composer** (rol-ikonlu 3 model seçici + görev kutusu + **Çalıştır**). En altta ince
-**durum çubuğu** projeyi, ajan modellerini ve son çalıştırmanın toplam token/maliyetini
-canlı gösterir.
-
-**Editör kullanımı**
-- Gezginden bir dosyaya **çift tıkla** → editörde yeni sekmede açılır (sözdizimi
-  renklendirmeli).
-- Düzenle; sekmede nokta (•) "kaydedilmemiş" demektir. **Ctrl+S** veya **Kaydet** ile yaz.
-
-**Entegre terminal**
-- **Ctrl+`** ile alt terminal panelini aç/kapat; **Ctrl+Shift+`** yeni sekme. Terminal
-  proje kökünde çalışır; komut yaz + Enter, çıktı canlı akar. `cd` ile dizin değiştir,
-  ↑/↓ ile geçmiş, `clear` ile temizle, çalışan komutu **Ctrl+C** / Durdur ile kes.
-- Command palette (**Ctrl+K**) → "Terminal aç/kapat" / "Yeni terminal".
-
-**Ajanlarla değişiklik**
-1. **Proje Seç** — ajanlar dosya ağacını görür.
-2. **Görev yaz** (alt kutu) — ör. *"config.py'ye loglama seviyesi ayarı ekle"*.
-3. (İsteğe bağlı) her role model seç (Planner/Coder/Reviewer).
-4. **Çalıştır** — Planner dosyaları seçer, Coder değişiklikleri üretir, Reviewer inceler;
-   sağ paneldeki **Değişiklikler** sekmesinde gösterilir (verdict rozeti + dosya bazında
-   kabul/ret kutuları + renkli diff).
-5. **Uygula** — dosyalara yazılır, açık sekmeler tazelenir, var olanlar `.bak` yedeklenir.
-   **Vazgeç** — hiçbir şey yazılmaz.
-
-Güvenlik: ajanlar seçtiğin klasörün **dışına çıkamaz**.
-
-> Konsol (çalıştır/derle) ve debugger sekmeleri yol haritasının 2. ve 3. fazında gelecek
-> (bkz. [ROADMAP.md](ROADMAP.md)).
-
-Tek `.exe` yapmak:
-
-```bash
-pyinstaller --noconsole --onefile desktop.py
-```
 
 ---
 
