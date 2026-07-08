@@ -31,6 +31,7 @@ export interface Api {
   "window.close": { params: {}; result: {} };
   "window.startSystemMove": { params: {}; result: {} };
   "window.startSystemResize": { params: { edge: ResizeEdge }; result: {} };
+  "window.setZoom": { params: { factor: number }; result: {} };
   "window.confirmClose": { params: {}; result: {} };
   "window.ready": { params: {}; result: {} };
 
@@ -61,6 +62,7 @@ export interface Api {
   "fs.createFile": { params: { rel: string }; result: { rel: string } };
   "fs.createFolder": { params: { rel: string }; result: { rel: string } };
   "fs.rename": { params: { rel: string; newName: string }; result: { rel: string } };
+  "fs.move": { params: { rel: string; newDir: string }; result: { rel: string } };
   "fs.delete": { params: { rel: string }; result: {} };
 
   // ---- run / history (P2) ----

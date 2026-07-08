@@ -67,6 +67,31 @@ const MAP: Record<string, Handler> = {
     e.preventDefault();
     useUi.getState().showSideView("scm"); // VS Code standardı
   },
+  // ---- UI zoom (P6.6): Ctrl+± / Ctrl+0 — native sayfa zoom'u ----
+  "mod+=": (e) => {
+    e.preventDefault();
+    const ui = useUi.getState();
+    ui.setZoom(ui.zoom + 0.1);
+  },
+  "mod++": (e) => {
+    e.preventDefault();
+    const ui = useUi.getState();
+    ui.setZoom(ui.zoom + 0.1);
+  },
+  "mod+-": (e) => {
+    e.preventDefault();
+    const ui = useUi.getState();
+    ui.setZoom(ui.zoom - 0.1);
+  },
+  "mod+0": (e) => {
+    e.preventDefault();
+    useUi.getState().setZoom(1);
+  },
+  // ---- editör satır kaydırma (VS Code: Alt+Z) ----
+  "alt+z": (e) => {
+    e.preventDefault();
+    useUi.getState().toggleWordWrap();
+  },
 };
 
 let bound = false;

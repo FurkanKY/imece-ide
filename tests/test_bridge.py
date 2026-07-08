@@ -138,6 +138,27 @@ def git_repo(tmp_path):
     state._active = None
 
 
+def test_fs_move(bridge, tmp_path):
+    import webhost.api.fs  # noqa: F401
+    from webhost import state
+    state.set_project(str(tmp_path))
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    r = rpc(bridge, "fs.move", {"rel": "a.txt", "newDir": "sub"})
+    assert r["ok"] and r["result"]["rel"] == "sub/a.txt"
+    assert (tmp_path / "sub" / "a.txt").exists()
+    # klasör kendi altına taşınamaz
+    (tmp_path / "d1" / "d2").mkdir(parents=True)
+    r = rpc(bridge, "fs.move", {"rel": "d1", "newDir": "d1/d2"}, call_id=2)
+    assert r["ok"] is False
+    # hedefte aynı ad varsa hata
+    (tmp_path / "b.txt").write_text("y", encoding="utf-8")
+    (tmp_path / "sub" / "b.txt").write_text("z", encoding="utf-8")
+    r = rpc(bridge, "fs.move", {"rel": "b.txt", "newDir": "sub"}, call_id=3)
+    assert r["ok"] is False
+    state._active = None
+
+
 def test_scm_not_a_repo(bridge, tmp_path):
     import webhost.api.scm  # noqa: F401
     from webhost import state

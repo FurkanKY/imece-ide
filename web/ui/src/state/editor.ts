@@ -18,6 +18,12 @@ interface EditorState {
   open: (rel: string) => Promise<void>;
   close: (rel: string) => void;
   activate: (rel: string) => void;
+  /** sekme sürükle-sırala (P6.3) */
+  reorder: (fromRel: string, toRel: string) => void;
+  /** toplu kapatma — kaydedilmemiş (dirty) sekmeler açık bırakılır */
+  closeOthers: (rel: string) => void;
+  closeRight: (rel: string) => void;
+  closeAll: () => void;
   setDraft: (rel: string, draft: string) => void;
   save: (rel: string) => Promise<void>;
   saveActive: () => Promise<void>;
@@ -71,6 +77,43 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   activate: (rel) => set({ activeRel: rel }),
+
+  reorder: (fromRel, toRel) =>
+    set((s) => {
+      const from = s.tabs.findIndex((t) => t.rel === fromRel);
+      const to = s.tabs.findIndex((t) => t.rel === toRel);
+      if (from < 0 || to < 0 || from === to) return s;
+      const tabs = [...s.tabs];
+      const [moved] = tabs.splice(from, 1);
+      tabs.splice(to, 0, moved);
+      return { tabs };
+    }),
+
+  closeOthers: (rel) =>
+    set((s) => ({
+      tabs: s.tabs.filter((t) => t.rel === rel || t.dirty),
+      activeRel: rel,
+    })),
+
+  closeRight: (rel) =>
+    set((s) => {
+      const idx = s.tabs.findIndex((t) => t.rel === rel);
+      if (idx < 0) return s;
+      const tabs = s.tabs.filter((t, i) => i <= idx || t.dirty);
+      const activeRel =
+        s.activeRel && tabs.some((t) => t.rel === s.activeRel) ? s.activeRel : rel;
+      return { tabs, activeRel };
+    }),
+
+  closeAll: () =>
+    set((s) => {
+      const tabs = s.tabs.filter((t) => t.dirty);
+      const activeRel =
+        s.activeRel && tabs.some((t) => t.rel === s.activeRel)
+          ? s.activeRel
+          : tabs[tabs.length - 1]?.rel ?? null;
+      return { tabs, activeRel };
+    }),
 
   setDraft: (rel, draft) =>
     set((s) => ({

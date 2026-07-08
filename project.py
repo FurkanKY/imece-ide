@@ -111,6 +111,27 @@ class Project:
         os.rename(src, dst)
         return os.path.relpath(dst, self.root).replace("\\", "/")
 
+    def move(self, rel: str, new_dir: str) -> str:
+        """Dosya/klasörü başka klasöre taşı (ad korunur). Döner: yeni göreli yol.
+        Klasörün kendi altına taşınması engellenir."""
+        src = self._safe(rel)
+        if not os.path.exists(src):
+            raise FileNotFoundError(rel)
+        dst_dir = self._safe(new_dir) if new_dir else self.root
+        if not os.path.isdir(dst_dir):
+            raise NotADirectoryError(new_dir)
+        if os.path.isdir(src):
+            common = os.path.commonpath([src, dst_dir])
+            if common == src:
+                raise ValueError("Klasör kendi altına taşınamaz.")
+        dst = os.path.join(dst_dir, os.path.basename(src))
+        if os.path.abspath(dst) == src:
+            return rel.replace("\\", "/")
+        if os.path.exists(dst):
+            raise FileExistsError(f"Hedefte zaten var: {os.path.basename(src)}")
+        os.rename(src, dst)
+        return os.path.relpath(dst, self.root).replace("\\", "/")
+
     def delete(self, rel: str) -> None:
         """Dosya veya klasörü (özyinelemeli) sil."""
         p = self._safe(rel)

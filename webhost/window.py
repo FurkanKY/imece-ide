@@ -97,6 +97,13 @@ class ShellWindow(QMainWindow):
             self._web_ready = True
             return {}
 
+        @handler("window.setZoom")
+        def _zoom(params, ctx):
+            # UI zoom (Ctrl+± — VS Code deseni): Chromium sayfa zoom'u, DPI-doğru
+            factor = float(params.get("factor", 1.0))
+            self.view.page().setZoomFactor(max(0.5, min(2.0, factor)))
+            return {}
+
         @handler("window.startSystemMove")
         def _move(params, ctx):
             self.windowHandle().startSystemMove()

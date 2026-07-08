@@ -30,6 +30,12 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
   renklendirmeli). **Ctrl+S** kaydet (sekmede • = kaydedilmemiş), **Ctrl+W** kapat.
 - **Sağ-tık** (gezgin): Yeni Dosya/Klasör, Yeniden Adlandır, Sil, Yolu Kopyala, Sistemde
   Göster — hepsi koyu temalı diyaloglarla (native beyaz pencere yok).
+- **Sürükle-taşı** (gezgin): dosya/klasörü başka klasöre sürükle → taşınır (hedef accent
+  çerçeveyle vurgulanır; boş alana bırak → köke). Sekmeler de sürüklenerek sıralanır;
+  sekmeye **sağ-tık** → Diğerlerini/Sağdakileri/Tümünü Kapat (kaydedilmemişler korunur).
+- **Zoom & kaydırma:** Ctrl+= / Ctrl+- / Ctrl+0 arayüzü büyütür-küçültür (kalıcı);
+  **Alt+Z** editörde satır kaydırmayı açar. Diff sekmesindeki düğmeyle **yan-yana ↔
+  inline** görünüm değişir.
 - **Ctrl+P** dosyaya git (fuzzy), **Ctrl+K** komut paleti, **Ctrl+B** gezgini aç/kapat.
 - İşlem sonuçları sağ altta **toast** olarak görünür.
 - **Kapatma koruması:** kaydedilmemiş sekme varken pencereyi kapatınca onay sorulur.

@@ -3,8 +3,10 @@
 
 import { useEffect, useRef } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
+import { Columns2, Rows3 } from "lucide-react";
 import { initMonaco, langForPath } from "@/lib/monaco";
 import { useEditor } from "@/state/editor";
+import { useUi } from "@/state/ui";
 
 export function DiffView({ path, original, modified }: {
   path: string;
@@ -13,6 +15,7 @@ export function DiffView({ path, original, modified }: {
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const edRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null);
+  const sideBySide = useUi((s) => s.diffSideBySide);
 
   useEffect(() => {
     const monaco = initMonaco();
@@ -21,7 +24,10 @@ export function DiffView({ path, original, modified }: {
       theme: "magent-dark",
       automaticLayout: true,
       readOnly: true,
-      renderSideBySide: false, // inline (Cursor deseni)
+      renderSideBySide: useUi.getState().diffSideBySide, // varsayılan inline (Cursor deseni)
+      // dar merkezde Monaco yan-yana isteğini sessizce inline'a düşürür — kullanıcı
+      // tercihi açıkça verildiği için bu düşüşü kapat (P6.5 toggle her genişlikte işlesin)
+      useInlineViewWhenSpaceIsLimited: false,
       fontFamily: "JetBrains Mono",
       fontSize: 13,
       lineHeight: 20,
@@ -44,12 +50,19 @@ export function DiffView({ path, original, modified }: {
     };
   }, [path, original, modified]);
 
+  // yan-yana ↔ inline geçişi (P6.5) — editör yeniden kurulmaz
+  useEffect(() => {
+    edRef.current?.updateOptions({ renderSideBySide: sideBySide });
+  }, [sideBySide]);
+
   return <div ref={hostRef} className="min-h-0 flex-1" />;
 }
 
 /** Diff açıkken sekme çubuğunda görünen özel sekme */
 export function DiffTab({ path }: { path: string }) {
   const closeDiff = useEditor((s) => s.closeDiff);
+  const sideBySide = useUi((s) => s.diffSideBySide);
+  const toggle = useUi((s) => s.toggleDiffSideBySide);
   return (
     <div
       className="flex items-center gap-1.5 border-r border-border-w bg-panel px-3 text-text"
@@ -57,6 +70,14 @@ export function DiffTab({ path }: { path: string }) {
     >
       <span className="text-accent" style={{ fontWeight: 700 }}>⇄</span>
       <span className="max-w-[200px] truncate">Diff: {path.split("/").pop()}</span>
+      <button
+        onClick={toggle}
+        aria-label={sideBySide ? "Inline görünüme geç" : "Yan-yana görünüme geç"}
+        title={sideBySide ? "Inline görünüm" : "Yan-yana görünüm"}
+        className="flex size-4 items-center justify-center rounded text-muted hover:bg-card2 hover:text-text"
+      >
+        {sideBySide ? <Rows3 size={12} /> : <Columns2 size={12} />}
+      </button>
       <button
         onClick={closeDiff}
         aria-label="Diff'i kapat"
