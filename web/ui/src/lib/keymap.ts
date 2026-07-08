@@ -92,6 +92,22 @@ const MAP: Record<string, Handler> = {
     e.preventDefault();
     useUi.getState().toggleWordWrap();
   },
+  // ---- F5 çalıştır (P8.1): F5 aktif dosya (yoksa proje) · Ctrl+F5 proje · Shift+F5 durdur ----
+  "f5": async (e) => {
+    e.preventDefault();
+    const { useExec } = await import("@/state/exec");
+    void useExec.getState().run(useEditor.getState().activeRel);
+  },
+  "mod+f5": async (e) => {
+    e.preventDefault();
+    const { useExec } = await import("@/state/exec");
+    void useExec.getState().run();
+  },
+  "shift+f5": async (e) => {
+    e.preventDefault();
+    const { useExec } = await import("@/state/exec");
+    void useExec.getState().stop();
+  },
 };
 
 let bound = false;

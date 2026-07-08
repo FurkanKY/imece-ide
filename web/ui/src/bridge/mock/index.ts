@@ -59,6 +59,29 @@ export class MockBridge implements Bridge {
       case "window.confirmClose":
       case "window.ready":
         return {} as R;
+      // ---- exec / F5 (P8.1): sahte akışlı koşu ----
+      case "exec.run": {
+        const rel = (params as { rel?: string | null }).rel;
+        const cmd = rel ? `python "${rel}"` : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"';
+        const execId = "x" + ++this.termCounter;
+        const lines = [
+          `\x1b[36m$ ${cmd}\x1b[0m\r\n`,
+          "Sunucu ayağa kalkıyor…\r\n",
+          "\x1b[32mOK\x1b[0m 3 test geçti · \x1b[33m1 uyarı\x1b[0m\r\n",
+        ];
+        lines.forEach((l, i) =>
+          setTimeout(() => this.emit("exec.output", { execId, data: l }), 200 + i * 350));
+        setTimeout(() =>
+          this.emit("exec.exited", { execId, code: 0, durationS: 1.4 }), 200 + lines.length * 350);
+        return { execId, command: cmd } as R;
+      }
+      case "exec.stop":
+        return {} as R;
+      case "exec.getCommand":
+        return { command: localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"' } as R;
+      case "exec.setCommand":
+        localStorage.setItem("magent.mock.runcmd", (params as { command: string }).command);
+        return {} as R;
       // ---- lsp (P7): tarayıcıda dil sunucusu yok — zararsız no-op ----
       case "lsp.start":
         return { running: false, ready: false } as R;

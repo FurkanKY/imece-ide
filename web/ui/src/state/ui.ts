@@ -26,6 +26,11 @@ export interface LayoutState {
 }
 
 interface UiState extends LayoutState {
+  /** alt panel aktif görünümü: terminal sekmeleri mi F5 ÇIKTI'sı mı (P8.1) */
+  bottomView: "terminal" | "output";
+  setBottomView: (v: "terminal" | "output") => void;
+  /** alt paneli aç (kapalıysa) + görünüme geç */
+  showBottom: (v: "terminal" | "output") => void;
   settingsOpen: boolean;
   /** bir splitter sürükleniyor — panel animasyonları geçici kapalı */
   resizing: boolean;
@@ -85,6 +90,9 @@ export const useUi = create<UiState>((set) => ({
       localStorage.setItem("magent.wordWrap", v ? "1" : "0");
       return { wordWrap: v };
     }),
+  bottomView: "terminal",
+  setBottomView: (v) => set({ bottomView: v }),
+  showBottom: (v) => set({ bottomView: v, bottomVisible: true }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   toggleAiPanel: () => set((s) => ({ aiPanelVisible: !s.aiPanelVisible })),
   toggleBottom: () => set((s) => ({ bottomVisible: !s.bottomVisible })),
