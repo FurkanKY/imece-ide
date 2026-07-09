@@ -19,7 +19,7 @@ export interface Prefs {
 
 export interface RunEvent {
   // project_runner.py olay sözlüğü DEĞİŞMEDEN forward edilir (doğrulandı :80–152)
-  type: "stage" | "info" | "output" | "metric" | "diff" | "verdict" | "proposal";
+  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal";
   [key: string]: unknown;
 }
 

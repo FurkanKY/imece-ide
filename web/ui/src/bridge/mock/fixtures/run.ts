@@ -38,6 +38,7 @@ export const RUN_PARTIAL: [number, RunEvent][] = [
   [300, { type: "stage", stage: "plan", provider: "claude" }],
   [900, { type: "output", stage: "plan", text: "1. utils.py okunacak\n2. format_date/parse_date ISO 8601'e çevrilecek\n3. Çağıran yerler kontrol edilecek" }],
   [500, { type: "metric", stage: "plan", provider: "claude", model: "claude-code", latency_s: 8.5, tokens: 176, cost_usd: 0.029 }],
+  [120, { type: "plan", summary: "utils.py içindeki tarih dönüşümünü ISO 8601'e taşı ve çağıran yerleri doğrula.", files: ["src/utils.ts"], assumptions: ["Mevcut çağıranlar ISO 8601 kabul eder."], risks: ["Geriye uyumluluk etkisi incelenecek."] }],
   [250, { type: "info", text: "Okunacak dosyalar: utils.py" }],
   [300, { type: "stage", stage: "code", provider: "deepseek" }],
 ];
