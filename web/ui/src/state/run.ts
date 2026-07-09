@@ -40,6 +40,13 @@ export interface DiffRow {
   checked: boolean;
 }
 
+export interface PlanInfo {
+  summary: string;
+  files: string[];
+  assumptions: string[];
+  risks: string[];
+}
+
 export type RunStatus = "idle" | "running" | "done" | "failed" | "cancelled";
 export type RunStage = "draft" | "planning" | "working" | "reviewing" | "ready" | "applied" | "restored" | "error";
 
@@ -49,6 +56,7 @@ interface RunState {
   runStage: RunStage;
   runId: string | null;
   task: string;
+  plan: PlanInfo | null;
   routing: Routing;
   providers: string[];
   stages: Record<Role, StageInfo>;
@@ -86,6 +94,7 @@ export const useRun = create<RunState>((set, get) => ({
   runStage: "draft",
   runId: null,
   task: "",
+  plan: null,
   routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
   providers: ["claude", "deepseek", "gemini"],
   stages: IDLE_STAGES(),
@@ -127,6 +136,7 @@ export const useRun = create<RunState>((set, get) => ({
       runStage: "planning",
       stages: IDLE_STAGES(),
       flow: [{ id: flowId++, kind: "task", text: task.trim() }],
+      plan: null,
       diffs: [],
       proposals: [],
       verdict: null,
@@ -283,6 +293,15 @@ function consume(
         },
       }));
     }
+  } else if (type === "plan") {
+    set(() => ({
+      plan: {
+        summary: (ev.summary as string) ?? "",
+        files: (ev.files as string[] | undefined) ?? [],
+        assumptions: (ev.assumptions as string[] | undefined) ?? [],
+        risks: (ev.risks as string[] | undefined) ?? [],
+      },
+    }));
   } else if (type === "diff") {
     set((s) => ({
       diffs: [

@@ -2,7 +2,7 @@
    metrik altbilgisi), bilgi/hata satırları, verdict rozeti, özet. */
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, User, Info, AlertCircle, CheckCircle2, BrainCircuit, Code2, SearchCheck } from "lucide-react";
+import { ChevronRight, Info, AlertCircle, CheckCircle2, BrainCircuit, Code2, SearchCheck, Activity } from "lucide-react";
 import { useRun, STAGE_ROLE, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
 import { Markdown } from "./Markdown";
@@ -19,7 +19,7 @@ function fmtCost(v?: number) {
 }
 
 function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(info.state === "running");
   const meta = STAGE_META[stage];
   const running = info.state === "running";
 
@@ -102,14 +102,12 @@ export function Chat() {
 
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto p-3">
+      <div className="flex items-center gap-1.5 px-1 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
+        <Activity size={12} /> ÇALIŞMA ZAMAN ÇİZELGESİ
+      </div>
       {flow.map((item) => {
         if (item.kind === "task") {
-          return (
-            <div key={item.id} className="material-card flex items-start gap-2 rounded-[var(--r-md)] border border-border-w2 px-3 py-2">
-              <User size={14} className="mt-0.5 shrink-0 text-text2" />
-              <p className="selectable text-text" style={{ fontSize: "var(--t-body)" }}>{item.text}</p>
-            </div>
-          );
+          return null; // görev ve plan, Plan bölümünün sahipliğindedir
         }
         if (item.kind === "stage" && item.stage) {
           const role = STAGE_ROLE[item.stage] as Role | undefined;

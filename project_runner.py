@@ -52,6 +52,11 @@ def _parse_requested_files(text: str, valid: set[str]) -> list[str]:
     return wanted[:8]
 
 
+def _plan_summary(text: str) -> str:
+    """Planner'ın kullanıcıya dönük planını FILES protokol kısmından ayır."""
+    return _FILES_RE.split(text or "", maxsplit=1)[0].strip()
+
+
 def _parse_file_blocks(text: str) -> dict[str, str]:
     changes = {}
     for m in _BLOCK_RE.finditer(text):
@@ -91,6 +96,9 @@ def run_project_task(project_root, task, routing=None):
     yield {"type": "output", "stage": "plan", "text": plan.text}
 
     wanted = _parse_requested_files(plan.text, valid)
+    # UI bunu opsiyonel, yapılandırılmış bir plan olarak kullanır. Eski istemciler
+    # olayı görmezden geldiğinde output + info akışı aynı biçimde devam eder.
+    yield {"type": "plan", "summary": _plan_summary(plan.text), "files": wanted}
     yield {"type": "info", "text": "Okunacak dosyalar: " + (", ".join(wanted) or "(yok)")}
 
     # 2) İlgili dosyaları oku
