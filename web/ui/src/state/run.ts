@@ -41,9 +41,12 @@ export interface DiffRow {
 }
 
 export type RunStatus = "idle" | "running" | "done" | "failed" | "cancelled";
+export type RunStage = "draft" | "planning" | "working" | "reviewing" | "ready" | "applied" | "restored" | "error";
 
 interface RunState {
   status: RunStatus;
+  /** Kullanıcının gördüğü lifecycle; altyapıdaki RunStatus'tan daha ayrıntılıdır. */
+  runStage: RunStage;
   runId: string | null;
   task: string;
   routing: Routing;
@@ -80,6 +83,7 @@ let installed = false;
 
 export const useRun = create<RunState>((set, get) => ({
   status: "idle",
+  runStage: "draft",
   runId: null,
   task: "",
   routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
@@ -108,14 +112,19 @@ export const useRun = create<RunState>((set, get) => ({
   setTask: (task) => set({ task }),
 
   start: async () => {
-    const { task, routing, status } = get();
+    const { task, routing, status, runStage } = get();
     if (status === "running") return;
+    if (runStage === "ready") {
+      toast.info("Önce hazır değişiklikleri inceleyin veya vazgeçin.");
+      return;
+    }
     if (!task.trim()) {
       toast.info("Görev boş.");
       return;
     }
     set({
       status: "running",
+      runStage: "planning",
       stages: IDLE_STAGES(),
       flow: [{ id: flowId++, kind: "task", text: task.trim() }],
       diffs: [],
@@ -129,7 +138,7 @@ export const useRun = create<RunState>((set, get) => ({
       const { runId } = await bridge.call("run.start", { task: task.trim(), routing });
       set({ runId });
     } catch (e) {
-      set({ status: "failed", error: e instanceof Error ? e.message : "Koşu başlatılamadı." });
+      set({ status: "failed", runStage: "error", error: e instanceof Error ? e.message : "Koşu başlatılamadı." });
       toast.err(e instanceof Error ? e.message : "Koşu başlatılamadı.");
     }
   },
@@ -174,7 +183,7 @@ export const useRun = create<RunState>((set, get) => ({
         for (const rel of Object.keys(ws.children)) void ws.loadDir(rel);
       }
       for (const e of errors) toast.err(`${e.path}: ${e.message}`);
-      set({ diffs: [], proposals: [] });
+      set({ diffs: [], proposals: [], runStage: "applied", task: "" });
       (await import("@/state/editor")).useEditor.getState().closeDiff();
     } catch (e) {
       toast.err(e instanceof Error ? e.message : "Uygulanamadı.");
@@ -183,7 +192,7 @@ export const useRun = create<RunState>((set, get) => ({
 
   reject: async () => {
     await bridge.call("run.rejectProposals", {});
-    set({ diffs: [], proposals: [] });
+    set({ diffs: [], proposals: [], runStage: "draft", task: "" });
     (await import("@/state/editor")).useEditor.getState().closeDiff();
     toast.info("Değişiklikler reddedildi.");
   },
@@ -197,6 +206,7 @@ export const useRun = create<RunState>((set, get) => ({
       if (status === "failed") {
         set((s) => ({
           status: "failed",
+          runStage: "error",
           error: error ?? null,
           stages: failRunning(s.stages),
           flow: [...s.flow, { id: flowId++, kind: "error", text: `Hata: ${error ?? "bilinmiyor"}` }],
@@ -204,11 +214,12 @@ export const useRun = create<RunState>((set, get) => ({
       } else if (status === "cancelled") {
         set((s) => ({
           status: "cancelled",
+          runStage: "draft",
           stages: failRunning(s.stages),
           flow: [...s.flow, { id: flowId++, kind: "info", text: "Koşu durduruldu." }],
         }));
       } else {
-        set({ status: "done" });
+        set((s) => ({ status: "done", runStage: s.runStage === "ready" ? "ready" : "draft" }));
       }
     });
   },
@@ -233,6 +244,7 @@ function consume(
     const provider = (ev.provider as string) ?? "";
     const role = STAGE_ROLE[stage];
     set((s) => ({
+      runStage: stage === "plan" ? "planning" : stage === "code" ? "working" : stage === "review" ? "reviewing" : s.runStage,
       stages: role
         ? {
             ...markPrevDone(s.stages),
@@ -290,6 +302,7 @@ function consume(
     const totals = ev.totals as { latency_s: number; tokens: number; cost_usd: number };
     set((s) => ({
       proposals,
+      runStage: "ready",
       totals,
       verdict: (ev.verdict as string) ?? s.verdict,
       flow: [

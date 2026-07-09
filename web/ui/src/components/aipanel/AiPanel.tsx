@@ -2,38 +2,60 @@
    composer + geçmiş çekmecesi. Öneri gelince Değişiklikler'e otomatik geçer. */
 
 import { useEffect, useState } from "react";
-import { Clock, MessageSquareText, FileDiff } from "lucide-react";
+import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2 } from "lucide-react";
 import { useRun } from "@/state/run";
 import { Pipeline } from "./Pipeline";
 import { Chat } from "./Chat";
 import { Changes } from "./Changes";
 import { Composer } from "./Composer";
 import { HistoryDrawer } from "./HistoryDrawer";
+import { Plan } from "./Plan";
 
-type Tab = "chat" | "changes";
+type Tab = "plan" | "work" | "review";
+
+const STAGE_META = {
+  draft: { label: "TASLAK", Icon: ClipboardList, tone: "text-muted" },
+  planning: { label: "PLANLANIYOR", Icon: ClipboardList, tone: "text-accent" },
+  working: { label: "ÇALIŞIYOR", Icon: Activity, tone: "text-accent" },
+  reviewing: { label: "İNCELENİYOR", Icon: FileDiff, tone: "text-warn" },
+  ready: { label: "KARAR BEKLİYOR", Icon: FileDiff, tone: "text-warn" },
+  applied: { label: "UYGULANDI", Icon: CheckCircle2, tone: "text-ok" },
+  restored: { label: "GERİ ALINDI", Icon: CheckCircle2, tone: "text-muted" },
+  error: { label: "EYLEM GEREKİYOR", Icon: CircleAlert, tone: "text-err" },
+} as const;
 
 export function AiPanel() {
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<Tab>("plan");
   const [historyOpen, setHistoryOpen] = useState(false);
   const diffCount = useRun((s) => s.diffs.length);
   const status = useRun((s) => s.status);
+  const runStage = useRun((s) => s.runStage);
+  const totals = useRun((s) => s.totals);
+  const meta = STAGE_META[runStage];
+  const StageIcon = meta.Icon;
 
   // öneri hazır olunca Değişiklikler sekmesine geç (desktop.py _focus_view deseni)
   useEffect(() => {
-    if (status === "done" && diffCount > 0) setTab("changes");
-    if (status === "running") setTab("chat");
-  }, [status, diffCount]);
+    if (runStage === "planning") setTab("plan");
+    if (runStage === "working" || runStage === "reviewing" || runStage === "error") setTab("work");
+    if (runStage === "ready" || runStage === "applied" || runStage === "restored") setTab("review");
+  }, [runStage, status, diffCount]);
 
   return (
     <aside className="relative flex h-full w-full flex-col bg-side">
       {/* başlık */}
       <div className="material-panel flex h-10 shrink-0 items-center justify-between border-b border-border-w px-3">
-        <span
-          className="text-muted"
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="shrink-0 text-muted"
           style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}
-        >
-          AI EKİBİ
-        </span>
+          >AI EKİBİ</span>
+          <span className={"flex min-w-0 items-center gap-1 truncate " + meta.tone} style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
+            <StageIcon size={12} strokeWidth={2} /> {meta.label}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {totals && <span className="text-faint" title="Toplam maliyet" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>${totals.cost_usd.toFixed(4)}</span>}
         <button
           onClick={() => setHistoryOpen(true)}
           title="Geçmiş koşular"
@@ -42,6 +64,7 @@ export function AiPanel() {
         >
           <Clock size={14} />
         </button>
+        </div>
       </div>
 
       <Pipeline />
@@ -50,8 +73,9 @@ export function AiPanel() {
       <div className="flex shrink-0 border-b border-border-w bg-panel/40 px-2 py-1">
         {(
           [
-            { id: "chat", label: "Akış", Icon: MessageSquareText, badge: 0 },
-            { id: "changes", label: "Değişiklikler", Icon: FileDiff, badge: diffCount },
+            { id: "plan", label: "Plan", Icon: ClipboardList, badge: 0 },
+            { id: "work", label: "Çalışma", Icon: Activity, badge: status === "running" ? 1 : 0 },
+            { id: "review", label: "İnceleme", Icon: FileDiff, badge: diffCount },
           ] as const
         ).map(({ id, label, Icon, badge }) => (
           <button
@@ -80,7 +104,7 @@ export function AiPanel() {
 
       {/* içerik */}
       <div className="min-h-0 flex-1">
-        {tab === "chat" ? <Chat /> : <Changes />}
+        {tab === "plan" ? <Plan /> : tab === "work" ? <Chat /> : <Changes />}
       </div>
 
       <Composer />

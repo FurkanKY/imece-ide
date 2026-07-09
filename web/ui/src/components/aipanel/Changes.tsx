@@ -10,6 +10,7 @@ export function Changes() {
   const diffs = useRun((s) => s.diffs);
   const verdict = useRun((s) => s.verdict);
   const status = useRun((s) => s.status);
+  const runStage = useRun((s) => s.runStage);
   const toggle = useRun((s) => s.toggleDiff);
   const apply = useRun((s) => s.apply);
   const reject = useRun((s) => s.reject);
@@ -17,11 +18,16 @@ export function Changes() {
   const activeDiff = useEditor((s) => s.diff?.path ?? null);
 
   if (diffs.length === 0) {
+    const message = runStage === "applied"
+      ? "Değişiklikler uygulandı. Checkpoint koruması R3 ile bu alana eklenecek."
+      : runStage === "ready"
+        ? "Ekip bu tur için uygulanacak dosya önermedi."
+        : "Öneri bekleniyor — ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir.";
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <FileDiff size={26} className="text-faint" strokeWidth={1.5} />
         <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          Öneri bekleniyor — koşu bitince dosya değişiklikleri burada listelenir.
+          {message}
         </p>
       </div>
     );
