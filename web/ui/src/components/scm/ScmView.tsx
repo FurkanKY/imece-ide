@@ -52,7 +52,7 @@ function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
             onClick={(e) => { e.stopPropagation(); void discard(change); }}
             title="Değişikliği at"
             aria-label="Değişikliği at"
-            className="rounded p-0.5 text-faint hover:bg-card2 hover:text-text2"
+            className="icon-btn size-5"
           >
             <Undo2 size={13} />
           </button>
@@ -64,7 +64,7 @@ function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
           }}
           title={staged ? "Hazırlıktan çıkar" : "Hazırla (stage)"}
           aria-label={staged ? "Hazırlıktan çıkar" : "Hazırla"}
-          className="rounded p-0.5 text-faint hover:bg-card2 hover:text-text2"
+          className="icon-btn size-5"
         >
           {staged ? <Minus size={13} /> : <Plus size={13} />}
         </button>
@@ -107,7 +107,7 @@ function Group({ title, changes, staged, action }: {
             onClick={action.onClick}
             title={action.label}
             aria-label={action.label}
-            className="rounded p-1 text-faint opacity-0 transition-all hover:bg-card hover:text-text2 focus-visible:opacity-100 group-hover/g:opacity-100"
+            className="icon-btn size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/g:opacity-100"
           >
             <action.Icon size={13} strokeWidth={1.9} />
           </button>
@@ -133,7 +133,7 @@ export function ScmView() {
   return (
     <div className="flex h-full flex-col">
       {/* başlık */}
-      <div className="group/head flex h-8 shrink-0 items-center pl-3 pr-1.5">
+      <div className="material-panel group/head flex h-8 shrink-0 items-center border-b border-border-w pl-3 pr-1.5">
         <span
           className="min-w-0 flex-1 truncate text-muted"
           style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}
@@ -144,7 +144,7 @@ export function ScmView() {
           onClick={() => void s.refresh()}
           title="Yenile"
           aria-label="Yenile"
-          className="rounded p-1 text-faint opacity-0 transition-all hover:bg-card hover:text-text2 focus-visible:opacity-100 group-hover/head:opacity-100"
+          className="icon-btn size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100"
         >
           <RefreshCw size={13} strokeWidth={1.9} />
         </button>
@@ -160,7 +160,7 @@ export function ScmView() {
       ) : (
         <>
           {/* dal satırı */}
-          <div className="mx-2 mb-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--r-sm)] bg-card px-2">
+          <div className="material-card mx-2 mb-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--r-sm)] border border-border-w px-2">
             <GitBranch size={13} className="shrink-0 text-accent" />
             <span className="truncate text-text2" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
               {s.branch}
@@ -197,7 +197,7 @@ export function ScmView() {
             <button
               onClick={() => void s.commit()}
               disabled={!canCommit}
-              className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent transition-all hover:bg-accent2 disabled:opacity-40"
+              className="pressable mt-1 flex w-full items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2 disabled:opacity-40"
               style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
             >
               <GitCommitHorizontal size={14} strokeWidth={2} />

@@ -56,7 +56,7 @@ export function DialogHost() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
+        transition={{ duration: 0.12 }}
         className="fixed inset-0 z-[150] flex items-start justify-center bg-black/50 pt-[18vh]"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) cancel();
@@ -67,12 +67,12 @@ export function DialogHost() {
         }}
       >
         <motion.div
-          initial={{ opacity: 0, y: 10, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 6, scale: 0.98 }}
+          initial={{ opacity: 0, transform: "translateY(10px) scale(0.98)" }}
+          animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
+          exit={{ opacity: 0, transform: "translateY(6px) scale(0.98)" }}
           transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
-          className="w-[420px] rounded-[var(--r-lg)] border border-border-w bg-panel p-4"
-          style={{ boxShadow: "var(--shadow-3)" }}
+          className="material-panel w-[420px] rounded-[var(--r-lg)] border border-border-w p-4"
+          style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
           role="dialog"
           aria-modal="true"
         >
@@ -116,7 +116,7 @@ export function DialogHost() {
           <div className="mt-4 flex justify-end gap-2">
             <button
               onClick={cancel}
-              className="rounded-[var(--r-sm)] border border-border-w bg-transparent px-3.5 py-1.5 text-text2 transition-colors hover:bg-card"
+              className="pressable rounded-[var(--r-sm)] border border-border-w bg-transparent px-3.5 py-1.5 text-text2 hover:bg-card"
               style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
             >
               Vazgeç
@@ -125,7 +125,7 @@ export function DialogHost() {
               onClick={ok}
               autoFocus={current.kind === "confirm"}
               className={
-                "rounded-[var(--r-sm)] px-3.5 py-1.5 transition-colors " +
+                "pressable rounded-[var(--r-sm)] px-3.5 py-1.5 " +
                 (current.kind === "confirm" && current.danger
                   ? "bg-err text-white hover:brightness-110"
                   : "bg-accent text-on-accent hover:bg-accent2")

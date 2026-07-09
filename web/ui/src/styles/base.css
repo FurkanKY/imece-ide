@@ -32,6 +32,59 @@ body {
   user-select: none; /* masaüstü hissi: metin seçimi yalnız içerik alanlarında */
   cursor: default;
 }
+button {
+  font: inherit;
+}
+.pressable {
+  transition: transform var(--dur-press) var(--ease-out),
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    opacity var(--dur-fast) ease;
+}
+.pressable:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  transition: transform var(--dur-press) var(--ease-out),
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover {
+    background: var(--card);
+    color: var(--text2);
+  }
+}
+.material-panel {
+  background: var(--material);
+  background-image: var(--surface-grad);
+  box-shadow: var(--bevel);
+}
+.material-card {
+  background: var(--card);
+  background-image: var(--surface-grad);
+  box-shadow: var(--bevel);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pressable,
+  .icon-btn {
+    transition-duration: 0ms;
+  }
+  .pressable:active:not(:disabled),
+  .icon-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
 .selectable, input, textarea {
   user-select: text;
   cursor: auto;
@@ -158,5 +211,5 @@ body {
   animation-duration: 0s !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  * { transition-duration: 0s !important; animation-duration: 0s !important; }
+  * { transition-duration: 0s !important; animation-duration: 0s !important; scroll-behavior: auto !important; }
 }

@@ -46,11 +46,9 @@ function Workspace() {
   const setSidebarWidth = useUi((s) => s.setSidebarWidth);
   const setAiPanelWidth = useUi((s) => s.setAiPanelWidth);
   const setBottomHeight = useUi((s) => s.setBottomHeight);
-  const resizing = useUi((s) => s.resizing);
-
   const ease = [0.33, 1, 0.68, 1] as const;
   // splitter sürüklerken animasyon devre dışı — boyut anında izler
-  const tr = { duration: resizing ? 0 : 0.18, ease };
+  const tr = { duration: 0, ease };
 
   return (
     <div className="flex min-h-0 flex-1">

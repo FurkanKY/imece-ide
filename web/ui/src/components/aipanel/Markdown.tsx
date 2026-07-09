@@ -47,7 +47,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
         onClick={copy}
         title="Kopyala"
         aria-label="Kodu kopyala"
-        className="absolute right-1.5 top-1.5 z-10 rounded p-1 text-faint opacity-0 transition-all hover:bg-card2 hover:text-text2 focus-visible:opacity-100 group-hover/code:opacity-100"
+        className="icon-btn absolute right-1.5 top-1.5 z-10 size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/code:opacity-100"
       >
         {copied ? <Check size={12} className="text-ok" /> : <Copy size={12} />}
       </button>

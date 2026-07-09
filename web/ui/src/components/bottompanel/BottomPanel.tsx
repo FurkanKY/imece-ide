@@ -17,7 +17,7 @@ function ViewTab(props: { label: string; active: boolean; onClick: () => void;
     <button
       onClick={props.onClick}
       className={
-        "flex items-center gap-1.5 border-b-2 px-2 pb-1 pt-1.5 transition-colors " +
+        "pressable flex items-center gap-1.5 border-b-2 px-2 pb-1 pt-1.5 transition-colors " +
         (props.active
           ? "border-accent text-text2"
           : "border-transparent text-muted hover:text-text2")
@@ -82,7 +82,7 @@ export function BottomPanel() {
   return (
     <section className="flex h-full flex-col bg-field">
       {/* başlık şeridi: görünüm sekmeleri + bağlama göre araçlar */}
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border-w bg-side px-1">
+      <div className="material-panel flex h-8 shrink-0 items-center gap-1 border-b border-border-w px-1">
         <ViewTab label="TERMİNAL" active={view === "terminal"}
                  onClick={() => setView("terminal")} icon={<TerminalSquare size={12} />} />
         <ViewTab label="ÇIKTI" active={view === "output"}
@@ -116,7 +116,7 @@ export function BottomPanel() {
                       void kill(t.id);
                     }}
                     aria-label="Terminali kapat"
-                    className="rounded p-0.5 opacity-0 hover:bg-card2 focus-visible:opacity-100 group-hover:opacity-100"
+                    className="icon-btn size-5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                   >
                     <X size={11} />
                   </button>
@@ -127,7 +127,7 @@ export function BottomPanel() {
               onClick={() => void create()}
               title="Yeni terminal (Ctrl+Shift+`)"
               aria-label="Yeni terminal"
-              className="rounded p-1 text-faint transition-colors hover:bg-card hover:text-text2"
+              className="icon-btn size-6"
             >
               <Plus size={14} />
             </button>
@@ -146,7 +146,7 @@ export function BottomPanel() {
                 onClick={() => void exec.stop()}
                 title="Koşuyu durdur (Shift+F5)"
                 aria-label="Koşuyu durdur"
-                className="rounded p-1 text-err transition-colors hover:bg-card"
+                className="icon-btn size-6 text-err hover:text-err"
               >
                 <Square size={13} />
               </button>
@@ -156,7 +156,7 @@ export function BottomPanel() {
                   onClick={() => void exec.run()}
                   title="Yeniden koş (Ctrl+F5)"
                   aria-label="Yeniden koş"
-                  className="rounded p-1 text-faint transition-colors hover:bg-card hover:text-text2"
+                  className="icon-btn size-6"
                 >
                   <Play size={13} />
                 </button>
@@ -166,7 +166,7 @@ export function BottomPanel() {
               onClick={clearExecOutput}
               title="Çıktıyı temizle"
               aria-label="Çıktıyı temizle"
-              className="rounded p-1 text-faint transition-colors hover:bg-card hover:text-text2"
+              className="icon-btn size-6"
             >
               <Eraser size={13} />
             </button>
@@ -176,7 +176,7 @@ export function BottomPanel() {
           onClick={toggleBottom}
           title="Paneli daralt (Ctrl+`)"
           aria-label="Paneli daralt"
-          className="rounded p-1 text-faint transition-colors hover:bg-card hover:text-text2"
+          className="icon-btn size-6"
         >
           <ChevronDown size={14} />
         </button>

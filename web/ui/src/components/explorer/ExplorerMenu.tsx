@@ -19,7 +19,7 @@ function Item(props: {
     <ContextMenu.Item
       onSelect={props.onSelect}
       className={
-        "flex cursor-default select-none items-center gap-2.5 rounded-[var(--r-xs)] px-2.5 py-1.5 outline-none " +
+        "flex cursor-default select-none items-center gap-2.5 rounded-[var(--r-xs)] px-2.5 py-1.5 outline-none transition-colors " +
         (props.danger
           ? "text-err data-[highlighted]:bg-err/15"
           : "text-text2 data-[highlighted]:bg-card2 data-[highlighted]:text-text")
@@ -57,8 +57,8 @@ export function ExplorerMenu({
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
-          className="z-[120] min-w-[210px] rounded-[var(--r-md)] border border-border-w bg-panel p-1"
-          style={{ boxShadow: "var(--shadow-2)" }}
+          className="material-panel z-[120] min-w-[210px] rounded-[var(--r-md)] border border-border-w p-1"
+          style={{ boxShadow: "var(--bevel-strong), var(--shadow-2)" }}
         >
           <Item Icon={FilePlus2} label="Yeni Dosya" onSelect={() => void ws.newFile(dirTarget)} />
           <Item Icon={FolderPlus} label="Yeni Klasör" onSelect={() => void ws.newFolder(dirTarget)} />

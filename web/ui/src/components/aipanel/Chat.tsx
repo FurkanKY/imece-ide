@@ -26,13 +26,13 @@ function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
   return (
     <div
       className={
-        "rounded-[var(--r-md)] border bg-card " +
+        "material-card rounded-[var(--r-md)] border " +
         (running ? "border-accent/40" : "border-border-w")
       }
     >
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        className="pressable flex w-full items-center gap-2 px-3 py-2 text-left"
       >
         <ChevronRight
           size={13}
@@ -105,7 +105,7 @@ export function Chat() {
       {flow.map((item) => {
         if (item.kind === "task") {
           return (
-            <div key={item.id} className="flex items-start gap-2 rounded-[var(--r-md)] border border-border-w2 bg-card2 px-3 py-2">
+            <div key={item.id} className="material-card flex items-start gap-2 rounded-[var(--r-md)] border border-border-w2 px-3 py-2">
               <User size={14} className="mt-0.5 shrink-0 text-text2" />
               <p className="selectable text-text" style={{ fontSize: "var(--t-body)" }}>{item.text}</p>
             </div>

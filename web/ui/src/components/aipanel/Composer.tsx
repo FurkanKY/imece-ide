@@ -51,7 +51,7 @@ export function Composer() {
   };
 
   return (
-    <div className="border-t border-border-w bg-composer p-2.5">
+    <div className="material-panel border-t border-border-w p-2.5">
       <div className="mb-2 flex gap-1.5">
         <RoleSelect role="planner" />
         <RoleSelect role="coder" />
@@ -72,7 +72,7 @@ export function Composer() {
           <button
             onClick={() => void cancel()}
             title="Durdur"
-            className="flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] border border-err/50 text-err transition-colors hover:bg-err/15"
+            className="pressable flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] border border-err/50 text-err hover:bg-err/15"
           >
             <Square size={15} strokeWidth={2.2} />
           </button>
@@ -80,7 +80,7 @@ export function Composer() {
           <button
             onClick={() => void start()}
             title="Çalıştır (Enter)"
-            className="flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-accent text-on-accent transition-all hover:bg-accent2"
+            className="pressable flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-accent text-on-accent hover:bg-accent2"
             style={{ boxShadow: "var(--shadow-1)" }}
           >
             <Play size={15} strokeWidth={2.2} className="ml-0.5" />
