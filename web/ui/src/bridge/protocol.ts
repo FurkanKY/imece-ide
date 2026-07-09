@@ -117,6 +117,30 @@ export interface Api {
   /** tek yön bildirim (didOpen/didChange/didClose/didSave) */
   "lsp.notify": { params: { method: string; params?: unknown }; result: {} };
 
+  // ---- debug (P8.2 — debugpy/DAP) ----
+  "debug.start": {
+    params: { rel: string; breakpoints: { path: string; lines: number[] }[] };
+    result: { started: boolean };
+  };
+  /** oturum aktifken breakpoint güncelle; dönen lines = doğrulanan satırlar */
+  "debug.setBreakpoints": {
+    params: { path: string; lines: number[] };
+    result: { lines: number[] };
+  };
+  "debug.continue": { params: {}; result: {} };
+  "debug.next": { params: {}; result: {} };
+  "debug.stepIn": { params: {}; result: {} };
+  "debug.stepOut": { params: {}; result: {} };
+  "debug.stack": { params: {}; result: { frames: DebugFrame[] } };
+  "debug.scopes": { params: { frameId: number }; result: { scopes: DebugScope[] } };
+  "debug.variables": { params: { ref: number }; result: { variables: DebugVariable[] } };
+  "debug.evaluate": {
+    params: { expr: string; frameId?: number };
+    result: { result: string; ref: number };
+  };
+  "debug.stop": { params: {}; result: {} };
+  "debug.status": { params: {}; result: { active: boolean; stopped: boolean } };
+
   // ---- scm / git (P4) ----
   "scm.status": { params: {}; result: ScmStatus };
   "scm.diff": {
@@ -143,6 +167,27 @@ export interface ScmStatus {
   behind: number;
   staged: ScmChange[];
   unstaged: ScmChange[];
+}
+
+// ---- debug tipleri (P8.2) ----
+export interface DebugFrame {
+  id: number;
+  name: string;
+  path: string; // köke göre; kök dışıysa mutlak
+  line: number;
+}
+
+export interface DebugScope {
+  name: string;
+  ref: number; // variablesReference
+  expensive: boolean;
+}
+
+export interface DebugVariable {
+  name: string;
+  value: string;
+  type: string;
+  ref: number; // >0 → genişletilebilir (debug.variables ile çocuklar)
 }
 
 export interface SearchMatch {
@@ -210,6 +255,17 @@ export interface Events {
   "lsp.event": { method: string; params: unknown };
   "exec.output": { execId: string; data: string };
   "exec.exited": { execId: string; code: number; durationS: number };
+  /** debug (P8.2): durdu (top frame + yığın dahil — ekstra round-trip yok) */
+  "debug.stopped": {
+    reason: string;
+    threadId: number;
+    path: string;
+    line: number;
+    frames: DebugFrame[];
+  };
+  "debug.continued": {};
+  "debug.output": { data: string };
+  "debug.terminated": { code: number | null; durationS: number };
 }
 
 export interface Bridge {

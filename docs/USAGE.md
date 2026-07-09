@@ -56,12 +56,20 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
 - **TS/JS** — aynı dörtlü Monaco'nun kendi dil servisinden; tanıma-git açık sekmeler
   arasında çalışır.
 
-**Çalıştır (P8.1 — F5):**
-- **F5** aktif dosyayı koşar (py/js/mjs), **Ctrl+F5** projeyi (npm dev/start,
-  cargo, go veya main/app.py — sezgisel; paletten "Çalıştırma Komutunu Değiştir…"
-  ile kalıcı özelleştir → `.magent/run.json`). Titlebar'daki **▶** de aynı işi yapar.
-- Çıktı alt paneldeki **ÇIKTI** sekmesine akar (renkli); bitince yeşil/kırmızı
-  **çıkış kodu rozeti** + süre. **Shift+F5** veya ■ koşuyu durdurur.
+**Çalıştır (P8.1) & Debug (P8.2):**
+- **F5** — VS Code düzeni: debug oturumu durmuşsa **devam eder**; aktif dosya
+  `.py` ise **debug başlatır**; değilse dosyayı debugsuz koşar. **Ctrl+F5**
+  projeyi debugsuz koşar (npm dev/start, cargo, go veya main/app.py — sezgisel;
+  paletten "Çalıştırma Komutunu Değiştir…" → `.magent/run.json`). Titlebar'daki
+  **▶** aktif dosyayı debugsuz koşar. **Shift+F5** veya ■ durdurur.
+- Çıktı (koşu da debug de) alt paneldeki **ÇIKTI** sekmesine akar (renkli);
+  bitince yeşil/kırmızı **çıkış kodu rozeti** + süre.
+- **Debug** — satır numarasının soluna tıkla (veya **F9**) → kırmızı breakpoint
+  (proje başına kalıcı). Aktivite çubuğundaki 🐞 → **ÇALIŞTIR VE DEBUG** görünümü:
+  Debug Başlat düğmesi; durunca kontrol şeridi (devam · **F10** üzerinden ·
+  **F11** içine · **Shift+F11** dışına · durdur), **çağrı yığını** (tık →
+  satıra git), **değişkenler** (tembel ağaç — genişlet), breakpoint listesi.
+  Durulan satır amber vurgulanır ve editör oraya kayar.
 
 **Ajanlarla değişiklik (P2 — sağdaki AI EKİBİ paneli):**
 1. Görev kutusuna yaz (ör. *"utils.py'deki tarih biçimini ISO 8601 yap"*), istersen

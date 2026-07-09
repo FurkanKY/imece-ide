@@ -130,6 +130,28 @@ body {
 .chat-md th { color: var(--text); background: var(--card); font-weight: var(--w-label); }
 .chat-md strong { color: var(--text); }
 
+/* ---- Debug süslemeleri (P8.2 — Editor.tsx glyph margin) ---- */
+.dbg-bp {
+  cursor: pointer;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--red) 0 4.5px,
+    transparent 5.5px
+  );
+}
+.dbg-stop-line {
+  background: color-mix(in srgb, var(--amber) 13%, transparent);
+}
+.dbg-stop-arrow::after {
+  content: "▶";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--amber);
+  font-size: 10px;
+}
+
 /* ---- Animasyon tercihi ---- */
 [data-animations="off"] *, [data-animations="off"] *::before, [data-animations="off"] *::after {
   transition-duration: 0s !important;

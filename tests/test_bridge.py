@@ -227,6 +227,33 @@ def test_scm_status_stage_commit_flow(bridge, git_repo):
     assert (git_repo / "a.py").read_text(encoding="utf-8") == "yeni = 2\n"
 
 
+# ---------------- debug domain'i (oturumsuz sözleşme; tam akış test_dap.py'de) ----------------
+
+def test_debug_contract_without_session(bridge, tmp_path):
+    import webhost.api.debug  # noqa: F401
+    from webhost import state
+    state._active = None
+    r = rpc(bridge, "debug.start", {"rel": "a.py"})
+    assert r["ok"] is False and r["error"]["code"] == "no_project"
+
+    state.set_project(str(tmp_path))
+    # python olmayan dosya reddedilir
+    r = rpc(bridge, "debug.start", {"rel": "a.txt"}, call_id=2)
+    assert r["ok"] is False and r["error"]["code"] == "not_python"
+    # oturum yokken durum/adım sözleşmesi
+    r = rpc(bridge, "debug.status", call_id=3)
+    assert r["ok"] and r["result"] == {"active": False, "stopped": False}
+    r = rpc(bridge, "debug.continue", call_id=4)
+    assert r["ok"] is False and r["error"]["code"] == "not_stopped"
+    # oturum yokken breakpoint çağrısı yereldekini aynen döndürür
+    r = rpc(bridge, "debug.setBreakpoints", {"path": "a.py", "lines": [3, 7]}, call_id=5)
+    assert r["ok"] and r["result"]["lines"] == [3, 7]
+    # stop oturumsuz da güvenli
+    r = rpc(bridge, "debug.stop", call_id=6)
+    assert r["ok"]
+    state._active = None
+
+
 def test_settings_roundtrip(bridge, tmp_path, monkeypatch):
     monkeypatch.setattr(ui_prefs, "_DIR", str(tmp_path))
     monkeypatch.setattr(ui_prefs, "_PATH", str(tmp_path / "prefs.json"))

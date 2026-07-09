@@ -1,7 +1,7 @@
 /* mock — düz tarayıcıda geliştirme + görsel doğrulama için sahte host.
    Senaryo seçimi: ?scenario=empty|project|running|result|error (P2'de fixtures/run.ts genişler). */
 
-import { Api, Bridge, Events, Prefs, Proposal, ScmChange } from "../protocol";
+import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ScmChange } from "../protocol";
 import * as vfs from "./vfs";
 import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
 
@@ -82,6 +82,66 @@ export class MockBridge implements Bridge {
       case "exec.setCommand":
         localStorage.setItem("magent.mock.runcmd", (params as { command: string }).command);
         return {} as R;
+      // ---- debug (P8.2): sahte DAP oturumu — breakpoint'te durur, adımlar ----
+      case "debug.start": {
+        const p = params as Api["debug.start"]["params"];
+        const bp = p.breakpoints[0];
+        this.dbgFile = p.rel;
+        this.dbgLine = bp?.lines[0] ?? 2;
+        this.dbgActive = true;
+        setTimeout(() => this.emit("debug.output", { data: "bas\r\n" }), 250);
+        setTimeout(() => this.dbgEmitStopped("breakpoint"), 500);
+        return { started: true } as R;
+      }
+      case "debug.setBreakpoints":
+        return { lines: (params as { lines: number[] }).lines } as R;
+      case "debug.continue": {
+        this.emit("debug.continued", {});
+        setTimeout(() => {
+          this.emit("debug.output", { data: "son 5\r\n" });
+          this.emit("debug.terminated", { code: 0, durationS: 1.2 });
+          this.dbgActive = false;
+        }, 400);
+        return {} as R;
+      }
+      case "debug.next":
+      case "debug.stepIn":
+      case "debug.stepOut": {
+        this.emit("debug.continued", {});
+        this.dbgLine += 1;
+        setTimeout(() => this.dbgEmitStopped("step"), 250);
+        return {} as R;
+      }
+      case "debug.stack":
+        return { frames: this.dbgFrames() } as R;
+      case "debug.scopes":
+        return { scopes: [{ name: "Locals", ref: 101, expensive: false }] } as R;
+      case "debug.variables": {
+        const ref = (params as { ref: number }).ref;
+        return {
+          variables: ref === 101
+            ? [
+                { name: "a", value: "2", type: "int", ref: 0 },
+                { name: "b", value: "3", type: "int", ref: 0 },
+                { name: "liste", value: "[1, 2]", type: "list", ref: 102 },
+              ]
+            : [
+                { name: "0", value: "1", type: "int", ref: 0 },
+                { name: "1", value: "2", type: "int", ref: 0 },
+              ],
+        } as R;
+      }
+      case "debug.evaluate":
+        return { result: "5", ref: 0 } as R;
+      case "debug.stop": {
+        if (this.dbgActive) {
+          this.emit("debug.terminated", { code: null, durationS: 0.6 });
+          this.dbgActive = false;
+        }
+        return {} as R;
+      }
+      case "debug.status":
+        return { active: this.dbgActive, stopped: this.dbgActive } as R;
       // ---- lsp (P7): tarayıcıda dil sunucusu yok — zararsız no-op ----
       case "lsp.start":
         return { running: false, ready: false } as R;
@@ -286,6 +346,29 @@ export class MockBridge implements Bridge {
         console.warn("[mock] karşılıksız metot:", method, params);
         return {} as R;
     }
+  }
+
+  // ---- debug mock durumu (P8.2) ----
+  private dbgActive = false;
+  private dbgFile = "main.py";
+  private dbgLine = 2;
+
+  private dbgFrames(): DebugFrame[] {
+    return [
+      { id: 1, name: "topla", path: this.dbgFile, line: this.dbgLine },
+      { id: 2, name: "<module>", path: this.dbgFile, line: 6 },
+    ];
+  }
+
+  private dbgEmitStopped(reason: string) {
+    if (!this.dbgActive) return;
+    this.emit("debug.stopped", {
+      reason,
+      threadId: 1,
+      path: this.dbgFile,
+      line: this.dbgLine,
+      frames: this.dbgFrames(),
+    });
   }
 
   /** senaryoya göre koşu olaylarını zamanlamalı akıt */

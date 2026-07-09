@@ -133,7 +133,7 @@ web/ui/  (React 19 + TS + Vite + Tailwind v4)      webhost/  (PySide6 host)
 `{id, method, params}` → `{id, ok, result|error}`; olaylar `{channel, payload}`. Python
 tarafında `@handler("domain.metot")` ile kaydedilir; uzun işler QThread'e alınıp sinyalle
 çözülür. Domain'ler: `window · app · settings · project · fs · session` (P1); `run ·
-terminal · history · search · scm` (P2–P4); `lsp · exec` (P7–P8, IDE+). `scm`
+terminal · history · search · scm` (P2–P4); `lsp · exec · debug` (P7–P8, IDE+). `scm`
 (api/scm.py) git CLI alt-süreçleriyle status/diff/stage/unstage/discard/commit sağlar
 (UTF-8 + `stdin=DEVNULL`; kenar çubuğu KAYNAK DENETİMİ görünümü buradan beslenir,
 satır diff'i merkez Monaco'da açılır).
@@ -158,6 +158,17 @@ main.py sezgisi). `api/exec.py` komutu kabuk üzerinden koşar, çıktıyı 16ms
 kapatır — çıktı YAKALANIR (alt panel ÇIKTI sekmesi, salt-okunur xterm; ham metin P9.2
 "hatayı ekibe gönder" için `state/exec.ts`'te saklanır). Tek eşzamanlı koşu; Windows'ta
 süreç ağacı `taskkill /T /F` ile temizlenir.
+
+**Debugger (P8.2 — `api/debug.py` + `state/debug.ts` + `components/debug/`):**
+debugpy DAP üzerinden: serbest porta `python -m debugpy --listen --wait-for-client
+<dosya>` (debuggee bizim alt-sürecimiz; stdout'u ÇIKTI sekmesine akar — `state/exec.ts`
+dış-koşu kanalı), retry'lı soket bağlantısı + `jsonrpc.py` çerçevesi (LSP ile ortak).
+El sıkışma: initialize→attach→[initialized]→setBreakpoints→configurationDone.
+`stopped` olayında yığını Python çeker ve `debug.stopped {path, line, frames}` tek
+pakette yollar; scopes/variables tembel (`variablesReference`). Web: Monaco glyph
+margin breakpoint'leri (proje başına localStorage) + durulan satırda amber vurgu;
+kenar çubuğu ÇALIŞTIR VE DEBUG görünümü (kontrol şeridi, çağrı yığını, değişken
+ağacı). F5 VS Code düzeni: durmuşsa devam · .py ise debug · değilse koş.
 
 **app:// özel şeması** (`scheme.py`): Vite ES modülleri/worker'ları `file://` altında
 CORS'a takıldığı için `SecureScheme|CorsEnabled|FetchApiAllowed` bayraklı özel şema

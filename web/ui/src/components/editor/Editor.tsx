@@ -8,8 +8,15 @@ import { initMonaco, langForPath } from "@/lib/monaco";
 import { fileIcon } from "@/lib/fileIcons";
 import { useEditor } from "@/state/editor";
 import { useUi } from "@/state/ui";
+import { useDebug } from "@/state/debug";
 import { DiffView, DiffTab } from "./DiffView";
 import { TabMenu } from "./TabMenu";
+
+// F9 gibi kısayolların imleç satırına erişimi için (keymap.ts)
+let activeCodeEditor: MonacoEditor.IStandaloneCodeEditor | null = null;
+export function getActiveCodeEditor() {
+  return activeCodeEditor;
+}
 
 function TabBar() {
   const { tabs, activeRel, activate, close, reorder } = useEditor();
@@ -127,8 +134,25 @@ export function Editor() {
       cursorBlinking: "smooth",
       guides: { indentation: true },
       wordWrap: useUi.getState().wordWrap ? "on" : "off",
+      glyphMargin: true, // P8.2: breakpoint şeridi
     });
     edRef.current = ed;
+    activeCodeEditor = ed;
+    // süsleme koleksiyonu editörle birlikte doğar/ölür (StrictMode remount tuzağı:
+    // eski editörün koleksiyonu ref'te kalırsa süslemeler görünmez)
+    decoRef.current = ed.createDecorationsCollection();
+    // glyph margin tık → breakpoint aç/kapat (P8.2)
+    const mouseSub = ed.onMouseDown((e) => {
+      if (
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN &&
+        e.target.position
+      ) {
+        const model = ed.getModel();
+        if (!model) return;
+        const rel = model.uri.path.replace(/^\//, "");
+        useDebug.getState().toggleBreakpoint(rel, e.target.position.lineNumber);
+      }
+    });
     const sub = ed.onDidChangeModelContent(() => {
       const model = ed.getModel();
       if (model) {
@@ -157,12 +181,19 @@ export function Editor() {
     });
     return () => {
       sub.dispose();
+      mouseSub.dispose();
       opener.dispose();
+      if (activeCodeEditor === ed) activeCodeEditor = null;
+      decoRef.current = null;
       ed.dispose();
       modelsRef.current.forEach((m) => m.dispose());
       modelsRef.current.clear();
     };
   }, [setDraft]);
+
+  const breakpoints = useDebug((s) => s.breakpoints);
+  const stoppedAt = useDebug((s) => s.stoppedAt);
+  const decoRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
 
   // Aktif sekme değişince modeli değiştir
   useEffect(() => {
@@ -199,6 +230,39 @@ export function Editor() {
     if (vs) ed.restoreViewState(vs);
     ed.focus();
   }, [activeRel, tabs]);
+
+  // P8.2: breakpoint + durulan satır süslemeleri — model-swap'tan SONRA tanımlı
+  // (efekt sırası: önce model değişir, sonra süslemeler yeni modele uygulanır)
+  useEffect(() => {
+    const monaco = initMonaco();
+    if (!decoRef.current) return;
+    if (!activeRel) {
+      decoRef.current.set([]);
+      return;
+    }
+    const decos: MonacoEditor.IModelDeltaDecoration[] = [];
+    for (const line of breakpoints[activeRel] ?? []) {
+      decos.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          glyphMarginClassName: "dbg-bp",
+          glyphMarginHoverMessage: { value: "Breakpoint (F9 / tık ile kaldır)" },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      });
+    }
+    if (stoppedAt && stoppedAt.path === activeRel) {
+      decos.push({
+        range: new monaco.Range(stoppedAt.line, 1, stoppedAt.line, 1),
+        options: {
+          isWholeLine: true,
+          className: "dbg-stop-line",
+          glyphMarginClassName: "dbg-stop-arrow",
+        },
+      });
+    }
+    decoRef.current.set(decos);
+  }, [breakpoints, stoppedAt, activeRel, tabs]);
 
   // satır kaydırma değişince canlı uygula (Alt+Z)
   const wordWrap = useUi((s) => s.wordWrap);
