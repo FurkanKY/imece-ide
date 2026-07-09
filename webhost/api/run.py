@@ -10,6 +10,7 @@ geri taşınmaz). Proposal gelince geçmişe kaydedilir (desktop.py davranışı
 from PySide6.QtCore import QThread, Signal
 
 from history import HistoryStore
+from checkpoints import CheckpointStore
 from project import Project
 from project_runner import run_project_task
 from agents import DEFAULT_ROUTING
@@ -121,20 +122,32 @@ def _cancel(params, ctx):
 def _apply(params, ctx):
     proj = _require_project()
     wanted = set(params.get("paths") or [])
+    proposals = [p for p in _active.get("proposals", []) if p.get("path") in wanted]
+    if not proposals:
+        return {"applied": [], "errors": [], "checkpointId": None}
+    try:
+        checkpoint = CheckpointStore(proj.root).create(
+            proj, [p["path"] for p in proposals], str(_active.get("run_id")),
+        )
+    except Exception as e:
+        raise BridgeError("checkpoint", f"Checkpoint oluşturulamadı: {e}")
+
     applied, errors = [], []
-    for p in _active.get("proposals", []):
-        if p.get("path") not in wanted:
-            continue
+    for p in proposals:
         try:
-            proj.apply(p["path"], p.get("new", ""))  # .bak yedekli (varsayılan)
+            proj.apply(p["path"], p.get("new", ""), backup=False)
             applied.append(p["path"])
         except Exception as e:
             errors.append({"path": p.get("path", ""), "message": str(e)})
+    # Kısmi apply'da checkpoint geri yüklenir; kullanıcı hiçbir yarım değişiklik görmez.
+    if errors:
+        CheckpointStore(proj.root).restore(proj, checkpoint["id"])
+        applied = []
     if applied:
         _active["proposals"] = [
             p for p in _active["proposals"] if p.get("path") not in set(applied)
         ]
-    return {"applied": applied, "errors": errors}
+    return {"applied": applied, "errors": errors, "checkpointId": checkpoint["id"]}
 
 
 @handler("run.rejectProposals")

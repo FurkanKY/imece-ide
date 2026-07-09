@@ -23,6 +23,7 @@ export class MockBridge implements Bridge {
   private maximized = false;
   private runCancelled = false;
   private mockProposals: Proposal[] = [];
+  private checkpoints: { id: string; ts: number; files: string[] }[] = [];
   private termCounter = 0;
   // sahte git durumu — ScmView geliştirme/webshot senaryosu
   private scmStaged: ScmChange[] = [{ path: "src/utils.ts", status: "M" }];
@@ -240,8 +241,14 @@ export class MockBridge implements Bridge {
           }
         }
         this.mockProposals = this.mockProposals.filter((p) => !wanted.has(p.path));
-        return { applied, errors: [] } as R;
+        const checkpointId = applied.length ? `mock-c${this.checkpoints.length + 1}` : null;
+        if (checkpointId) this.checkpoints.unshift({ id: checkpointId, ts: Date.now() / 1000, files: applied });
+        return { applied, errors: [], checkpointId } as R;
       }
+      case "checkpoint.list":
+        return { checkpoints: this.checkpoints } as R;
+      case "checkpoint.restore":
+        return { restored: [] } as R;
       case "run.rejectProposals":
         this.mockProposals = [];
         return {} as R;

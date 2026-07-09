@@ -74,8 +74,10 @@ export interface Api {
   "run.cancel": { params: { runId?: string }; result: {} };
   "run.applyProposals": {
     params: { paths: string[] };
-    result: { applied: string[]; errors: { path: string; message: string }[] };
+    result: { applied: string[]; errors: { path: string; message: string }[]; checkpointId: string | null };
   };
+  "checkpoint.list": { params: {}; result: { checkpoints: Checkpoint[] } };
+  "checkpoint.restore": { params: { checkpointId: string }; result: { restored: string[] } };
   "run.rejectProposals": { params: {}; result: {} };
   "history.list": { params: {}; result: { items: HistoryItem[] } };
 
@@ -206,6 +208,12 @@ export interface HistoryItem {
   verdict: string;
   tokens: number;
   cost_usd: number;
+  files: string[];
+}
+export interface Checkpoint {
+  id: string;
+  ts: number;
+  runId?: string | null;
   files: string[];
 }
 
