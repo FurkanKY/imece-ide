@@ -210,6 +210,18 @@ button {
   transition-duration: 0s !important;
   animation-duration: 0s !important;
 }
+
+/* Dar pencere: AI kararı editörü ezmez; aktivite çubuğundaki AI ikonu drawer'ı açar. */
+@media (max-width: 1050px) {
+  .workspace-ai-splitter { display: none; }
+  .workspace-ai-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 12;
+    border-left: 1px solid var(--border2);
+    box-shadow: var(--shadow-3);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0s !important; animation-duration: 0s !important; scroll-behavior: auto !important; }
 }

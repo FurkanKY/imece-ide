@@ -45,7 +45,9 @@ export function Composer() {
     ? "Ekip çalışıyor — gerekirse durdurun."
     : reviewReady
       ? "İnceleme hazır — dosyaları uygulayın veya vazgeçin."
-      : null;
+      : runStage === "error"
+        ? "Bu tur tamamlanamadı — görevi düzenleyin veya yeniden çalıştırın."
+        : null;
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey && enterToSend) {

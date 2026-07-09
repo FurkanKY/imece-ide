@@ -44,6 +44,8 @@ interface UiState extends LayoutState {
   toggleWordWrap: () => void;
   toggleSidebar: () => void;
   toggleAiPanel: () => void;
+  showAiPanel: () => void;
+  hideAiPanel: () => void;
   toggleBottom: () => void;
   setSideView: (v: SideView) => void;
   /** görünümü aç + kenar çubuğu kapalıysa göster */
@@ -95,6 +97,8 @@ export const useUi = create<UiState>((set) => ({
   showBottom: (v) => set({ bottomView: v, bottomVisible: true }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   toggleAiPanel: () => set((s) => ({ aiPanelVisible: !s.aiPanelVisible })),
+  showAiPanel: () => set({ aiPanelVisible: true }),
+  hideAiPanel: () => set({ aiPanelVisible: false }),
   toggleBottom: () => set((s) => ({ bottomVisible: !s.bottomVisible })),
   setSideView: (v) => set({ sideView: v }),
   showSideView: (v) => set({ sideView: v, sidebarVisible: true }),

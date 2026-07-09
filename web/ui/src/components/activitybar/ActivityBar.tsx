@@ -15,23 +15,27 @@ const TOP: { id: View; Icon: typeof Files; label: string }[] = [
 export function ActivityBar({
   active,
   onSelect,
+  aiPanelVisible,
+  onAgent,
   onSettings,
 }: {
   active: View;
   onSelect: (v: View) => void;
+  aiPanelVisible: boolean;
+  onAgent: () => void;
   onSettings: () => void;
 }) {
   return (
     <nav className="material-panel flex w-[52px] shrink-0 flex-col items-center border-r border-border-w py-2">
       {TOP.map(({ id, Icon, label }) => {
-        const on = id === active;
+        const on = id === "agent" ? aiPanelVisible : id === active;
         return (
           <button
             key={id}
             title={label}
             aria-label={label}
             aria-pressed={on}
-            onClick={() => onSelect(id)}
+            onClick={() => id === "agent" ? onAgent() : onSelect(id)}
             className="group relative flex h-11 w-full items-center justify-center"
           >
             {on && (

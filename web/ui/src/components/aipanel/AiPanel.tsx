@@ -2,7 +2,7 @@
    composer + geçmiş çekmecesi. Öneri gelince Değişiklikler'e otomatik geçer. */
 
 import { useEffect, useState } from "react";
-import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2 } from "lucide-react";
+import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2, PanelRightClose } from "lucide-react";
 import { useRun } from "@/state/run";
 import { Pipeline } from "./Pipeline";
 import { Chat } from "./Chat";
@@ -24,7 +24,7 @@ const STAGE_META = {
   error: { label: "EYLEM GEREKİYOR", Icon: CircleAlert, tone: "text-err" },
 } as const;
 
-export function AiPanel() {
+export function AiPanel({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("plan");
   const [historyOpen, setHistoryOpen] = useState(false);
   const diffCount = useRun((s) => s.diffs.length);
@@ -63,6 +63,9 @@ export function AiPanel() {
           className="icon-btn size-7"
         >
           <Clock size={14} />
+        </button>
+        <button onClick={onClose} title="AI panelini kapat" aria-label="AI panelini kapat" className="icon-btn size-7">
+          <PanelRightClose size={14} />
         </button>
         </div>
       </div>
