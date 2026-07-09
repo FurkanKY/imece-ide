@@ -21,7 +21,7 @@ export function Select({
     <RSelect.Root value={value} onValueChange={onChange}>
       <RSelect.Trigger
         aria-label={ariaLabel}
-        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-1 text-text2 outline-none transition-colors hover:border-border-w2 focus-visible:border-accent data-[state=open]:border-accent"
+        className="pressable flex min-w-0 flex-1 items-center gap-1.5 rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-1 text-text2 outline-none hover:border-border-w2 focus-visible:border-accent data-[state=open]:border-accent"
         style={{ fontSize: "var(--t-caption)" }}
       >
         {icon}
@@ -36,8 +36,8 @@ export function Select({
         <RSelect.Content
           position="popper"
           sideOffset={4}
-          className="z-[160] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-[var(--r-md)] border border-border-w bg-panel p-1"
-          style={{ boxShadow: "var(--shadow-2)" }}
+          className="material-panel z-[160] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-[var(--r-md)] border border-border-w p-1"
+          style={{ boxShadow: "var(--bevel-strong), var(--shadow-2)", transformOrigin: "var(--radix-select-content-transform-origin)" }}
         >
           <RSelect.Viewport>
             {options.map((o) => (

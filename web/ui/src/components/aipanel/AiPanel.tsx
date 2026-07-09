@@ -27,7 +27,7 @@ export function AiPanel() {
   return (
     <aside className="relative flex h-full w-full flex-col bg-side">
       {/* başlık */}
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border-w px-3">
+      <div className="material-panel flex h-10 shrink-0 items-center justify-between border-b border-border-w px-3">
         <span
           className="text-muted"
           style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}
@@ -38,7 +38,7 @@ export function AiPanel() {
           onClick={() => setHistoryOpen(true)}
           title="Geçmiş koşular"
           aria-label="Geçmiş"
-          className="rounded p-1 text-faint transition-colors hover:bg-card hover:text-text2"
+          className="icon-btn size-7"
         >
           <Clock size={14} />
         </button>
@@ -47,7 +47,7 @@ export function AiPanel() {
       <Pipeline />
 
       {/* sekmeler */}
-      <div className="flex shrink-0 border-b border-border-w">
+      <div className="flex shrink-0 border-b border-border-w bg-panel/40 px-2 py-1">
         {(
           [
             { id: "chat", label: "Akış", Icon: MessageSquareText, badge: 0 },
@@ -58,8 +58,8 @@ export function AiPanel() {
             key={id}
             onClick={() => setTab(id)}
             className={
-              "relative flex flex-1 items-center justify-center gap-1.5 py-2 transition-colors " +
-              (tab === id ? "text-text" : "text-muted hover:text-text2")
+              "pressable relative flex flex-1 items-center justify-center gap-1.5 rounded-[var(--r-sm)] py-1.5 " +
+              (tab === id ? "bg-card2 text-text" : "text-muted hover:text-text2")
             }
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >

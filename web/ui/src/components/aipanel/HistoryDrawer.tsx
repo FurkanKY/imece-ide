@@ -34,11 +34,11 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0, x: 16 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 16 }}
+          initial={{ opacity: 0, transform: "translateX(16px)" }}
+          animate={{ opacity: 1, transform: "translateX(0)" }}
+          exit={{ opacity: 0, transform: "translateX(16px)" }}
           transition={{ duration: 0.16, ease: [0.33, 1, 0.68, 1] }}
-          className="absolute inset-0 z-20 flex flex-col bg-side"
+          className="material-panel absolute inset-0 z-20 flex flex-col"
         >
           <div className="flex h-9 shrink-0 items-center justify-between border-b border-border-w px-3">
             <span
@@ -47,7 +47,7 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
             >
               <Clock size={12} /> GEÇMİŞ
             </span>
-            <button onClick={onClose} aria-label="Kapat" className="rounded p-1 text-faint hover:bg-card hover:text-text2">
+            <button onClick={onClose} aria-label="Kapat" className="icon-btn size-7">
               <X size={14} />
             </button>
           </div>
@@ -64,7 +64,7 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                     setTask(it.task);
                     onClose();
                   }}
-                  className="mb-1 w-full rounded-[var(--r-sm)] border border-border-w bg-card px-2.5 py-2 text-left transition-colors hover:bg-card2"
+                  className="material-card pressable mb-1 w-full rounded-[var(--r-sm)] border border-border-w px-2.5 py-2 text-left hover:bg-card2"
                 >
                   <div className="flex items-center gap-2">
                     <span

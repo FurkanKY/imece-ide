@@ -22,7 +22,7 @@ export function ActivityBar({
   onSettings: () => void;
 }) {
   return (
-    <nav className="flex w-[52px] shrink-0 flex-col items-center border-r border-border-w bg-activity py-2">
+    <nav className="material-panel flex w-[52px] shrink-0 flex-col items-center border-r border-border-w py-2">
       {TOP.map(({ id, Icon, label }) => {
         const on = id === active;
         return (

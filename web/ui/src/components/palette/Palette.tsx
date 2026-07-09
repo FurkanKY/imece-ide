@@ -92,7 +92,7 @@ export function Palette() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.12 }}
+        transition={{ duration: 0 }}
         className="fixed inset-0 z-[140] flex items-start justify-center bg-black/40 pt-[12vh]"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) close();
@@ -101,9 +101,9 @@ export function Palette() {
         <motion.div
           initial={{ opacity: 0, y: -8, scale: 0.99 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.16, ease: [0.33, 1, 0.68, 1] }}
-          className="w-[560px] overflow-hidden rounded-[var(--r-lg)] border border-border-w bg-panel"
-          style={{ boxShadow: "var(--shadow-3)" }}
+          transition={{ duration: 0 }}
+          className="material-panel w-[560px] overflow-hidden rounded-[var(--r-lg)] border border-border-w"
+          style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
         >
           <div className="flex items-center gap-2.5 border-b border-border-w px-3.5 py-3">
             <Search size={15} className="shrink-0 text-faint" />

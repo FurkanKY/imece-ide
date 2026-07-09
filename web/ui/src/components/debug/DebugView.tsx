@@ -41,10 +41,10 @@ function CtrlBtn({ label, Icon, onClick, danger = false, disabled = false }: {
       onClick={onClick}
       disabled={disabled}
       className={
-        "rounded-[var(--r-xs)] p-1.5 transition-colors disabled:opacity-35 " +
+        "icon-btn size-7 disabled:opacity-35 " +
         (danger
-          ? "text-err hover:bg-card"
-          : "text-text2 hover:bg-card hover:text-text")
+          ? "text-err hover:text-err"
+          : "text-text2")
       }
     >
       <Icon size={15} strokeWidth={2} />
@@ -170,7 +170,7 @@ export function DebugView() {
 
       {/* kontrol şeridi / başlat */}
       {active ? (
-        <div className="mx-2.5 mb-2 flex items-center gap-0.5 rounded-[var(--r-sm)] border border-border-w bg-card px-1 py-0.5">
+        <div className="material-card mx-2.5 mb-2 flex items-center gap-0.5 rounded-[var(--r-sm)] border border-border-w px-1 py-0.5">
           <CtrlBtn label="Devam (F5)" Icon={Play} onClick={dbg.cont} disabled={!stopped} />
           <CtrlBtn label="Üzerinden Adımla (F10)" Icon={CornerDownRight} onClick={dbg.next} disabled={!stopped} />
           <CtrlBtn label="İçine Gir (F11)" Icon={ArrowDownToDot} onClick={dbg.stepIn} disabled={!stopped} />
@@ -182,7 +182,7 @@ export function DebugView() {
         <div className="px-2.5 pb-1">
           <button
             onClick={() => void dbg.start(activeRel)}
-            className="flex w-full items-center justify-center gap-2 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent transition-opacity hover:opacity-90"
+            className="pressable flex w-full items-center justify-center gap-2 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2"
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
             <Bug size={14} strokeWidth={2} /> Debug Başlat (F5)
@@ -264,7 +264,7 @@ export function DebugView() {
             <button
               onClick={dbg.clearBreakpoints}
               title="Tümünü kaldır"
-              className="ml-auto rounded p-1 text-faint transition-colors hover:bg-card hover:text-err"
+              className="icon-btn ml-auto size-6 hover:text-err"
             >
               <Trash2 size={12} />
             </button>
@@ -299,7 +299,7 @@ export function DebugView() {
                 <button
                   onClick={() => dbg.removeBreakpoint(path, line)}
                   title="Kaldır"
-                  className="rounded p-0.5 text-faint opacity-0 transition-opacity hover:text-err focus-visible:opacity-100 group-hover:opacity-100"
+                  className="icon-btn size-5 opacity-0 transition-opacity hover:text-err focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <X size={11} />
                 </button>

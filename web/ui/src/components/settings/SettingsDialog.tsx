@@ -51,13 +51,13 @@ function Toggle({ on, onChange, ariaLabel }: {
       aria-label={ariaLabel}
       onClick={() => onChange(!on)}
       className={
-        "relative h-5 w-9 shrink-0 rounded-[var(--r-pill)] border transition-colors " +
+        "pressable relative h-5 w-9 shrink-0 rounded-[var(--r-pill)] border transition-colors " +
         (on ? "border-accent bg-accentdim" : "border-border-w2 bg-field")
       }
     >
       <span
         className={
-          "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full transition-all " +
+          "absolute top-1/2 size-3.5 -translate-y-1/2 rounded-full transition-[left,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] " +
           (on ? "left-[18px] bg-accent" : "left-[3px] bg-muted")
         }
       />
@@ -77,7 +77,7 @@ function Segmented<T extends string>({ value, options, onChange }: {
           key={o.id}
           onClick={() => onChange(o.id)}
           className={
-            "rounded-[6px] px-2.5 py-1 transition-colors " +
+            "pressable rounded-[6px] px-2.5 py-1 transition-colors " +
             (value === o.id ? "bg-card2 text-text" : "text-muted hover:text-text2")
           }
           style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-caption)" }}
@@ -116,7 +116,7 @@ export function SettingsDialog() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.98 }}
             transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
-            className="w-[460px] rounded-[var(--r-lg)] border border-border-w bg-panel"
+            className="material-panel w-[460px] rounded-[var(--r-lg)] border border-border-w"
             style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
             role="dialog"
             aria-modal="true"
@@ -131,7 +131,7 @@ export function SettingsDialog() {
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Kapat"
-                className="rounded p-1 text-faint hover:bg-card hover:text-text2"
+                className="icon-btn size-7"
               >
                 <X size={15} />
               </button>
@@ -146,7 +146,7 @@ export function SettingsDialog() {
                       title={a.id}
                       aria-label={`Accent: ${a.id}`}
                       onClick={() => void update({ accent: a.id })}
-                      className="flex size-6 items-center justify-center rounded-full border transition-transform hover:scale-110"
+                      className="pressable flex size-6 items-center justify-center rounded-full border"
                       style={{
                         background: a.color,
                         borderColor: prefs.accent === a.id ? "white" : "transparent",

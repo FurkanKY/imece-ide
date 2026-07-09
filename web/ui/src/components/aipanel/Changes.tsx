@@ -72,7 +72,7 @@ export function Changes() {
         })}
       </div>
 
-      <div className="border-t border-border-w p-2.5">
+      <div className="material-panel border-t border-border-w p-2.5">
         {verdict && (
           <div
             className={
@@ -88,14 +88,14 @@ export function Changes() {
           <button
             onClick={() => void apply()}
             disabled={!canApply}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent transition-all hover:bg-accent2 disabled:opacity-40"
+            className="pressable flex flex-1 items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2 disabled:opacity-40"
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
             <Check size={14} strokeWidth={2.2} /> Uygula ({checkedCount})
           </button>
           <button
             onClick={() => void reject()}
-            className="flex items-center justify-center gap-1.5 rounded-[var(--r-sm)] border border-border-w2 px-3 py-1.5 text-text2 transition-colors hover:bg-card"
+            className="pressable flex items-center justify-center gap-1.5 rounded-[var(--r-sm)] border border-border-w2 px-3 py-1.5 text-text2 hover:bg-card"
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
             <X size={14} /> Vazgeç

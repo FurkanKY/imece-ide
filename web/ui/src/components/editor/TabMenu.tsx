@@ -13,7 +13,7 @@ function Item(props: { Icon: LucideIcon; label: string; onSelect: () => void }) 
   return (
     <ContextMenu.Item
       onSelect={props.onSelect}
-      className="flex cursor-default select-none items-center gap-2.5 rounded-[var(--r-xs)] px-2.5 py-1.5 text-text2 outline-none data-[highlighted]:bg-card2 data-[highlighted]:text-text"
+      className="flex cursor-default select-none items-center gap-2.5 rounded-[var(--r-xs)] px-2.5 py-1.5 text-text2 outline-none transition-colors data-[highlighted]:bg-card2 data-[highlighted]:text-text"
       style={{ fontSize: "var(--t-label)" }}
     >
       <props.Icon size={14} strokeWidth={1.9} className="shrink-0 opacity-80" />
@@ -31,8 +31,8 @@ export function TabMenu({ rel, children }: { rel: string; children: React.ReactN
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
-          className="z-[120] min-w-[220px] rounded-[var(--r-md)] border border-border-w bg-panel p-1"
-          style={{ boxShadow: "var(--shadow-2)" }}
+          className="material-panel z-[120] min-w-[220px] rounded-[var(--r-md)] border border-border-w p-1"
+          style={{ boxShadow: "var(--bevel-strong), var(--shadow-2)" }}
         >
           <Item Icon={X} label="Kapat" onSelect={() => ed().close(rel)} />
           <Item Icon={XCircle} label="Diğerlerini Kapat" onSelect={() => ed().closeOthers(rel)} />

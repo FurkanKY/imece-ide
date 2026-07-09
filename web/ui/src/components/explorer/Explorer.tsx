@@ -146,7 +146,7 @@ function HeaderAction({ Icon, label, onClick }: {
       title={label}
       aria-label={label}
       onClick={onClick}
-      className="rounded p-1 text-faint opacity-0 transition-all hover:bg-card hover:text-text2 focus-visible:opacity-100 group-hover/head:opacity-100"
+      className="icon-btn size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100"
     >
       <Icon size={13} strokeWidth={1.9} />
     </button>
@@ -163,7 +163,7 @@ export function Explorer() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="group/head flex h-8 shrink-0 items-center pl-3 pr-1.5">
+      <div className="material-panel group/head flex h-8 shrink-0 items-center border-b border-border-w pl-3 pr-1.5">
         <span
           className="min-w-0 flex-1 truncate text-muted"
           style={{

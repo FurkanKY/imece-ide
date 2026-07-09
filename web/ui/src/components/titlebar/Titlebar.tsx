@@ -27,7 +27,7 @@ function RunButton() {
       title={running ? "Koşuyu durdur (Shift+F5)" : "Çalıştır (F5)"}
       aria-label={running ? "Koşuyu durdur" : "Çalıştır"}
       className={
-        "ml-2 flex h-[26px] w-[30px] items-center justify-center rounded-[var(--r-sm)] border transition-colors " +
+        "pressable ml-2 flex h-[26px] w-[30px] items-center justify-center rounded-[var(--r-sm)] border " +
         (running
           ? "border-err/40 text-err hover:bg-err/10"
           : "border-border-w text-muted hover:border-border-w2 hover:bg-card hover:text-accent")
@@ -108,7 +108,7 @@ export function Titlebar({ maximized }: { maximized: boolean }) {
       <button
         data-no-drag
         onClick={() => openCommandsPalette()}
-        className="group flex w-[340px] max-w-[36vw] items-center gap-2 rounded-[var(--r-sm)] border border-border-w bg-field px-3 py-[5px] transition-colors hover:border-border-w2 hover:bg-card"
+        className="pressable group flex w-[340px] max-w-[36vw] items-center gap-2 rounded-[var(--r-sm)] border border-border-w bg-field px-3 py-[5px] hover:border-border-w2 hover:bg-card"
         title="Komut paleti (Ctrl+K)"
       >
         <Search size={12.5} className="shrink-0 text-faint" />

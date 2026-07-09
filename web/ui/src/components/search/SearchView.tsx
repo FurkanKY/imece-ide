@@ -21,8 +21,8 @@ function OptionToggle({ on, label, Icon, onClick }: {
       aria-pressed={on}
       onClick={onClick}
       className={
-        "rounded p-1 transition-colors " +
-        (on ? "bg-accentdim text-accent" : "text-faint hover:bg-card hover:text-text2")
+        "icon-btn size-6 " +
+        (on ? "bg-accentdim text-accent hover:bg-accentdim hover:text-accent" : "")
       }
     >
       <Icon size={13} strokeWidth={2} />
@@ -63,7 +63,7 @@ export function SearchView() {
   return (
     <div className="flex h-full flex-col">
       <div
-        className="flex h-8 shrink-0 items-center px-3 text-muted"
+        className="material-panel flex h-8 shrink-0 items-center border-b border-border-w px-3 text-muted"
         style={{
           fontSize: "var(--t-overline)",
           fontWeight: "var(--w-overline)",
@@ -75,7 +75,7 @@ export function SearchView() {
 
       {/* sorgu satırı */}
       <div className="px-2.5 pb-2">
-        <div className="flex items-center gap-1 rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-1 transition-colors focus-within:border-accent">
+        <div className="material-card flex items-center gap-1 rounded-[var(--r-sm)] border border-border-w px-2 py-1 transition-colors focus-within:border-accent">
           <Search size={12.5} className="shrink-0 text-faint" />
           <input
             ref={inputRef}
@@ -91,7 +91,7 @@ export function SearchView() {
             style={{ fontSize: "var(--t-label)" }}
           />
           {s.searching ? (
-            <button onClick={() => void s.cancel()} title="Durdur" className="rounded p-0.5 text-faint hover:text-err">
+            <button onClick={() => void s.cancel()} title="Durdur" className="icon-btn size-5 hover:text-err">
               <X size={12} />
             </button>
           ) : (
