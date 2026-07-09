@@ -46,13 +46,22 @@ function Workspace() {
   const setSidebarWidth = useUi((s) => s.setSidebarWidth);
   const setAiPanelWidth = useUi((s) => s.setAiPanelWidth);
   const setBottomHeight = useUi((s) => s.setBottomHeight);
+  const showAiPanel = useUi((s) => s.showAiPanel);
+  const hideAiPanel = useUi((s) => s.hideAiPanel);
   const ease = [0.33, 1, 0.68, 1] as const;
   // splitter sürüklerken animasyon devre dışı — boyut anında izler
   const tr = { duration: 0, ease };
 
+  useEffect(() => {
+    const closeForNarrow = () => { if (window.innerWidth <= 1050) hideAiPanel(); };
+    closeForNarrow();
+    window.addEventListener("resize", closeForNarrow);
+    return () => window.removeEventListener("resize", closeForNarrow);
+  }, [hideAiPanel]);
+
   return (
-    <div className="flex min-h-0 flex-1">
-      <ActivityBar active={view} onSelect={setView} onSettings={() => setSettingsOpen(true)} />
+    <div className="relative flex min-h-0 flex-1">
+      <ActivityBar active={view} onSelect={setView} aiPanelVisible={aiPanelVisible} onAgent={showAiPanel} onSettings={() => setSettingsOpen(true)} />
       <AnimatePresence initial={false}>
         {sidebarVisible && (
           <motion.aside
@@ -131,6 +140,7 @@ function Workspace() {
         </AnimatePresence>
       </div>
       {aiPanelVisible && (
+        <div className="workspace-ai-splitter">
         <Splitter
           orientation="col"
           reverse
@@ -140,6 +150,7 @@ function Workspace() {
           onChange={setAiPanelWidth}
           label="AI paneli genişliği"
         />
+        </div>
       )}
       <AnimatePresence initial={false}>
         {aiPanelVisible && (
@@ -149,10 +160,10 @@ function Workspace() {
             animate={{ width: aiPanelWidth }}
             exit={{ width: 0 }}
             transition={tr}
-            className="shrink-0 overflow-hidden"
+            className="workspace-ai-panel shrink-0 overflow-hidden"
           >
             <div className="h-full" style={{ width: aiPanelWidth }}>
-              <AiPanel />
+                <AiPanel onClose={hideAiPanel} />
             </div>
           </motion.div>
         )}
