@@ -64,6 +64,8 @@ Ayrıntı → [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)
 | [OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md) | Multi-agent optimizasyon teknikleri |
 | [MODELS.md](docs/MODELS.md) | Model sağlayıcıları, çalışan model adları, fiyatlandırma |
 | [ROADMAP.md](docs/ROADMAP.md) | Yol haritası |
+| [IDE-PLUS-PLAN.md](docs/IDE-PLUS-PLAN.md) | **Aktif program (P7–P10)**: LSP · F5/debug · eşli programlama · maliyet panosu |
+| [AGENTIC-PLAN.md](docs/AGENTIC-PLAN.md) | **Sıradaki program (P11–P13)**: agentic araç döngüsü · bağlam motoru · orkestrasyon 2.0 |
 | [DESIGN.md](docs/DESIGN.md) | Tasarım tokenları + ASTRYX/Linear referans kalibrasyonu |
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Çalışma kuralları + **dokümantasyon güncelleme kuralı** |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Sürüm/iterasyon günlüğü |
