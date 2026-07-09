@@ -1,13 +1,14 @@
 /* ActivityBar — sol dikey ikon şeridi (VS Code deseni). P1'de görünümler tekli;
    P2/P4'te sohbet-paneli/arama görünümleri eklenir. */
 
-import { Files, Search, GitBranch, Bot, Settings } from "lucide-react";
+import { Files, Search, GitBranch, Bug, Bot, Settings } from "lucide-react";
 import type { SideView as View } from "@/state/ui";
 
 const TOP: { id: View; Icon: typeof Files; label: string }[] = [
   { id: "explorer", Icon: Files, label: "Gezgin" },
   { id: "search", Icon: Search, label: "Ara" },
   { id: "scm", Icon: GitBranch, label: "Kaynak denetimi" },
+  { id: "debug", Icon: Bug, label: "Çalıştır ve Debug" },
   { id: "agent", Icon: Bot, label: "AI ekibi" },
 ];
 

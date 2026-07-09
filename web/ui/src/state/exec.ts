@@ -25,6 +25,25 @@ export function clearExecOutput() {
   chunkCb?.("\x1b[2J\x1b[3J\x1b[H");
 }
 
+/* ---- dış koşu kanalı (P8.2 debug): debugger çıktısı aynı ÇIKTI sekmesine akar ---- */
+
+export function beginExternalRun(label: string) {
+  useExec.setState({
+    execId: "external", command: label, running: true,
+    exitCode: null, durationS: null, raw: "",
+  });
+  chunkCb?.("\x1b[2J\x1b[3J\x1b[H");
+}
+
+export function feedExternalOutput(data: string) {
+  useExec.setState((s) => ({ raw: (s.raw + data).slice(-RAW_MAX) }));
+  chunkCb?.(data);
+}
+
+export function endExternalRun(code: number | null, durationS: number) {
+  useExec.setState({ running: false, exitCode: code ?? 0, durationS });
+}
+
 interface ExecState {
   execId: string | null;
   command: string;
@@ -80,6 +99,12 @@ export const useExec = create<ExecState>((set, get) => ({
   },
 
   stop: async () => {
+    // ÇIKTI sekmesi bir debug koşusunu gösteriyorsa durdurma oraya gider
+    if (get().execId === "external") {
+      const { useDebug } = await import("@/state/debug");
+      void useDebug.getState().stop();
+      return;
+    }
     try {
       await bridge.call("exec.stop", {});
     } catch {

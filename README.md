@@ -90,7 +90,7 @@ shell.py           giriş (--dev = Vite HMR + DevTools)
 webhost/           PySide6 host: scheme (app://) · bridge (RPC) · jsonrpc (LSP/DAP
                    çerçeveleme) · window (frameless + kapatma koruması) · state (aktif
                    proje) · watcher (fs.changed) · api/ (app·settings·project·fs·session·
-                   run·history·terminal·search·scm·lsp·exec)
+                   run·history·terminal·search·scm·lsp·exec·debug)
 web/ui/            React+TS+Vite+Tailwind UI: bridge/ (protocol+qt+mock) · state/ (zustand)
                    · components/ (titlebar·activitybar·explorer·editor·scm·search·aipanel·
                    bottompanel·statusbar·welcome·palette·dialogs·toasts·settings) ·

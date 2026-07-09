@@ -176,6 +176,11 @@ class ShellWindow(QMainWindow):
             exec_api.shutdown()
         except Exception:
             pass
+        try:
+            from webhost.api import debug as debug_api
+            debug_api.shutdown()
+        except Exception:
+            pass
         super().closeEvent(ev)
 
     # ---------------- devtools (--dev) ----------------

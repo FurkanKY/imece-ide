@@ -92,21 +92,68 @@ const MAP: Record<string, Handler> = {
     e.preventDefault();
     useUi.getState().toggleWordWrap();
   },
-  // ---- F5 çalıştır (P8.1): F5 aktif dosya (yoksa proje) · Ctrl+F5 proje · Shift+F5 durdur ----
+  // ---- Koş & Debug (P8.1 + P8.2, VS Code düzeni) ----
+  // F5: debug oturumu varsa DEVAM; .py aktifse DEBUG başlat; değilse exec koş.
   "f5": async (e) => {
     e.preventDefault();
+    const { useDebug } = await import("@/state/debug");
+    const dbg = useDebug.getState();
+    if (dbg.status === "stopped") {
+      dbg.cont();
+      return;
+    }
+    if (dbg.status === "running" || dbg.status === "starting") return; // koşuyor — bekle
+    const rel = useEditor.getState().activeRel;
+    if (rel?.endsWith(".py")) {
+      void dbg.start(rel);
+      return;
+    }
     const { useExec } = await import("@/state/exec");
-    void useExec.getState().run(useEditor.getState().activeRel);
+    void useExec.getState().run(rel);
   },
+  // Ctrl+F5: debugsuz koş (proje komutu — P8.1 davranışı korunur)
   "mod+f5": async (e) => {
     e.preventDefault();
     const { useExec } = await import("@/state/exec");
     void useExec.getState().run();
   },
+  // Shift+F5: debug oturumu varsa onu, yoksa exec koşusunu durdur
   "shift+f5": async (e) => {
     e.preventDefault();
+    const { useDebug } = await import("@/state/debug");
+    if (useDebug.getState().status !== "idle") {
+      void useDebug.getState().stop();
+      return;
+    }
     const { useExec } = await import("@/state/exec");
     void useExec.getState().stop();
+  },
+  // F9: imleç satırında breakpoint aç/kapat
+  "f9": async (e) => {
+    e.preventDefault();
+    const rel = useEditor.getState().activeRel;
+    if (!rel) return;
+    const { getActiveCodeEditor } = await import("@/components/editor/Editor");
+    const line = getActiveCodeEditor()?.getPosition()?.lineNumber;
+    if (!line) return;
+    const { useDebug } = await import("@/state/debug");
+    useDebug.getState().toggleBreakpoint(rel, line);
+  },
+  // F10 / F11 / Shift+F11: adımlama (yalnız durmuşken)
+  "f10": async (e) => {
+    e.preventDefault();
+    const { useDebug } = await import("@/state/debug");
+    if (useDebug.getState().status === "stopped") useDebug.getState().next();
+  },
+  "f11": async (e) => {
+    e.preventDefault();
+    const { useDebug } = await import("@/state/debug");
+    if (useDebug.getState().status === "stopped") useDebug.getState().stepIn();
+  },
+  "shift+f11": async (e) => {
+    e.preventDefault();
+    const { useDebug } = await import("@/state/debug");
+    if (useDebug.getState().status === "stopped") useDebug.getState().stepOut();
   },
 };
 

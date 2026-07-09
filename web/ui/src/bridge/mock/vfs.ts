@@ -13,6 +13,7 @@ export const VFS: VNode = {
     },
     "utils.ts": `export const clamp = (n: number, lo: number, hi: number) =>\n  Math.max(lo, Math.min(hi, n));\n`,
   },
+  "main.py": `def topla(a, b):\n    sonuc = a + b\n    return sonuc\n\nprint("bas")\nx = topla(2, 3)\nprint("son", x)\n`,
   "README.md": `# Demo API\n\nMock bridge ile çalışan örnek proje.\n\n- \`src/\` kaynak\n- \`package.json\` bağımlılıklar\n`,
   "package.json": `{\n  "name": "demo-api",\n  "version": "1.0.0",\n  "type": "module"\n}\n`,
   ".env.example": `API_KEY=\nPORT=3000\n`,

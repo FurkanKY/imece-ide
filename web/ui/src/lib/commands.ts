@@ -2,9 +2,9 @@
    keymap → commands → store'lar). */
 
 import {
-  FolderOpen, GitBranch, Play, Save, FileSearch, FilePlus2, FolderPlus, PanelLeft,
-  PanelRight, Search, Settings, SlidersHorizontal, Square, TerminalSquare,
-  WrapText, X, ZoomIn, ZoomOut,
+  Bug, CircleDot, FolderOpen, GitBranch, Play, Save, FileSearch, FilePlus2,
+  FolderPlus, PanelLeft, PanelRight, Search, Settings, SlidersHorizontal, Square,
+  TerminalSquare, WrapText, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
@@ -147,10 +147,48 @@ function buildCommands(): Command[] {
       },
     );
   }
+  if (ws.root) {
+    cmds.push(
+      // ---- debug (P8.2) ----
+      {
+        id: "debug-view", label: "Çalıştır ve Debug Görünümü", hint: "kenar çubuğu",
+        Icon: Bug, run: () => ui.showSideView("debug"),
+      },
+      {
+        id: "debug-start", label: "Debug: Başlat", hint: "F5 (.py)",
+        Icon: Bug,
+        run: async () => {
+          const { useDebug } = await import("@/state/debug");
+          void useDebug.getState().start(useEditor.getState().activeRel);
+        },
+      },
+      {
+        id: "debug-stop", label: "Debug: Durdur", hint: "Shift+F5",
+        Icon: Square,
+        run: async () => {
+          const { useDebug } = await import("@/state/debug");
+          void useDebug.getState().stop();
+        },
+      },
+    );
+  }
   if (ed.activeRel) {
     cmds.push(
       {
-        id: "run-file", label: "Çalıştır: Aktif Dosya", hint: "F5",
+        id: "toggle-bp", label: "Breakpoint Ekle/Kaldır", hint: "F9",
+        Icon: CircleDot,
+        run: async () => {
+          const rel = useEditor.getState().activeRel;
+          if (!rel) return;
+          const { getActiveCodeEditor } = await import("@/components/editor/Editor");
+          const line = getActiveCodeEditor()?.getPosition()?.lineNumber;
+          if (!line) return;
+          const { useDebug } = await import("@/state/debug");
+          useDebug.getState().toggleBreakpoint(rel, line);
+        },
+      },
+      {
+        id: "run-file", label: "Çalıştır: Aktif Dosya (debugsuz)", hint: "▶",
         Icon: Play,
         run: async () => {
           const { useExec } = await import("@/state/exec");

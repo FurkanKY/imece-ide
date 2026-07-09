@@ -13,6 +13,7 @@ import { ActivityBar } from "@/components/activitybar/ActivityBar";
 import { Explorer } from "@/components/explorer/Explorer";
 import { SearchView } from "@/components/search/SearchView";
 import { ScmView } from "@/components/scm/ScmView";
+import { DebugView } from "@/components/debug/DebugView";
 import { Editor } from "@/components/editor/Editor";
 import { StatusBar } from "@/components/statusbar/StatusBar";
 import { Welcome } from "@/components/welcome/Welcome";
@@ -71,6 +72,8 @@ function Workspace() {
                 <SearchView />
               ) : view === "scm" ? (
                 <ScmView />
+              ) : view === "debug" ? (
+                <DebugView />
               ) : (
                 <div className="p-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
                   Bu görünüm sonraki fazda gelecek.
@@ -178,6 +181,8 @@ export default function App() {
       installLsp(); // P7: Python dil sunucusu (native'de; mock'ta no-op)
       const { useExec } = await import("@/state/exec");
       useExec.getState().install(); // P8.1: exec.output/exited abonelikleri
+      const { useDebug } = await import("@/state/debug");
+      useDebug.getState().install(); // P8.2: debug.stopped/output/terminated
       useRun.getState().install();
       void useRun.getState().loadProviders();
       await loadSettings();
