@@ -24,6 +24,8 @@ interface WorkspaceState {
   children: Record<string, DirEntry[]>;
   expanded: Set<string>;
   loading: Set<string>;
+  /** rel → son klasör yükleme hatası; başarılı retry'da temizlenir */
+  errors: Record<string, string>;
   openProject: (path: string) => Promise<void>;
   pickAndOpen: () => Promise<void>;
   toggleDir: (rel: string) => Promise<void>;
@@ -45,10 +47,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   children: {},
   expanded: new Set(),
   loading: new Set(),
+  errors: {},
 
   openProject: async (path) => {
     const { root, name } = await bridge.call("project.open", { path });
-    set({ root, name, children: {}, expanded: new Set(), loading: new Set() });
+    set({ root, name, children: {}, expanded: new Set(), loading: new Set(), errors: {} });
     await get().loadDir("");
     // önceki oturumun sekmelerini geri yükle
     const { restoreSession } = await import("@/lib/session");
@@ -61,19 +64,26 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   loadDir: async (rel) => {
-    set((s) => ({ loading: new Set(s.loading).add(rel) }));
+    set((s) => {
+      const errors = { ...s.errors };
+      delete errors[rel];
+      return { loading: new Set(s.loading).add(rel), errors };
+    });
     try {
       const { entries } = await bridge.call("fs.listDir", { rel });
       set((s) => {
         const loading = new Set(s.loading);
         loading.delete(rel);
-        return { children: { ...s.children, [rel]: entries }, loading };
+        const errors = { ...s.errors };
+        delete errors[rel];
+        return { children: { ...s.children, [rel]: entries }, loading, errors };
       });
-    } catch {
+    } catch (e) {
       set((s) => {
         const loading = new Set(s.loading);
         loading.delete(rel);
-        return { loading };
+        const message = e instanceof Error ? e.message : "Klasör yüklenemedi.";
+        return { loading, errors: { ...s.errors, [rel]: message } };
       });
     }
   },
