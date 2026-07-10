@@ -2,12 +2,13 @@
    aktif dosyada sol accent şeridi. Klasör tıkla → genişle; dosya tıkla → aç. */
 
 import { useState } from "react";
-import { ChevronRight, ChevronsDownUp, FilePlus2, FolderPlus, Folder, FolderOpen, Loader2, RefreshCw } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, CircleAlert, FilePlus2, FolderPlus, Folder, FolderOpen, Loader2, RefreshCw } from "lucide-react";
 import { DirEntry } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
 import { useEditor } from "@/state/editor";
 import { useScmDecorations, SCM_STATUS } from "@/state/scm";
 import { fileIcon } from "@/lib/fileIcons";
+import { Button, EmptyState, IconButton, PanelHeader, Spinner } from "@/components/ui";
 import { ExplorerMenu } from "./ExplorerMenu";
 
 const INDENT = 12;
@@ -20,7 +21,7 @@ type Deco = { files: Map<string, string>; dirs: Set<string> };
 let dragSrc: string | null = null;
 
 function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Deco }) {
-  const { expanded, children, loading, toggleDir, moveEntry } = useWorkspace();
+  const { expanded, children, loading, errors, toggleDir, loadDir, moveEntry, newFile } = useWorkspace();
   const openFile = useEditor((s) => s.open);
   const activeRel = useEditor((s) => s.activeRel);
   const [dropOver, setDropOver] = useState(false);
@@ -28,6 +29,8 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
   const isOpen = expanded.has(entry.rel);
   const isActive = !entry.isDir && activeRel === entry.rel;
   const isLoading = loading.has(entry.rel);
+  const dirChildren = entry.isDir ? children[entry.rel] : undefined;
+  const dirError = entry.isDir ? errors[entry.rel] : undefined;
   const scmStatus = entry.isDir ? null : deco.files.get(entry.rel) ?? null;
   const scmColor = scmStatus ? SCM_STATUS[scmStatus]?.color : null;
   const dirChanged = entry.isDir && deco.dirs.has(entry.rel);
@@ -38,7 +41,7 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
   };
 
   const { Icon, color } = entry.isDir
-    ? { Icon: isOpen ? FolderOpen : Folder, color: "#7a8aa0" }
+    ? { Icon: isOpen ? FolderOpen : Folder, color: "var(--muted)" }
     : fileIcon(entry.name);
 
   return (
@@ -70,8 +73,8 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
           dragSrc = null;
         }}
         className={
-          "group relative flex w-full items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pr-2 text-left transition-colors duration-100 " +
-          (isActive ? "bg-accentdim text-text" : "text-text2 hover:bg-card") +
+          "group relative flex w-full items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pr-2 text-left outline-none transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent " +
+          (isActive ? "bg-surface-selected text-text" : "text-text2 hover:bg-surface-hover") +
           (dropOver ? " outline outline-1 outline-accent" : "")
         }
         style={{ paddingLeft: depth * INDENT + 6 }}
@@ -128,34 +131,48 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
         )}
       </button>
       </ExplorerMenu>
-      {entry.isDir && isOpen &&
-        (children[entry.rel] ?? []).map((child) => (
-          <Row key={child.rel} entry={child} depth={depth + 1} deco={deco} />
-        ))}
+      {entry.isDir && isOpen && !isLoading && dirError && (
+        <div style={{ paddingLeft: (depth + 1) * INDENT + 6 }}>
+          <EmptyState
+            icon={CircleAlert}
+            title="Klasör yüklenemedi"
+            description={dirError}
+            action={
+              <Button size="sm" variant="secondary" icon={RefreshCw} onClick={() => void loadDir(entry.rel)}>
+                Tekrar Dene
+              </Button>
+            }
+            className="px-3 py-4"
+          />
+        </div>
+      )}
+      {entry.isDir && isOpen && !isLoading && !dirError && dirChildren?.length === 0 && (
+        <div style={{ paddingLeft: (depth + 1) * INDENT + 6 }}>
+          <EmptyState
+            title="Bu klasör boş"
+            description="Burada henüz dosya veya klasör yok."
+            action={
+              <Button size="sm" variant="secondary" icon={FilePlus2} onClick={() => void newFile(entry.rel)}>
+                Yeni Dosya
+              </Button>
+            }
+            className="px-3 py-4"
+          />
+        </div>
+      )}
+      {entry.isDir && isOpen && !dirError && dirChildren?.map((child) => (
+        <Row key={child.rel} entry={child} depth={depth + 1} deco={deco} />
+      ))}
     </>
   );
 }
 
-function HeaderAction({ Icon, label, onClick }: {
-  Icon: typeof FilePlus2;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-      className="icon-btn size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100"
-    >
-      <Icon size={13} strokeWidth={1.9} />
-    </button>
-  );
-}
-
 export function Explorer() {
-  const { name, children, newFile, newFolder, loadDir } = useWorkspace();
+  const { name, children, loading, errors, newFile, newFolder, loadDir } = useWorkspace();
   const roots = children[""] ?? [];
+  const rootLoaded = Object.prototype.hasOwnProperty.call(children, "");
+  const rootLoading = loading.has("");
+  const rootError = errors[""];
   const deco = useScmDecorations();
 
   const collapseAll = () =>
@@ -163,25 +180,22 @@ export function Explorer() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="material-panel group/head flex h-8 shrink-0 items-center border-b border-border-w pl-3 pr-1.5">
-        <span
-          className="min-w-0 flex-1 truncate text-muted"
-          style={{
-            fontSize: "var(--t-overline)",
-            fontWeight: "var(--w-overline)",
-            letterSpacing: "var(--ls-overline)",
-          }}
-        >
-          {(name ?? "GEZGİN").toLocaleUpperCase("tr")}
-        </span>
-        <HeaderAction Icon={FilePlus2} label="Yeni Dosya" onClick={() => void newFile("")} />
-        <HeaderAction Icon={FolderPlus} label="Yeni Klasör" onClick={() => void newFolder("")} />
-        <HeaderAction Icon={RefreshCw} label="Yenile" onClick={() => void loadDir("")} />
-        <HeaderAction Icon={ChevronsDownUp} label="Tümünü Daralt" onClick={collapseAll} />
-      </div>
+      <PanelHeader
+        title={(name ?? "GEZGİN").toLocaleUpperCase("tr")}
+        className="group/head px-2.5"
+        actions={
+          <>
+            <IconButton size="sm" icon={FilePlus2} label="Yeni Dosya" onClick={() => void newFile("")} className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" />
+            <IconButton size="sm" icon={FolderPlus} label="Yeni Klasör" onClick={() => void newFolder("")} className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" />
+            <IconButton size="sm" icon={RefreshCw} label="Yenile" disabled={rootLoading} onClick={() => void loadDir("")} className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" />
+            <IconButton size="sm" icon={ChevronsDownUp} label="Tümünü Daralt" onClick={collapseAll} className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" />
+          </>
+        }
+      />
       <ExplorerMenu entry={null}>
         <div
           className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
+          aria-busy={rootLoading}
           onDragOver={(e) => {
             // boş alana bırak → köke taşı (satır hedefleri stopPropagation yapar)
             if (dragSrc && dragSrc.includes("/")) e.preventDefault();
@@ -194,10 +208,35 @@ export function Explorer() {
             dragSrc = null;
           }}
         >
-          {roots.length === 0 ? (
-            <p className="px-3 py-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-              Boş klasör. Sağ-tık → Yeni Dosya.
-            </p>
+          {rootLoading && !rootLoaded ? (
+            <EmptyState
+              icon={FolderOpen}
+              title="Klasör yükleniyor"
+              description="Dosya ağacı hazırlanıyor."
+              action={<span role="status" aria-label="Klasör yükleniyor"><Spinner size={16} /></span>}
+            />
+          ) : rootError ? (
+            <EmptyState
+              icon={CircleAlert}
+              title="Klasör yüklenemedi"
+              description={rootError}
+              action={
+                <Button size="sm" variant="secondary" icon={RefreshCw} onClick={() => void loadDir("")}>
+                  Tekrar Dene
+                </Button>
+              }
+            />
+          ) : roots.length === 0 ? (
+            <EmptyState
+              icon={FolderOpen}
+              title="Bu klasör boş"
+              description="Yeni bir dosya oluşturabilir veya sağ tıklayarak klasör ekleyebilirsin."
+              action={
+                <Button size="sm" variant="secondary" icon={FilePlus2} onClick={() => void newFile("")}>
+                  Yeni Dosya
+                </Button>
+              }
+            />
           ) : (
             roots.map((e) => <Row key={e.rel} entry={e} depth={0} deco={deco} />)
           )}
