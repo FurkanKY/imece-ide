@@ -8,7 +8,9 @@ import { useEditor } from "@/state/editor";
 import { useUi, layoutSnapshot, SideView } from "@/state/ui";
 import { confirmDialog } from "@/components/dialogs/dialogs";
 
-const SIDE_VIEWS: SideView[] = ["explorer", "search", "scm", "agent"];
+// Geçerli kenar görünümleri (oturum geri yüklemede beyaz liste). "debug" eklendi
+// (eksikti → debug görünümü kalıcı değildi); ölü "agent" pseudo-view kaldırıldı.
+const SIDE_VIEWS: SideView[] = ["explorer", "search", "scm", "debug"];
 
 export async function restoreSession() {
   try {

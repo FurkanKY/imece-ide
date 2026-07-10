@@ -9,6 +9,7 @@ import { useEditor } from "@/state/editor";
 import { useExec } from "@/state/exec";
 import { openCommandsPalette } from "@/lib/commands";
 import { Logo } from "@/components/brand/Logo";
+import { Kbd } from "@/components/ui";
 import { S } from "@/lib/strings.tr";
 
 /** P8.1: ▶ koş / ■ durdur — proje açıkken görünür (F5 kısayolunun görünür yüzü) */
@@ -116,12 +117,7 @@ export function Titlebar({ maximized }: { maximized: boolean }) {
               style={{ fontSize: "var(--t-caption)" }}>
           {project ?? S.common.noProject}
         </span>
-        <kbd
-          className="shrink-0 rounded border border-border-w bg-card px-1.5 py-px text-faint"
-          style={{ fontSize: "10px", fontFamily: "var(--font-ui)" }}
-        >
-          Ctrl K
-        </kbd>
+        <Kbd className="shrink-0">Ctrl K</Kbd>
       </button>
       <RunButton />
 

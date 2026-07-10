@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import { bridge } from "@/bridge";
 
-export type SideView = "explorer" | "search" | "scm" | "debug" | "agent";
+export type SideView = "explorer" | "search" | "scm" | "debug";
 
 /** panel boyut sınırları (px) */
 export const PANEL_LIMITS = {

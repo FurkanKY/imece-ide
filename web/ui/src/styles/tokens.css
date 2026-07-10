@@ -101,7 +101,7 @@
   --glow-accent-soft: 0 0 14px color-mix(in srgb, var(--accent) 12%, transparent);
 
   /* ---- Pencere ---- */
-  --titlebar-h: 42px;
+  --titlebar-h: 36px; /* kompakt masaüstü IDE yoğunluğu (Phase 3) */
   --window-radius: 8px; /* maximize'da 0'a düşer (.maximized) */
 }
 
