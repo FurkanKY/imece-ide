@@ -94,12 +94,8 @@ function Workspace() {
                 <SearchView />
               ) : view === "scm" ? (
                 <ScmView />
-              ) : view === "debug" ? (
-                <DebugView />
               ) : (
-                <div className="p-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-                  Bu görünüm sonraki fazda gelecek.
-                </div>
+                <DebugView />
               )}
             </div>
           </motion.aside>

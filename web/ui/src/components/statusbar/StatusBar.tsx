@@ -9,6 +9,7 @@ import { useScm } from "@/state/scm";
 import { useUi } from "@/state/ui";
 import { langForPath } from "@/lib/monaco";
 import { useLsp } from "@/lib/lsp";
+import { StatusDot, Badge } from "@/components/ui";
 import { CountUp } from "./CountUp";
 
 /** P7: Python dil sunucusu durumu — yalnız .py dosyası aktifken görünür. */
@@ -36,27 +37,29 @@ export function StatusBar() {
 
   return (
     <footer
-      className="flex h-6 shrink-0 items-center gap-3 border-t border-border-w bg-status px-3 text-muted"
+      className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-border-w bg-status px-3 text-muted"
       style={{ fontSize: "var(--t-caption)" }}
     >
-      {name && <span className="text-text2">{name}</span>}
+      {name && <span className="shrink-0 text-text2">{name}</span>}
       {isRepo && (
         <button
           onClick={() => showSideView("scm")}
           title="Kaynak denetimi (Ctrl+Shift+G)"
-          className="flex items-center gap-1 rounded px-1 transition-colors hover:bg-card hover:text-text2"
+          className="flex min-w-0 shrink items-center gap-1 rounded px-1 transition-colors hover:bg-card hover:text-text2"
         >
-          <GitBranch size={11} />
+          <GitBranch size={11} className="shrink-0" />
           <span className="max-w-[160px] truncate">{branch}</span>
-          {ahead > 0 && <span className="text-faint">↑{ahead}</span>}
-          {changeCount > 0 && (
-            <span style={{ color: "var(--amber)" }}>●{changeCount}</span>
-          )}
+          {ahead > 0 && <span className="shrink-0 text-faint">↑{ahead}</span>}
+          {changeCount > 0 && <Badge tone="warn">{changeCount}</Badge>}
         </button>
       )}
-      {status === "running" && <span className="text-accent">● ekip çalışıyor…</span>}
+      {status === "running" && (
+        <span className="flex shrink-0 items-center gap-1.5 text-accent">
+          <StatusDot tone="accent" pulse /> ekip çalışıyor…
+        </span>
+      )}
       {totals && (
-        <span className="flex items-center gap-2.5 text-text2">
+        <span className="flex shrink-0 items-center gap-2.5 text-text2">
           <span className="flex items-center gap-1">
             <Cpu size={11} className="text-faint" />
             <CountUp value={totals.tokens} format={(v) => `${Math.round(v)} tok`} />
@@ -65,16 +68,21 @@ export function StatusBar() {
             <Coins size={11} className="text-faint" />
             <CountUp value={totals.cost_usd} format={(v) => `$${v.toFixed(4)}`} />
           </span>
-          <span className="text-faint">{totals.latency_s.toFixed(1)} sn</span>
+          {/* süre en düşük öncelik — dar pencerede gizlenir (taşma önleme) */}
+          <span className="hidden text-faint min-[900px]:inline">{totals.latency_s.toFixed(1)} sn</span>
         </span>
       )}
-      <div className="flex-1" />
+      <div className="min-w-2 flex-1" />
       {activeRel && (
-        <>
-          {dirty && <span className="text-warn">● kaydedilmedi</span>}
+        <div className="flex shrink-0 items-center gap-3">
+          {dirty && (
+            <span className="flex items-center gap-1.5 text-warn">
+              <StatusDot tone="warn" /> kaydedilmedi
+            </span>
+          )}
           <LspBadge activeRel={activeRel} />
           <span>{langForPath(activeRel)}</span>
-        </>
+        </div>
       )}
     </footer>
   );

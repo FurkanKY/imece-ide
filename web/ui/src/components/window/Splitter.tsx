@@ -88,11 +88,11 @@ export function Splitter({ orientation, reverse, value, min, max, onChange, labe
       }
       style={{ background: "var(--border)" }}
     >
-      {/* geniş görünmez tutma alanı + hover/aktif accent vurgusu */}
+      {/* geniş görünmez tutma alanı + hover/aktif accent vurgusu (kolay yakalama) */}
       <div
         className={
           "absolute transition-colors duration-150 " +
-          (isCol ? "-left-[2.5px] top-0 h-full w-[6px]" : "-top-[2.5px] left-0 h-[6px] w-full")
+          (isCol ? "-left-[4.5px] top-0 h-full w-[10px]" : "-top-[4.5px] left-0 h-[10px] w-full")
         }
         style={{
           background: active
