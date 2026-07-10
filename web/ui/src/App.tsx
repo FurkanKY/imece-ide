@@ -46,7 +46,7 @@ function Workspace() {
   const setSidebarWidth = useUi((s) => s.setSidebarWidth);
   const setAiPanelWidth = useUi((s) => s.setAiPanelWidth);
   const setBottomHeight = useUi((s) => s.setBottomHeight);
-  const showAiPanel = useUi((s) => s.showAiPanel);
+  const toggleAiPanel = useUi((s) => s.toggleAiPanel);
   const hideAiPanel = useUi((s) => s.hideAiPanel);
   const ease = [0.33, 1, 0.68, 1] as const;
   // splitter sürüklerken animasyon devre dışı — boyut anında izler
@@ -76,7 +76,7 @@ function Workspace() {
 
   return (
     <div className="relative flex min-h-0 flex-1">
-      <ActivityBar active={view} onSelect={setView} aiPanelVisible={aiPanelVisible} onAgent={showAiPanel} onSettings={() => setSettingsOpen(true)} />
+      <ActivityBar active={view} onSelect={setView} aiPanelVisible={aiPanelVisible} onAgent={toggleAiPanel} onSettings={() => setSettingsOpen(true)} />
       <AnimatePresence initial={false}>
         {sidebarVisible && (
           <motion.aside
