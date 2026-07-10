@@ -8,6 +8,7 @@ import { useTerminals } from "@/state/terminal";
 import { useExec, clearExecOutput } from "@/state/exec";
 import { useUi } from "@/state/ui";
 import { bridge } from "@/bridge";
+import { Badge, IconButton, StatusDot } from "@/components/ui";
 import { TermView } from "./TermView";
 import { OutputView } from "./OutputView";
 
@@ -65,18 +66,11 @@ export function BottomPanel() {
 
   const exitBadge =
     exec.running ? (
-      <span className="ml-0.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+      <StatusDot tone="accent" pulse size={6} className="ml-0.5 text-accent" />
     ) : exec.exitCode !== null ? (
-      <span
-        className="ml-0.5 rounded px-1 font-mono"
-        style={{
-          fontSize: "10px",
-          color: exec.exitCode === 0 ? "var(--green)" : "var(--red)",
-          background: exec.exitCode === 0 ? "#4bd48a1a" : "#ff6b741a",
-        }}
-      >
+      <Badge tone={exec.exitCode === 0 ? "ok" : "err"} className="ml-0.5 font-mono">
         {exec.exitCode}
-      </span>
+      </Badge>
     ) : null;
 
   return (
@@ -123,14 +117,13 @@ export function BottomPanel() {
                 </div>
               ))}
             </div>
-            <button
-              onClick={() => void create()}
+            <IconButton
+              size="sm"
+              icon={Plus}
+              label="Yeni terminal"
               title="Yeni terminal (Ctrl+Shift+`)"
-              aria-label="Yeni terminal"
-              className="icon-btn size-6"
-            >
-              <Plus size={14} />
-            </button>
+              onClick={() => void create()}
+            />
           </>
         ) : (
           <>
@@ -142,44 +135,36 @@ export function BottomPanel() {
               )}
             </span>
             {exec.running ? (
-              <button
-                onClick={() => void exec.stop()}
+              <IconButton
+                size="sm"
+                variant="danger"
+                icon={Square}
+                label="Koşuyu durdur"
                 title="Koşuyu durdur (Shift+F5)"
-                aria-label="Koşuyu durdur"
-                className="icon-btn size-6 text-err hover:text-err"
-              >
-                <Square size={13} />
-              </button>
+                className="text-err"
+                onClick={() => void exec.stop()}
+              />
             ) : (
               exec.execId && (
-                <button
-                  onClick={() => void exec.run()}
+                <IconButton
+                  size="sm"
+                  icon={Play}
+                  label="Yeniden koş"
                   title="Yeniden koş (Ctrl+F5)"
-                  aria-label="Yeniden koş"
-                  className="icon-btn size-6"
-                >
-                  <Play size={13} />
-                </button>
+                  onClick={() => void exec.run()}
+                />
               )
             )}
-            <button
-              onClick={clearExecOutput}
-              title="Çıktıyı temizle"
-              aria-label="Çıktıyı temizle"
-              className="icon-btn size-6"
-            >
-              <Eraser size={13} />
-            </button>
+            <IconButton size="sm" icon={Eraser} label="Çıktıyı temizle" onClick={clearExecOutput} />
           </>
         )}
-        <button
-          onClick={toggleBottom}
+        <IconButton
+          size="sm"
+          icon={ChevronDown}
+          label="Paneli daralt"
           title="Paneli daralt (Ctrl+`)"
-          aria-label="Paneli daralt"
-          className="icon-btn size-6"
-        >
-          <ChevronDown size={14} />
-        </button>
+          onClick={toggleBottom}
+        />
       </div>
 
       {/* gövdeler — hepsi mount kalır (scrollback korunur), aktif görünür */}
