@@ -211,13 +211,15 @@ button {
   animation-duration: 0s !important;
 }
 
-/* Dar pencere: AI kararı editörü ezmez; aktivite çubuğundaki AI ikonu drawer'ı açar. */
-@media (max-width: 1050px) {
+/* R5 dar kırılım (≤900px, 820 tier): AI kararı editörü ezmez; ActivityBar AI ikonu
+   drawer'ı açar. 1024 tier'ı bu eşiğin üstünde kaldığından inline sütun korunur. */
+@media (max-width: 900px) {
   .workspace-ai-splitter { display: none; }
   .workspace-ai-panel {
     position: absolute;
     inset: 0 0 0 auto;
     z-index: 12;
+    max-width: 86vw;
     border-left: 1px solid var(--border2);
     box-shadow: var(--shadow-3);
   }

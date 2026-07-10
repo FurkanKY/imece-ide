@@ -24,7 +24,7 @@ import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { AiPanel } from "@/components/aipanel/AiPanel";
 import { BottomPanel } from "@/components/bottompanel/BottomPanel";
 import { useEditor } from "@/state/editor";
-import { useUi, PANEL_LIMITS } from "@/state/ui";
+import { useUi, PANEL_LIMITS, NARROW_BP } from "@/state/ui";
 import { useRun } from "@/state/run";
 
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
@@ -52,12 +52,27 @@ function Workspace() {
   // splitter sürüklerken animasyon devre dışı — boyut anında izler
   const tr = { duration: 0, ease };
 
+  // R5 adaptif düzen: dar kırılıma GİRERKEN AI panel drawer'a düşer + içerik sidebar'ı
+  // ikon-only'ye çöker (kullanıcı sonradan açarsa zorla kapatılmaz). Alt panel her
+  // resize'da viewport yüksekliğine göre yeniden clamp edilir.
   useEffect(() => {
-    const closeForNarrow = () => { if (window.innerWidth <= 1050) hideAiPanel(); };
-    closeForNarrow();
-    window.addEventListener("resize", closeForNarrow);
-    return () => window.removeEventListener("resize", closeForNarrow);
-  }, [hideAiPanel]);
+    const collapseForNarrow = () => {
+      const ui = useUi.getState();
+      if (ui.aiPanelVisible) ui.hideAiPanel();
+      if (ui.sidebarVisible) ui.hideSidebar();
+    };
+    if (window.innerWidth <= NARROW_BP) collapseForNarrow();
+    useUi.getState().clampToViewport();
+    let prev = window.innerWidth;
+    const onResize = () => {
+      const w = window.innerWidth;
+      if (w <= NARROW_BP && prev > NARROW_BP) collapseForNarrow();
+      useUi.getState().clampToViewport();
+      prev = w;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -215,6 +230,7 @@ export default function App() {
           openProject,
           editor: () => useEditor.getState(),
           run: () => useRun.getState(),
+          ui: () => useUi.getState(),
           exec: () => import("@/state/exec").then((m) => m.useExec.getState()),
           monaco: () => import("@/lib/monaco").then((m) => m.initMonaco()),
           bridge,

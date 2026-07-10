@@ -14,6 +14,17 @@ export const PANEL_LIMITS = {
   bottom: { min: 120, max: 520, def: 240 },
 } as const;
 
+/** R5 dar kırılımı: bu genişliğin altında AI paneli overlay drawer, içerik sidebar'ı
+    ikon-only'ye çöker (ActivityBar kalır). 1024 üstte inline, 820 altta drawer. */
+export const NARROW_BP = 900;
+
+/** Alt panel üst sınırı ekran yüksekliğine göre clamp edilir (R5): görünür alanın
+    ~%60'ından fazlasını kaplamaz; kısa ekranda editör/karar boğulmaz. */
+export function bottomMax(): number {
+  const byViewport = Math.round((typeof window !== "undefined" ? window.innerHeight : 900) * 0.6);
+  return Math.min(PANEL_LIMITS.bottom.max, Math.max(PANEL_LIMITS.bottom.min, byViewport));
+}
+
 /** oturuma yazılan/oturumdan dönen düzen alanları */
 export interface LayoutState {
   sideView: SideView;
@@ -43,9 +54,12 @@ interface UiState extends LayoutState {
   wordWrap: boolean;
   toggleWordWrap: () => void;
   toggleSidebar: () => void;
+  hideSidebar: () => void;
   toggleAiPanel: () => void;
   showAiPanel: () => void;
   hideAiPanel: () => void;
+  /** alt panel yüksekliğini güncel viewport'a göre yeniden clamp et (resize'da) */
+  clampToViewport: () => void;
   /** Composer'a odak iste (command center "Görev ver"): AI panelini açar + nonce artırır */
   composerFocusNonce: number;
   focusComposer: () => void;
@@ -99,6 +113,7 @@ export const useUi = create<UiState>((set) => ({
   setBottomView: (v) => set({ bottomView: v }),
   showBottom: (v) => set({ bottomView: v, bottomVisible: true }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
+  hideSidebar: () => set({ sidebarVisible: false }),
   toggleAiPanel: () => set((s) => ({ aiPanelVisible: !s.aiPanelVisible })),
   showAiPanel: () => set({ aiPanelVisible: true }),
   hideAiPanel: () => set({ aiPanelVisible: false }),
@@ -114,7 +129,9 @@ export const useUi = create<UiState>((set) => ({
   setAiPanelWidth: (w) =>
     set({ aiPanelWidth: clamp(w, PANEL_LIMITS.aiPanel.min, PANEL_LIMITS.aiPanel.max) }),
   setBottomHeight: (h) =>
-    set({ bottomHeight: clamp(h, PANEL_LIMITS.bottom.min, PANEL_LIMITS.bottom.max) }),
+    set({ bottomHeight: clamp(h, PANEL_LIMITS.bottom.min, bottomMax()) }),
+  clampToViewport: () =>
+    set((s) => ({ bottomHeight: clamp(s.bottomHeight, PANEL_LIMITS.bottom.min, bottomMax()) })),
   setResizing: (on) => set({ resizing: on }),
   applyLayout: (l) =>
     set((s) => ({
@@ -127,7 +144,7 @@ export const useUi = create<UiState>((set) => ({
       aiPanelWidth: clamp(
         l.aiPanelWidth ?? s.aiPanelWidth, PANEL_LIMITS.aiPanel.min, PANEL_LIMITS.aiPanel.max),
       bottomHeight: clamp(
-        l.bottomHeight ?? s.bottomHeight, PANEL_LIMITS.bottom.min, PANEL_LIMITS.bottom.max),
+        l.bottomHeight ?? s.bottomHeight, PANEL_LIMITS.bottom.min, bottomMax()),
     })),
 }));
 
