@@ -23,6 +23,11 @@ function TabBar() {
   const diff = useEditor((s) => s.diff);
   // sürükle-sırala (P6.3): HTML5 drag — sürüklenen sekmenin rel'i
   const [dragRel, setDragRel] = useState<string | null>(null);
+  // taşan sekme çubuğunda aktif sekme görünür kalsın (drag sırasında karışmasın)
+  const activeTabRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!dragRel) activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeRel, dragRel]);
   return (
     <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border-w bg-side">
       {diff && <DiffTab path={diff.path} />}
@@ -35,6 +40,7 @@ function TabBar() {
             role="tab"
             aria-selected={on}
             tabIndex={0}
+            ref={on ? activeTabRef : undefined}
             draggable
             onDragStart={(e) => {
               setDragRel(t.rel);
@@ -54,8 +60,8 @@ function TabBar() {
             }}
             onAuxClick={(e) => { if (e.button === 1) close(t.rel); }} // orta tık → kapat
             className={
-              "group relative flex cursor-pointer items-center gap-1.5 border-r border-border-w px-3 transition-colors duration-100 " +
-              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-card hover:text-text2") +
+              "group relative flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-border-w px-3 outline-none transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent " +
+              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-surface-hover hover:text-text2") +
               (dragRel === t.rel ? " opacity-50" : "")
             }
             style={{ fontSize: "var(--t-label)" }}
@@ -68,14 +74,17 @@ function TabBar() {
                 e.stopPropagation();
                 close(t.rel);
               }}
-              className="flex size-4 items-center justify-center rounded hover:bg-card2"
-              aria-label="Sekmeyi kapat"
+              className={
+                "group/close flex size-4 shrink-0 items-center justify-center rounded outline-none hover:bg-card2 focus-visible:ring-1 focus-visible:ring-accent " +
+                (t.dirty || on ? "" : "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100")
+              }
+              aria-label={t.dirty ? "Kaydedilmemiş değişiklik var — sekmeyi kapat" : "Sekmeyi kapat"}
               title="Kapat"
             >
               {t.dirty ? (
-                <Circle size={8} className="fill-text2 text-text2 group-hover:hidden" />
+                <Circle size={8} className="fill-text2 text-text2 group-hover/close:hidden" />
               ) : null}
-              <X size={13} className={t.dirty ? "hidden group-hover:block" : ""} />
+              <X size={13} className={t.dirty ? "hidden group-hover/close:block" : ""} />
             </button>
           </div>
           </TabMenu>
