@@ -1,7 +1,7 @@
 /* Changes — önerilen dosya değişiklikleri: checkbox'lı liste, satıra tık →
    merkez diff (Cursor deseni), Uygula / Vazgeç. changes_panel.py'nin halefi. */
 
-import { FileDiff, FilePlus2, Check, X } from "lucide-react";
+import { FileDiff, FilePlus2, Check, X, RotateCcw, ShieldCheck } from "lucide-react";
 import { useRun } from "@/state/run";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
@@ -11,15 +11,17 @@ export function Changes() {
   const verdict = useRun((s) => s.verdict);
   const status = useRun((s) => s.status);
   const runStage = useRun((s) => s.runStage);
+  const checkpointId = useRun((s) => s.checkpointId);
   const toggle = useRun((s) => s.toggleDiff);
   const apply = useRun((s) => s.apply);
   const reject = useRun((s) => s.reject);
+  const restoreCheckpoint = useRun((s) => s.restoreCheckpoint);
   const openDiff = useEditor((s) => s.openDiff);
   const activeDiff = useEditor((s) => s.diff?.path ?? null);
 
   if (diffs.length === 0) {
     const message = runStage === "applied"
-      ? "Değişiklikler uygulandı. Checkpoint koruması R3 ile bu alana eklenecek."
+      ? "Değişiklikler uygulandı. Bu turun checkpoint'i geri alma için hazır."
       : runStage === "ready"
         ? "Ekip bu tur için uygulanacak dosya önermedi."
         : "Öneri bekleniyor — ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir.";
@@ -29,6 +31,11 @@ export function Changes() {
         <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
           {message}
         </p>
+        {runStage === "applied" && checkpointId && (
+          <button onClick={() => void restoreCheckpoint()} className="pressable mt-1 flex items-center gap-1.5 rounded-[var(--r-sm)] border border-warn/40 px-3 py-1.5 text-warn hover:bg-warn/10" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
+            <RotateCcw size={13} /> Geri Al
+          </button>
+        )}
       </div>
     );
   }
@@ -79,6 +86,9 @@ export function Changes() {
       </div>
 
       <div className="material-panel border-t border-border-w p-2.5">
+        <div className="mb-2 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
+          <ShieldCheck size={12} className="text-ok" /> Uygulamadan önce checkpoint oluşturulur.
+        </div>
         {verdict && (
           <div
             className={
@@ -97,7 +107,7 @@ export function Changes() {
             className="pressable flex flex-1 items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2 disabled:opacity-40"
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
-            <Check size={14} strokeWidth={2.2} /> Uygula ({checkedCount})
+            <Check size={14} strokeWidth={2.2} /> Uygula + checkpoint ({checkedCount})
           </button>
           <button
             onClick={() => void reject()}

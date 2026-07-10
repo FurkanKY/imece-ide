@@ -32,6 +32,11 @@ export function ToastHost() {
               <p className="min-w-0 flex-1 break-words text-text2" style={{ fontSize: "var(--t-label)" }}>
                 {t.text}
               </p>
+              {t.action && (
+                <button onClick={() => { t.action?.run(); dismiss(t.id); }} className="pressable shrink-0 rounded-[var(--r-sm)] bg-accentdim px-2 py-1 text-accent" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
+                  {t.action.label}
+                </button>
+              )}
               <button
                 onClick={() => dismiss(t.id)}
                 aria-label="Kapat"

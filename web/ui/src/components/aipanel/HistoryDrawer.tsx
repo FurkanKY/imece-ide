@@ -3,8 +3,8 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X, Clock } from "lucide-react";
-import { bridge, HistoryItem } from "@/bridge";
+import { X, Clock, RotateCcw, ShieldCheck } from "lucide-react";
+import { bridge, Checkpoint, HistoryItem } from "@/bridge";
 import { useRun } from "@/state/run";
 import { toast } from "@/components/toasts/toasts";
 
@@ -20,13 +20,14 @@ function relTime(ts: number): string {
 
 export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const setTask = useRun((s) => s.setTask);
+  const restoreCheckpoint = useRun((s) => s.restoreCheckpoint);
 
   useEffect(() => {
     if (!open) return;
-    bridge
-      .call("history.list", {})
-      .then((r) => setItems(r.items))
+    void Promise.all([bridge.call("history.list", {}), bridge.call("checkpoint.list", {})])
+      .then(([history, checkpoints]) => { setItems(history.items); setCheckpoints(checkpoints.checkpoints); })
       .catch(() => toast.err("Geçmiş yüklenemedi."));
   }, [open]);
 
@@ -52,6 +53,20 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {checkpoints.length > 0 && (
+              <section className="mb-3">
+                <div className="mb-1 flex items-center gap-1.5 px-1 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}><ShieldCheck size={11} /> CHECKPOINTLER</div>
+                {checkpoints.map((checkpoint) => (
+                  <div key={checkpoint.id} className="material-card mb-1 flex items-center gap-2 rounded-[var(--r-sm)] border border-border-w px-2.5 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-text2" style={{ fontSize: "var(--t-label)" }}>{checkpoint.files.length} dosya · {relTime(checkpoint.ts)}</p>
+                      <p className="truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>{checkpoint.files.join(", ")}</p>
+                    </div>
+                    <button onClick={() => { void restoreCheckpoint(checkpoint.id); }} title="Bu checkpoint'e geri dön" className="icon-btn size-7 text-warn"><RotateCcw size={13} /></button>
+                  </div>
+                ))}
+              </section>
+            )}
             {items.length === 0 ? (
               <p className="px-2 py-3 text-faint" style={{ fontSize: "var(--t-caption)" }}>
                 Henüz koşu yok — bir görev çalıştırınca burada birikir.
