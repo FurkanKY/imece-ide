@@ -32,6 +32,14 @@
   --green: #4bd48a;
   --red: #ff6b74;
   --amber: #e9b45a;
+  --info: var(--accent);
+
+  /* ---- Etkileşim yüzeyleri (primitive katmanı — mevcut icon-btn/card desenini
+     tek isimde toplar; bileşenler ham hex yerine bunları kullanır) ---- */
+  --surface-hover: var(--card);
+  --surface-active: var(--card2);
+  --surface-selected: var(--accentdim);
+  --focus-ring: var(--accent);
 
   /* ---- Aralık (4px grid, density katsayısıyla ölçeklenir) ---- */
   --density: 1;
@@ -145,6 +153,10 @@
   --color-ok: var(--green);
   --color-err: var(--red);
   --color-warn: var(--amber);
+  --color-info: var(--info);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-surface-selected: var(--surface-selected);
   --font-ui: var(--font-ui);
   --font-mono: var(--font-mono);
   --radius-xs: var(--r-xs);
