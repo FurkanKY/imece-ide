@@ -53,8 +53,8 @@ interface ExecState {
   /** ham çıktı (ANSI'li) — OutputView (yeniden) mount olunca baştan yazar */
   raw: string;
   install: () => void;
-  /** rel verilirse dosyayı, verilmezse projeyi koşar */
-  run: (rel?: string | null) => Promise<void>;
+  /** rel verilirse dosyayı, verilmezse projeyi koşar; command verilirse ikisini de geçersiz kılar */
+  run: (rel?: string | null, command?: string) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -85,13 +85,16 @@ export const useExec = create<ExecState>((set, get) => ({
     });
   },
 
-  run: async (rel) => {
+  run: async (rel, command) => {
     try {
       useUi.getState().showBottom("output");
-      const { execId, command } = await bridge.call("exec.run", { rel: rel ?? null });
+      const { execId, command: cmd } = await bridge.call(
+        "exec.run",
+        command ? { rel: null, command } : { rel: rel ?? null },
+      );
       const early = pendingChunks.get(execId) ?? "";
       pendingChunks.clear();
-      set({ execId, command, running: true, exitCode: null, durationS: null, raw: early });
+      set({ execId, command: cmd, running: true, exitCode: null, durationS: null, raw: early });
       if (early) chunkCb?.(early);
     } catch (e) {
       toast.err(e instanceof Error ? e.message : "Çalıştırılamadı.");
