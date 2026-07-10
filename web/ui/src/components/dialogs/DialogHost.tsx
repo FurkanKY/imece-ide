@@ -27,15 +27,15 @@ export function DialogHost() {
     }
   }, [current]);
 
-  if (!current) return <AnimatePresence />;
-
   const cancel = () => {
+    if (!current) return;
     if (current.kind === "confirm") current.resolve(false);
     else current.resolve(null);
     close();
   };
 
   const ok = () => {
+    if (!current) return;
     if (current.kind === "confirm") {
       current.resolve(true);
       close();
@@ -52,7 +52,7 @@ export function DialogHost() {
 
   return (
     <AnimatePresence>
-      <motion.div
+      {current && <motion.div
         key="overlay"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -128,7 +128,7 @@ export function DialogHost() {
             </Button>
           </div>
         </motion.div>
-      </motion.div>
+      </motion.div>}
     </AnimatePresence>
   );
 }
