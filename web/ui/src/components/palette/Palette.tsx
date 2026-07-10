@@ -99,8 +99,8 @@ export function Palette() {
         }}
       >
         <motion.div
-          initial={{ opacity: 0, y: -8, scale: 0.99 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
+          initial={{ opacity: 0, transform: "translateY(-8px) scale(0.99)" }}
+          animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
           transition={{ duration: 0 }}
           className="material-panel w-[560px] overflow-hidden rounded-[var(--r-lg)] border border-border-w"
           style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}

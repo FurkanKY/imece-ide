@@ -25,7 +25,7 @@ export const useToasts = create<ToastState>((set) => ({
   push: (kind, text, ms, action) => {
     const id = nextId++;
     set((s) => ({ toasts: [...s.toasts, { id, kind, text, action }] }));
-    const ttl = ms ?? (kind === "err" ? 6000 : 3500);
+    const ttl = ms ?? (action ? 8000 : kind === "err" ? 6000 : 3500);
     setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
     }, ttl);

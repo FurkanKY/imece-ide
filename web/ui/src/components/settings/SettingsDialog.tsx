@@ -112,9 +112,9 @@ export function SettingsDialog() {
           onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
         >
           <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            initial={{ opacity: 0, transform: "translateY(10px) scale(0.98)" }}
+            animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
+            exit={{ opacity: 0, transform: "translateY(6px) scale(0.98)" }}
             transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
             className="material-panel w-[460px] rounded-[var(--r-lg)] border border-border-w"
             style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}

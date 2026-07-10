@@ -5,6 +5,14 @@ import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ScmChange } from "../
 import * as vfs from "./vfs";
 import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
 
+interface MockCheckpoint {
+  id: string;
+  ts: number;
+  runId?: string;
+  files: string[];
+  snapshots: { path: string; exists: boolean; content: string }[];
+}
+
 const DEFAULT_PREFS: Prefs = {
   accent: "blue",
   density: "comfortable",
@@ -23,7 +31,7 @@ export class MockBridge implements Bridge {
   private maximized = false;
   private runCancelled = false;
   private mockProposals: Proposal[] = [];
-  private checkpoints: { id: string; ts: number; files: string[] }[] = [];
+  private checkpoints: MockCheckpoint[] = [];
   private termCounter = 0;
   // sahte git durumu — ScmView geliştirme/webshot senaryosu
   private scmStaged: ScmChange[] = [{ path: "src/utils.ts", status: "M" }];
@@ -233,22 +241,46 @@ export class MockBridge implements Bridge {
         return {} as R;
       case "run.applyProposals": {
         const wanted = new Set((params as { paths: string[] }).paths);
+        const selected = this.mockProposals.filter((proposal) => wanted.has(proposal.path));
+        const snapshots = selected.map((proposal) => ({
+          path: proposal.path,
+          exists: vfs.fileExists(proposal.path),
+          content: vfs.readFile(proposal.path).content,
+        }));
         const applied: string[] = [];
-        for (const p of this.mockProposals) {
-          if (wanted.has(p.path)) {
-            vfs.writeFile(p.path, p.new);
-            applied.push(p.path);
-          }
+        for (const p of selected) {
+          vfs.writeFile(p.path, p.new);
+          applied.push(p.path);
         }
         this.mockProposals = this.mockProposals.filter((p) => !wanted.has(p.path));
         const checkpointId = applied.length ? `mock-c${this.checkpoints.length + 1}` : null;
-        if (checkpointId) this.checkpoints.unshift({ id: checkpointId, ts: Date.now() / 1000, files: applied });
+        if (checkpointId) {
+          this.checkpoints.unshift({
+            id: checkpointId,
+            ts: Date.now() / 1000,
+            runId: "mock-1",
+            files: applied,
+            snapshots,
+          });
+          this.emit("fs.changed", { kind: "modified", paths: applied });
+        }
         return { applied, errors: [], checkpointId } as R;
       }
       case "checkpoint.list":
-        return { checkpoints: this.checkpoints } as R;
-      case "checkpoint.restore":
-        return { restored: [] } as R;
+        return {
+          checkpoints: this.checkpoints.map(({ snapshots: _snapshots, ...checkpoint }) => checkpoint),
+        } as R;
+      case "checkpoint.restore": {
+        const id = (params as { checkpointId: string }).checkpointId;
+        const checkpoint = this.checkpoints.find((item) => item.id === id);
+        if (!checkpoint) throw new Error("Checkpoint bulunamadı.");
+        for (const snapshot of checkpoint.snapshots) {
+          if (snapshot.exists) vfs.writeFile(snapshot.path, snapshot.content);
+          else vfs.deleteNode(snapshot.path);
+        }
+        this.emit("fs.changed", { kind: "modified", paths: checkpoint.files });
+        return { restored: checkpoint.files } as R;
+      }
       case "run.rejectProposals":
         this.mockProposals = [];
         return {} as R;

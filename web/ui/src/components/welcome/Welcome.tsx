@@ -19,8 +19,8 @@ export function Welcome() {
     <main className="relative flex flex-1 items-center justify-center overflow-hidden bg-bg">
       {/* accent glow orb — sahnenin ışığı */}
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ opacity: 0, transform: "translateY(10px)" }}
+        animate={{ opacity: 1, transform: "translateY(0)" }}
         transition={{ duration: 0.26, ease: [0.23, 1, 0.32, 1] }}
         className="relative flex w-full max-w-md flex-col items-center gap-3 px-6 text-center"
       >
@@ -80,8 +80,8 @@ export function Welcome() {
               {recent.slice(0, 4).map((p, i) => (
                 <motion.button
                   key={p.path}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0, transform: "translateY(6px)" }}
+                  animate={{ opacity: 1, transform: "translateY(0)" }}
                   transition={{ delay: 0.08 + i * 0.05, duration: 0.25 }}
                   onClick={() => void openProject(p.path)}
                   className="material-card pressable group flex items-center gap-2.5 rounded-[var(--r-md)] border border-border-w px-3 py-2 text-left hover:border-border-w2 hover:bg-card2"

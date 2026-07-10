@@ -56,6 +56,10 @@ export function readFile(rel: string) {
   return { content: node, truncated: false };
 }
 
+export function fileExists(rel: string): boolean {
+  return typeof resolve(rel) === "string";
+}
+
 export function writeFile(rel: string, content: string) {
   const parts = rel.split("/");
   const name = parts.pop()!;

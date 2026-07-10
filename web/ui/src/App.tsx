@@ -214,6 +214,7 @@ export default function App() {
         (window as unknown as Record<string, unknown>).__magent = {
           openProject,
           editor: () => useEditor.getState(),
+          run: () => useRun.getState(),
           exec: () => import("@/state/exec").then((m) => m.useExec.getState()),
           monaco: () => import("@/lib/monaco").then((m) => m.initMonaco()),
           bridge,
