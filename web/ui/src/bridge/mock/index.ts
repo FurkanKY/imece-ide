@@ -70,8 +70,12 @@ export class MockBridge implements Bridge {
         return {} as R;
       // ---- exec / F5 (P8.1): sahte akışlı koşu ----
       case "exec.run": {
-        const rel = (params as { rel?: string | null }).rel;
-        const cmd = rel ? `python "${rel}"` : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"';
+        const { rel, command } = params as { rel?: string | null; command?: string };
+        const cmd = command
+          ? command
+          : rel
+            ? `python "${rel}"`
+            : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"';
         const execId = "x" + ++this.termCounter;
         const lines = [
           `\x1b[36m$ ${cmd}\x1b[0m\r\n`,

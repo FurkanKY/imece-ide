@@ -32,11 +32,17 @@ const MAP: Record<string, Handler> = {
     e.preventDefault();
     void openFilesPalette();
   },
-  "mod+k": (e) => {
+  "mod+k": async (e) => {
     e.preventDefault();
     // palet açıksa kapat (toggle hissi)
     const p = usePalette.getState();
-    if (p.open) p.close();
+    if (p.open) {
+      p.close();
+      return;
+    }
+    // seçim varken Ctrl+K = inline AI edit; yoksa command center (R4)
+    const { hasActiveSelection, inlineEditSelection } = await import("@/lib/aiActions");
+    if (await hasActiveSelection()) void inlineEditSelection();
     else openCommandsPalette();
   },
   "mod+b": (e) => {

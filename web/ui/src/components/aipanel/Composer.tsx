@@ -1,8 +1,10 @@
 /* Composer — görev kutusu + rol→model seçimleri + Çalıştır/Durdur.
    Enter davranışı prefs.enterToSend'e bağlı (Shift+Enter yeni satır). */
 
+import { useEffect, useRef } from "react";
 import { BrainCircuit, Code2, SearchCheck, Play, Square, ClipboardCheck, type LucideIcon } from "lucide-react";
 import { useRun } from "@/state/run";
+import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
 import { Role } from "@/bridge";
 import { Select } from "@/components/ui/Select";
@@ -38,9 +40,20 @@ export function Composer() {
   const start = useRun((s) => s.start);
   const cancel = useRun((s) => s.cancel);
   const enterToSend = useSettings((s) => s.prefs?.enterToSend ?? true);
+  const focusNonce = useUi((s) => s.composerFocusNonce);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const running = status === "running";
   const reviewReady = runStage === "ready";
   const locked = running || reviewReady;
+
+  // command center "Görev ver" → composer'a odaklan (kilitli değilse imleç sona gider)
+  useEffect(() => {
+    if (focusNonce === 0) return;
+    const ta = taRef.current;
+    if (!ta || locked) return;
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }, [focusNonce, locked]);
   const helper = running
     ? "Ekip çalışıyor — gerekirse durdurun."
     : reviewReady
@@ -74,6 +87,7 @@ export function Composer() {
       )}
       <div className="flex items-end gap-2">
         <textarea
+          ref={taRef}
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={onKey}

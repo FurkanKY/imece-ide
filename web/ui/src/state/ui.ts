@@ -46,6 +46,9 @@ interface UiState extends LayoutState {
   toggleAiPanel: () => void;
   showAiPanel: () => void;
   hideAiPanel: () => void;
+  /** Composer'a odak iste (command center "Görev ver"): AI panelini açar + nonce artırır */
+  composerFocusNonce: number;
+  focusComposer: () => void;
   toggleBottom: () => void;
   setSideView: (v: SideView) => void;
   /** görünümü aç + kenar çubuğu kapalıysa göster */
@@ -99,6 +102,9 @@ export const useUi = create<UiState>((set) => ({
   toggleAiPanel: () => set((s) => ({ aiPanelVisible: !s.aiPanelVisible })),
   showAiPanel: () => set({ aiPanelVisible: true }),
   hideAiPanel: () => set({ aiPanelVisible: false }),
+  composerFocusNonce: 0,
+  focusComposer: () =>
+    set((s) => ({ aiPanelVisible: true, composerFocusNonce: s.composerFocusNonce + 1 })),
   toggleBottom: () => set((s) => ({ bottomVisible: !s.bottomVisible })),
   setSideView: (v) => set({ sideView: v }),
   showSideView: (v) => set({ sideView: v, sidebarVisible: true }),

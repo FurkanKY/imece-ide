@@ -5,13 +5,20 @@ import {
   Bug, CircleDot, FolderOpen, GitBranch, Play, Save, FileSearch, FilePlus2,
   FolderPlus, PanelLeft, PanelRight, Search, Settings, SlidersHorizontal, Square,
   TerminalSquare, WrapText, X, ZoomIn, ZoomOut,
+  Sparkles, Wand2, MessageSquareCode, FileDiff, History, FlaskConical, Send,
 } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
 import { useEditor } from "@/state/editor";
 import { useUi } from "@/state/ui";
+import { useRun } from "@/state/run";
+import { useExec } from "@/state/exec";
 import { usePalette, Command } from "@/components/palette/paletteStore";
 import { toast } from "@/components/toasts/toasts";
+import {
+  giveTask, inlineEditSelection, explainSelection, sendOutputErrorToTeam,
+  reviewChanges, restoreLastCheckpoint, runTests,
+} from "@/lib/aiActions";
 
 export async function openFilesPalette() {
   const ws = useWorkspace.getState();
@@ -28,7 +35,59 @@ export async function openFilesPalette() {
 }
 
 export function openCommandsPalette() {
-  usePalette.getState().openCommands(buildCommands());
+  usePalette.getState().openCommands([...buildAiCommands(), ...buildCommands()]);
+}
+
+/* AI-native command center (R4): görev/kod/hata/inceleme/checkpoint/test eylemleri.
+   Bağlama göre görünür; hepsi aiActions üzerinden aynı run lifecycle'ına düşer. */
+function buildAiCommands(): Command[] {
+  const ws = useWorkspace.getState();
+  const ed = useEditor.getState();
+  const run = useRun.getState();
+  const ex = useExec.getState();
+  const cmds: Command[] = [
+    {
+      id: "ai-task", label: "AI: Ekibe görev ver", hint: "composer",
+      Icon: Sparkles, run: () => giveTask(),
+    },
+  ];
+  if (ed.activeRel) {
+    cmds.push(
+      {
+        id: "ai-edit-selection", label: "AI: Seçili kodu düzenle", hint: "Ctrl+K (seçim)",
+        Icon: Wand2, run: () => inlineEditSelection(),
+      },
+      {
+        id: "ai-explain-selection", label: "AI: Seçili kodu açıkla", hint: "seçili satırlar",
+        Icon: MessageSquareCode, run: () => explainSelection(),
+      },
+    );
+  }
+  if (ex.raw.trim()) {
+    cmds.push({
+      id: "ai-error-to-team", label: "AI: Çıktı hatasını ekibe gönder", hint: "ÇIKTI → ekip",
+      Icon: Send, run: () => sendOutputErrorToTeam(),
+    });
+  }
+  if (run.diffs.length || run.proposals.length) {
+    cmds.push({
+      id: "ai-review", label: "AI: Değişiklikleri incele", hint: `${run.diffs.length || run.proposals.length} dosya`,
+      Icon: FileDiff, run: () => reviewChanges(),
+    });
+  }
+  if (run.checkpointId) {
+    cmds.push({
+      id: "ai-restore", label: "AI: Checkpoint'e dön", hint: "son apply",
+      Icon: History, run: () => restoreLastCheckpoint(),
+    });
+  }
+  if (ws.root) {
+    cmds.push({
+      id: "ai-run-tests", label: "AI: Testleri çalıştır", hint: "ÇIKTI",
+      Icon: FlaskConical, run: () => runTests(),
+    });
+  }
+  return cmds;
 }
 
 function buildCommands(): Command[] {
