@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2, PanelRightClose } from "lucide-react";
+import { IconButton, Badge } from "@/components/ui";
 import { useRun } from "@/state/run";
 import { Pipeline } from "./Pipeline";
 import { Chat } from "./Chat";
@@ -56,17 +57,8 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         </div>
         <div className="flex items-center gap-1.5">
           {totals && <span className="text-faint" title="Toplam maliyet" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>${totals.cost_usd.toFixed(4)}</span>}
-        <button
-          onClick={() => setHistoryOpen(true)}
-          title="Geçmiş koşular"
-          aria-label="Geçmiş"
-          className="icon-btn size-7"
-        >
-          <Clock size={14} />
-        </button>
-        <button onClick={onClose} title="AI panelini kapat" aria-label="AI panelini kapat" className="icon-btn size-7">
-          <PanelRightClose size={14} />
-        </button>
+        <IconButton icon={Clock} label="Geçmiş koşular" onClick={() => setHistoryOpen(true)} />
+        <IconButton icon={PanelRightClose} label="AI panelini kapat" onClick={onClose} />
         </div>
       </div>
 
@@ -92,14 +84,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
           >
             <Icon size={13} strokeWidth={1.9} />
             {label}
-            {badge > 0 && (
-              <span
-                className="rounded-[var(--r-pill)] bg-accentdim px-1.5 text-accent"
-                style={{ fontSize: "10px", fontWeight: 700 }}
-              >
-                {badge}
-              </span>
-            )}
+            {badge > 0 && <Badge tone="accent">{badge}</Badge>}
             {tab === id && <span className="absolute inset-x-4 bottom-0 h-[2px] rounded-t bg-accent" />}
           </button>
         ))}

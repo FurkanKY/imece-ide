@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useDialogs } from "./dialogs";
+import { Button } from "@/components/ui";
 
 export function DialogHost() {
   const { current, close } = useDialogs();
@@ -114,26 +115,17 @@ export function DialogHost() {
           )}
 
           <div className="mt-4 flex justify-end gap-2">
-            <button
-              onClick={cancel}
-              className="pressable rounded-[var(--r-sm)] border border-border-w bg-transparent px-3.5 py-1.5 text-text2 hover:bg-card"
-              style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
-            >
+            <Button variant="secondary" size="sm" onClick={cancel}>
               Vazgeç
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={current.kind === "confirm" && current.danger ? "danger" : "primary"}
+              size="sm"
               onClick={ok}
               autoFocus={current.kind === "confirm"}
-              className={
-                "pressable rounded-[var(--r-sm)] px-3.5 py-1.5 " +
-                (current.kind === "confirm" && current.danger
-                  ? "bg-err text-white hover:brightness-110"
-                  : "bg-accent text-on-accent hover:bg-accent2")
-              }
-              style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
             >
               {current.okLabel}
-            </button>
+            </Button>
           </div>
         </motion.div>
       </motion.div>
