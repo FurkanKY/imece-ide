@@ -26,4 +26,6 @@ def _restore(params, ctx):
         restored = CheckpointStore(proj.root).restore(proj, params.get("checkpointId", ""))
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
         raise BridgeError("checkpoint", str(e))
+    if restored:
+        ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": restored})
     return {"restored": restored}

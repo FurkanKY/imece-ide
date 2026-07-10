@@ -31,8 +31,8 @@ function StageNode({ info, routedTo }: { info: StageInfo; routedTo: string }) {
         {running && (
           <motion.span
             className="absolute inset-0 rounded-full bg-accent/25"
-            animate={{ scale: [1, 1.45, 1], opacity: [0.7, 0.15, 0.7] }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+            animate={{ transform: ["scale(1)", "scale(1.45)", "scale(1)"], opacity: [0.7, 0.15, 0.7] }}
+            transition={{ duration: 1.4, repeat: Infinity, ease: [0.77, 0, 0.175, 1] }}
           />
         )}
         <span

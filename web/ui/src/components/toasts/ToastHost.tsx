@@ -1,8 +1,9 @@
 /* ToastHost — sağ altta toast yığını; motion ile giriş/çıkış. */
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 import { useToasts, ToastKind } from "./toasts";
+import { useSettings } from "@/state/settings";
 
 const ICONS: Record<ToastKind, { Icon: typeof Info; cls: string }> = {
   ok: { Icon: CheckCircle2, cls: "text-ok" },
@@ -12,6 +13,9 @@ const ICONS: Record<ToastKind, { Icon: typeof Info; cls: string }> = {
 
 export function ToastHost() {
   const { toasts, dismiss } = useToasts();
+  const reduceMotion = useReducedMotion();
+  const animationsEnabled = useSettings((s) => s.prefs?.animations ?? true);
+  const animate = animationsEnabled && !reduceMotion;
 
   return (
     <div className="pointer-events-none fixed bottom-9 right-4 z-[200] flex w-[340px] flex-col gap-2">
@@ -21,9 +25,9 @@ export function ToastHost() {
           return (
             <motion.div
               key={t.id}
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              initial={{ opacity: 0, transform: animate ? "translateY(12px) scale(0.98)" : "none" }}
+              animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
+              exit={{ opacity: 0, transform: animate ? "translateY(8px) scale(0.98)" : "none" }}
               transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
               className="material-card pointer-events-auto flex items-start gap-2.5 rounded-[var(--r-md)] border border-border-w px-3.5 py-2.5"
               style={{ boxShadow: "var(--bevel-strong), var(--shadow-2)" }}

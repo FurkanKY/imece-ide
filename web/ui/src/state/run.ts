@@ -4,7 +4,7 @@
    için tüketilir. desktop.py:on_event akışının store karşılığı. */
 
 import { create } from "zustand";
-import { bridge, Proposal, Role, Routing, RunEvent } from "@/bridge";
+import { bridge, Checkpoint, Proposal, Role, Routing, RunEvent } from "@/bridge";
 import { toast } from "@/components/toasts/toasts";
 
 export const STAGE_ROLE: Record<string, Role> = {
@@ -68,6 +68,8 @@ interface RunState {
   totals: { latency_s: number; tokens: number; cost_usd: number } | null;
   error: string | null;
   checkpointId: string | null;
+  lastRestoredCheckpointId: string | null;
+  checkpointBusy: boolean;
 
   loadProviders: () => Promise<void>;
   setRouting: (role: Role, provider: string) => void;
@@ -108,6 +110,8 @@ export const useRun = create<RunState>((set, get) => ({
   totals: null,
   error: null,
   checkpointId: null,
+  lastRestoredCheckpointId: null,
+  checkpointBusy: false,
 
   loadProviders: async () => {
     try {
@@ -146,6 +150,7 @@ export const useRun = create<RunState>((set, get) => ({
       verdictNote: "",
       totals: null,
       error: null,
+      checkpointId: null,
     });
     try {
       const { runId } = await bridge.call("run.start", { task: task.trim(), routing });
@@ -173,36 +178,36 @@ export const useRun = create<RunState>((set, get) => ({
       toast.info("Uygulanacak dosya seçilmedi.");
       return;
     }
+    if (get().checkpointBusy) return;
+    const { useEditor } = await import("@/state/editor");
+    const dirty = useEditor.getState().tabs.filter((t) => t.dirty && paths.includes(t.rel));
+    if (dirty.length) {
+      toast.err(`Önce kaydedilmemiş sekmeleri kaydedin: ${dirty.map((t) => t.name).join(", ")}`);
+      return;
+    }
+    set({ checkpointBusy: true });
     try {
       const { applied, errors, checkpointId } = await bridge.call("run.applyProposals", { paths });
-      if (applied.length) {
-        toast.ok(`${applied.length} dosya uygulandı · checkpoint oluşturuldu.`, {
-          label: "Geri Al",
-          run: () => void get().restoreCheckpoint(checkpointId ?? undefined),
-        });
-        // açık sekmeleri ve ağacı tazele
-        const { useEditor } = await import("@/state/editor");
-        const { useWorkspace } = await import("@/state/workspace");
-        const ed = useEditor.getState();
-        for (const p of applied) {
-          const tab = ed.tabs.find((t) => t.rel === p);
-          if (tab) {
-            const { content } = await bridge.call("fs.readFile", { rel: p });
-            useEditor.setState((s) => ({
-              tabs: s.tabs.map((t) =>
-                t.rel === p ? { ...t, content, draft: content, dirty: false } : t,
-              ),
-            }));
-          }
-        }
-        const ws = useWorkspace.getState();
-        for (const rel of Object.keys(ws.children)) void ws.loadDir(rel);
-      }
       for (const e of errors) toast.err(`${e.path}: ${e.message}`);
-      set({ diffs: [], proposals: [], runStage: "applied", task: "", checkpointId });
-      (await import("@/state/editor")).useEditor.getState().closeDiff();
+      if (!applied.length) return;
+      if (!checkpointId) throw new Error("Uygulama tamamlandı ancak checkpoint kimliği alınamadı.");
+      await refreshProjectFiles(applied);
+      set({
+        diffs: [],
+        proposals: [],
+        runStage: "applied",
+        task: "",
+        checkpointId,
+        lastRestoredCheckpointId: null,
+      });
+      toast.ok(`${applied.length} dosya uygulandı · checkpoint hazır.`, {
+        label: "Geri Al",
+        run: () => void get().restoreCheckpoint(checkpointId),
+      });
     } catch (e) {
       toast.err(e instanceof Error ? e.message : "Uygulanamadı.");
+    } finally {
+      set({ checkpointBusy: false });
     }
   },
 
@@ -212,36 +217,53 @@ export const useRun = create<RunState>((set, get) => ({
       toast.info("Geri alınacak checkpoint yok.");
       return;
     }
+    if (get().checkpointBusy) return;
+    let checkpoint: Checkpoint | undefined;
+    try {
+      const { checkpoints } = await bridge.call("checkpoint.list", {});
+      checkpoint = checkpoints.find((item) => item.id === checkpointId);
+    } catch {
+      toast.err("Checkpoint bilgisi doğrulanamadı.");
+      return;
+    }
+    if (!checkpoint) {
+      toast.err("Checkpoint bulunamadı veya artık geçerli değil.");
+      return;
+    }
+    const { useEditor } = await import("@/state/editor");
+    const dirty = useEditor.getState().tabs.filter(
+      (tab) => tab.dirty && checkpoint.files.includes(tab.rel),
+    );
+    if (dirty.length) {
+      toast.err(`Geri almadan önce kaydedilmemiş sekmeleri kaydedin: ${dirty.map((t) => t.name).join(", ")}`);
+      return;
+    }
     const { confirmDialog } = await import("@/components/dialogs/dialogs");
+    const preview = checkpoint.files.slice(0, 3).join(", ");
+    const more = checkpoint.files.length > 3 ? ` ve ${checkpoint.files.length - 3} dosya daha` : "";
     const accepted = await confirmDialog({
       title: "Checkpoint'e geri dön",
-      message: "Bu checkpoint'ten sonra uygulanan dosya değişiklikleri geri alınacak.",
+      message: `${checkpoint.files.length} dosya checkpoint anına dönecek: ${preview}${more}.`,
       okLabel: "Geri Al",
       danger: true,
     });
     if (!accepted) return;
+    set({ checkpointBusy: true });
     try {
       const { restored } = await bridge.call("checkpoint.restore", { checkpointId });
-      const { useEditor } = await import("@/state/editor");
-      const { useWorkspace } = await import("@/state/workspace");
-      const ed = useEditor.getState();
-      for (const rel of restored) {
-        const tab = ed.tabs.find((t) => t.rel === rel);
-        if (!tab) continue;
-        try {
-          const { content } = await bridge.call("fs.readFile", { rel });
-          useEditor.setState((s) => ({ tabs: s.tabs.map((t) => t.rel === rel ? { ...t, content, draft: content, dirty: false } : t) }));
-        } catch {
-          useEditor.getState().closeDeleted(rel);
-        }
-      }
-      const ws = useWorkspace.getState();
-      for (const rel of Object.keys(ws.children)) void ws.loadDir(rel);
-      useEditor.getState().closeDiff();
-      set({ runStage: "restored", checkpointId: null, diffs: [], proposals: [] });
+      await refreshProjectFiles(restored);
+      set({
+        runStage: "restored",
+        checkpointId: null,
+        lastRestoredCheckpointId: checkpointId,
+        diffs: [],
+        proposals: [],
+      });
       toast.ok(`${restored.length} dosya checkpoint'e geri alındı.`);
     } catch (e) {
       toast.err(e instanceof Error ? e.message : "Checkpoint geri alınamadı.");
+    } finally {
+      set({ checkpointBusy: false });
     }
   },
 
@@ -392,4 +414,30 @@ function markPrevDone(stages: Record<Role, StageInfo>): Record<Role, StageInfo> 
     if (out[r].state === "running") out[r] = { ...out[r], state: "done" };
   }
   return out;
+}
+
+async function refreshProjectFiles(paths: string[]) {
+  const [{ useEditor }, { useWorkspace }, { useScm }] = await Promise.all([
+    import("@/state/editor"),
+    import("@/state/workspace"),
+    import("@/state/scm"),
+  ]);
+  const editor = useEditor.getState();
+  for (const rel of paths) {
+    if (!editor.tabs.some((tab) => tab.rel === rel)) continue;
+    try {
+      const { content } = await bridge.call("fs.readFile", { rel });
+      useEditor.setState((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.rel === rel ? { ...tab, content, draft: content, dirty: false } : tab,
+        ),
+      }));
+    } catch {
+      useEditor.getState().closeDeleted(rel);
+    }
+  }
+  const workspace = useWorkspace.getState();
+  await Promise.all(Object.keys(workspace.children).map((rel) => workspace.loadDir(rel)));
+  await useScm.getState().refresh();
+  useEditor.getState().closeDiff();
 }

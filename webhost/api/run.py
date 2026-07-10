@@ -141,13 +141,21 @@ def _apply(params, ctx):
             errors.append({"path": p.get("path", ""), "message": str(e)})
     # Kısmi apply'da checkpoint geri yüklenir; kullanıcı hiçbir yarım değişiklik görmez.
     if errors:
-        CheckpointStore(proj.root).restore(proj, checkpoint["id"])
+        store = CheckpointStore(proj.root)
+        store.restore(proj, checkpoint["id"])
+        store.drop(checkpoint["id"])
         applied = []
     if applied:
         _active["proposals"] = [
             p for p in _active["proposals"] if p.get("path") not in set(applied)
         ]
-    return {"applied": applied, "errors": errors, "checkpointId": checkpoint["id"]}
+    if applied:
+        ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
+    return {
+        "applied": applied,
+        "errors": errors,
+        "checkpointId": checkpoint["id"] if applied else None,
+    }
 
 
 @handler("run.rejectProposals")

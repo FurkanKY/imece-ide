@@ -1,7 +1,7 @@
 /* Changes — önerilen dosya değişiklikleri: checkbox'lı liste, satıra tık →
    merkez diff (Cursor deseni), Uygula / Vazgeç. changes_panel.py'nin halefi. */
 
-import { FileDiff, FilePlus2, Check, X, RotateCcw, ShieldCheck } from "lucide-react";
+import { FileDiff, FilePlus2, Check, X, RotateCcw, ShieldCheck, LoaderCircle } from "lucide-react";
 import { useRun } from "@/state/run";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
@@ -12,6 +12,7 @@ export function Changes() {
   const status = useRun((s) => s.status);
   const runStage = useRun((s) => s.runStage);
   const checkpointId = useRun((s) => s.checkpointId);
+  const checkpointBusy = useRun((s) => s.checkpointBusy);
   const toggle = useRun((s) => s.toggleDiff);
   const apply = useRun((s) => s.apply);
   const reject = useRun((s) => s.reject);
@@ -20,20 +21,24 @@ export function Changes() {
   const activeDiff = useEditor((s) => s.diff?.path ?? null);
 
   if (diffs.length === 0) {
+    const EmptyIcon = runStage === "applied" ? ShieldCheck : runStage === "restored" ? RotateCcw : FileDiff;
+    const emptyIconClass = runStage === "applied" || runStage === "restored" ? "text-ok" : "text-faint";
     const message = runStage === "applied"
       ? "Değişiklikler uygulandı. Bu turun checkpoint'i geri alma için hazır."
+      : runStage === "restored"
+        ? "Dosyalar checkpoint anına geri döndürüldü. Yeni bir tur başlatabilirsiniz."
       : runStage === "ready"
         ? "Ekip bu tur için uygulanacak dosya önermedi."
         : "Öneri bekleniyor — ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir.";
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        <FileDiff size={26} className="text-faint" strokeWidth={1.5} />
+        <EmptyIcon size={26} className={emptyIconClass} strokeWidth={1.5} />
         <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
           {message}
         </p>
         {runStage === "applied" && checkpointId && (
-          <button onClick={() => void restoreCheckpoint()} className="pressable mt-1 flex items-center gap-1.5 rounded-[var(--r-sm)] border border-warn/40 px-3 py-1.5 text-warn hover:bg-warn/10" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
-            <RotateCcw size={13} /> Geri Al
+          <button disabled={checkpointBusy} aria-busy={checkpointBusy} onClick={() => void restoreCheckpoint()} className="pressable mt-1 flex items-center gap-1.5 rounded-[var(--r-sm)] border border-warn/40 px-3 py-1.5 text-warn hover:bg-warn/10 disabled:opacity-50" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
+            {checkpointBusy ? <LoaderCircle size={13} className="animate-spin" /> : <RotateCcw size={13} />} Geri Al
           </button>
         )}
       </div>
@@ -41,7 +46,7 @@ export function Changes() {
   }
 
   const checkedCount = diffs.filter((d) => d.checked).length;
-  const canApply = status !== "running" && checkedCount > 0;
+  const canApply = status !== "running" && checkedCount > 0 && !checkpointBusy;
 
   return (
     <div className="flex h-full flex-col">
@@ -66,6 +71,7 @@ export function Changes() {
             >
               <input
                 type="checkbox"
+                aria-label={`${d.path} değişikliğini seç`}
                 checked={d.checked}
                 onChange={() => toggle(d.path)}
                 onClick={(e) => e.stopPropagation()}
@@ -104,14 +110,17 @@ export function Changes() {
           <button
             onClick={() => void apply()}
             disabled={!canApply}
+            aria-busy={checkpointBusy}
             className="pressable flex flex-1 items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2 disabled:opacity-40"
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
-            <Check size={14} strokeWidth={2.2} /> Uygula + checkpoint ({checkedCount})
+            {checkpointBusy ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} strokeWidth={2.2} />}
+            {checkpointBusy ? "Uygulanıyor…" : `Uygula · checkpoint oluştur (${checkedCount})`}
           </button>
           <button
             onClick={() => void reject()}
-            className="pressable flex items-center justify-center gap-1.5 rounded-[var(--r-sm)] border border-border-w2 px-3 py-1.5 text-text2 hover:bg-card"
+            disabled={checkpointBusy}
+            className="pressable flex items-center justify-center gap-1.5 rounded-[var(--r-sm)] border border-border-w2 px-3 py-1.5 text-text2 hover:bg-card disabled:opacity-40"
             style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
             <X size={14} /> Vazgeç
