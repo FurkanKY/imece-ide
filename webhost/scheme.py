@@ -9,6 +9,8 @@ modül/font/worker yüklemeleri serbest. register_scheme() QApplication'dan ÖNC
 import mimetypes
 import os
 
+from runtime_paths import resource_path
+
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtWebEngineCore import (
     QWebEngineUrlScheme,
@@ -16,8 +18,7 @@ from PySide6.QtWebEngineCore import (
     QWebEngineUrlRequestJob,
 )
 
-UI_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "web", "ui", "dist")
+UI_DIST = str(resource_path("web", "ui", "dist"))
 
 _EXTRA_MIME = {
     ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
