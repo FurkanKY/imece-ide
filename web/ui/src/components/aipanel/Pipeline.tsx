@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 import { BrainCircuit, Code2, SearchCheck, Check, X, type LucideIcon } from "lucide-react";
 import { useRun, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
+import { Badge, StatusDot } from "@/components/ui";
 
 const ROLE_META: Record<Role, { label: string; Icon: LucideIcon }> = {
   planner: { label: "Planner", Icon: BrainCircuit },
@@ -74,8 +75,8 @@ function StageNode({ info, routedTo }: { info: StageInfo; routedTo: string }) {
           </div>
         )}
         {running && (
-          <div className="text-accent" style={{ fontSize: "var(--t-caption)" }}>
-            çalışıyor…
+          <div className="flex items-center gap-1.5 text-accent" style={{ fontSize: "var(--t-caption)" }}>
+            <StatusDot tone="accent" pulse size={5} /> çalışıyor…
           </div>
         )}
       </div>
@@ -101,9 +102,9 @@ export function Pipeline() {
         }}
       >
         <span>EKİP</span>
-        {status === "done" && <span className="text-ok">TAMAMLANDI</span>}
-        {status === "failed" && <span className="text-err">HATA</span>}
-        {status === "cancelled" && <span className="text-warn">DURDURULDU</span>}
+        {status === "done" && <Badge tone="ok">TAMAMLANDI</Badge>}
+        {status === "failed" && <Badge tone="err">HATA</Badge>}
+        {status === "cancelled" && <Badge tone="warn">DURDURULDU</Badge>}
       </div>
       <div className="relative">
         {/* bağlayıcı dikey çizgi (+ koşu sırasında akan accent) */}

@@ -9,12 +9,15 @@ export function EmptyState({
   title,
   description,
   action,
+  tone = "neutral",
   className,
 }: {
   icon?: LucideIcon;
   title: string;
   description?: string;
   action?: React.ReactNode;
+  /** "ok": başarı-boş durumları (uygulandı/geri yüklendi) — ikon yeşile döner */
+  tone?: "neutral" | "ok";
   className?: string;
 }) {
   return (
@@ -25,7 +28,12 @@ export function EmptyState({
       )}
     >
       {Icon && (
-        <div className="mb-1 flex size-9 items-center justify-center rounded-[var(--r-md)] bg-card text-faint">
+        <div
+          className={cx(
+            "mb-1 flex size-9 items-center justify-center rounded-[var(--r-md)] bg-card",
+            tone === "ok" ? "text-ok" : "text-faint",
+          )}
+        >
           <Icon size={18} strokeWidth={1.7} />
         </div>
       )}
