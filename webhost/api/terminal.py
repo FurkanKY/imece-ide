@@ -20,6 +20,19 @@ _terms: dict[str, "_Term"] = {}
 _next_id = 0
 
 
+def _clamp_i32(code) -> int:
+    """PTY çıkış kodunu Qt Signal(int) (C++ 32-bit) için güvenli aralığa indir."""
+    if code is None:
+        return 0
+    try:
+        c = int(code)
+    except (TypeError, ValueError, OverflowError):
+        return -1
+    if c > 2_147_483_647 or c < -2_147_483_648:
+        return c & 0xFFFF  # düşük 16 bit yeterli sinyal (ör. 0x013A → 314)
+    return c
+
+
 class _Reader(QThread):
     chunk = Signal(str)
     exited = Signal(int)
@@ -39,8 +52,14 @@ class _Reader(QThread):
                 self.chunk.emit(data)
         except (EOFError, OSError, RuntimeError):
             pass
-        code = self._pty.exitstatus
-        self.exited.emit(int(code) if code is not None else 0)
+        # ConPTY başarısız olursa exitstatus 32-bit'e sığmayan bir Windows kodu
+        # (ör. 0xC000013A) olabilir → Signal(int) C++ int taşması → traceback'siz
+        # OverflowError (Beta-3 blokeri). Güvenli aralığa kıstır.
+        try:
+            code = self._pty.exitstatus
+        except Exception:
+            code = None
+        self.exited.emit(_clamp_i32(code))
 
 
 class _Term(QObject):

@@ -12,6 +12,10 @@ UI_DIST = ROOT / "web" / "ui" / "dist"
 
 bp_datas, bp_binaries, bp_hidden = collect_all("basedpyright")
 dp_datas, dp_binaries, dp_hidden = collect_all("debugpy")
+# winpty: conpty.dll/winpty.dll YANINDA OpenConsole.exe + winpty-agent.exe ŞART.
+# Bu .exe'ler ConPTY tarafından runtime'da spawn edilir (linklenmiş bağımlılık DEĞİL),
+# PyInstaller otomatik analizi göremez → collect_all ile paketle (Beta-3 PTY blokeri).
+wp_datas, wp_binaries, wp_hidden = collect_all("winpty")
 
 node_exe = Path(nodejs_wheel.__file__).parent / "node.exe"
 
@@ -20,11 +24,13 @@ datas = [
     (str(node_exe), "nodejs_wheel"),
     *bp_datas,
     *dp_datas,
+    *wp_datas,
 ]
-binaries = [*bp_binaries, *dp_binaries]
+binaries = [*bp_binaries, *dp_binaries, *wp_binaries]
 hiddenimports = [
     *bp_hidden,
     *dp_hidden,
+    *wp_hidden,
     "code",
     "http.server",
     "xmlrpc.client",

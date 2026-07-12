@@ -49,8 +49,11 @@ def attach_bridge(bridge) -> None:
 
 
 def _excepthook(etype, value, tb) -> None:
+    # C-katmanı/thread istisnaları traceback'siz gelebilir (ör. OverflowError);
+    # repr + thread adı olmadan teşhis imkânsızdı (Beta-3 PTY blokeri dersi).
     text = "".join(traceback.format_exception(etype, value, tb))
-    logger.error("YAKALANMAMIŞ İSTİSNA:\n%s", text)
+    thread = threading.current_thread().name
+    logger.error("YAKALANMAMIŞ İSTİSNA [thread=%s] %r\n%s", thread, value, text)
     if _bridge is not None:
         try:
             _bridge.emit_event_from_any_thread("app.error", {
