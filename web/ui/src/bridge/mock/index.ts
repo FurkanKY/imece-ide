@@ -155,6 +155,25 @@ export class MockBridge implements Bridge {
       }
       case "debug.status":
         return { active: this.dbgActive, stopped: this.dbgActive } as R;
+      // ---- keys (beta onboarding): sahte anahtar durumu ----
+      case "keys.status": {
+        const dk = localStorage.getItem("magent.mock.dk") ?? "";
+        const gk = localStorage.getItem("magent.mock.gk") ?? "";
+        return {
+          providers: {
+            claude: { ok: true, detail: "C:\\mock\\claude.exe" },
+            deepseek: { ok: !!dk, masked: dk ? "•••• " + dk.slice(-4) : "" },
+            gemini: { ok: !!gk, masked: gk ? "•••• " + gk.slice(-4) : "" },
+          },
+          envPath: "C:/mock/.env",
+        } as R;
+      }
+      case "keys.set": {
+        const p = params as { deepseek?: string; gemini?: string };
+        if (p.deepseek) localStorage.setItem("magent.mock.dk", p.deepseek);
+        if (p.gemini) localStorage.setItem("magent.mock.gk", p.gemini);
+        return {} as R;
+      }
       // ---- lsp (P7): tarayıcıda dil sunucusu yok — zararsız no-op ----
       case "lsp.start":
         return { running: false, ready: false } as R;
