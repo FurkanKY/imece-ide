@@ -6,6 +6,7 @@ import { BrainCircuit, Code2, SearchCheck, Play, Square, ClipboardCheck, type Lu
 import { useRun } from "@/state/run";
 import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
+import { useKeys } from "@/state/keys";
 import { Role } from "@/bridge";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui";
@@ -55,6 +56,19 @@ export function Composer() {
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }, [focusNonce, locked]);
+  // beta onboarding: seçili routing'de anahtarı/CLI'ı eksik sağlayıcı uyarısı
+  const routing = useRun((s) => s.routing);
+  const keyProviders = useKeys((s) => s.providers);
+  const keysLoaded = useKeys((s) => s.loaded);
+  const loadKeys = useKeys((s) => s.load);
+  const setSettingsOpen = useUi((s) => s.setSettingsOpen);
+  useEffect(() => {
+    if (!keysLoaded) void loadKeys();
+  }, [keysLoaded, loadKeys]);
+  const missing = keysLoaded
+    ? [...new Set(Object.values(routing))].filter((p) => keyProviders[p] && !keyProviders[p].ok)
+    : [];
+
   const helper = running
     ? "Ekip çalışıyor — gerekirse durdurun."
     : reviewReady
@@ -84,6 +98,14 @@ export function Composer() {
       {helper && (
         <div className="mb-1.5 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
           {reviewReady && <ClipboardCheck size={12} className="text-warn" />} {helper}
+        </div>
+      )}
+      {!helper && missing.length > 0 && (
+        <div className="mb-1.5 flex items-center gap-1.5 text-warn" style={{ fontSize: "var(--t-caption)" }}>
+          {missing.join(", ")} için anahtar/CLI eksik —{" "}
+          <button onClick={() => setSettingsOpen(true)} className="underline underline-offset-2 hover:text-text">
+            Ayarlar'dan ekle
+          </button>
         </div>
       )}
       <div className="flex items-end gap-2">

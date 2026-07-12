@@ -107,6 +107,17 @@ export interface Api {
   "exec.getCommand": { params: {}; result: { command: string | null } };
   "exec.setCommand": { params: { command: string }; result: {} };
 
+  // ---- keys (beta onboarding — API anahtarları) ----
+  /** anahtarlar UI'a dönmez; yalnız ok + maske. claude = CLI varlık kontrolü */
+  "keys.status": {
+    params: {};
+    result: {
+      providers: Record<string, { ok: boolean; masked?: string; detail?: string }>;
+      envPath: string;
+    };
+  };
+  "keys.set": { params: { deepseek?: string; gemini?: string }; result: {} };
+
   // ---- lsp (P7 — Python dil sunucusu, basedpyright) ----
   "lsp.start": { params: {}; result: { running: boolean; ready: boolean } };
   "lsp.stop": { params: {}; result: {} };

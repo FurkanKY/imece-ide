@@ -16,4 +16,5 @@ def register_all() -> None:
     from webhost.api import scm as _scm            # noqa: F401
     from webhost.api import lsp as _lsp            # noqa: F401
     from webhost.api import exec as _exec          # noqa: F401
+    from webhost.api import keys as _keys          # noqa: F401
     from webhost.api import debug as _debug        # noqa: F401
