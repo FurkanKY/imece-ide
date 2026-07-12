@@ -12,6 +12,10 @@ import sys
 def main() -> int:
     dev = "--dev" in sys.argv
 
+    # Beta-2: dosya log'u + global istisna yakalama — HER ŞEYDEN önce.
+    from webhost import applog
+    applog.setup()
+
     # Şema kaydı QApplication'dan ÖNCE olmalı.
     from webhost.scheme import register_scheme, UI_DIST
     register_scheme()
@@ -29,6 +33,7 @@ def main() -> int:
 
     from webhost.window import ShellWindow
     win = ShellWindow(dev=dev)
+    applog.attach_bridge(win.bridge)  # istisnalar UI'a da duyurulur
     win.show()
     return app.exec()
 
