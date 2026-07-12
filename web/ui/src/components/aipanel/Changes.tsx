@@ -1,10 +1,11 @@
 /* Changes — önerilen dosya değişiklikleri: checkbox'lı liste, satıra tık →
    merkez diff (Cursor deseni), Uygula / Vazgeç. changes_panel.py'nin halefi. */
 
-import { FileDiff, FilePlus2, Check, X, RotateCcw, ShieldCheck, LoaderCircle } from "lucide-react";
+import { FileDiff, FilePlus2, Check, X, RotateCcw, ShieldCheck } from "lucide-react";
 import { useRun } from "@/state/run";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
+import { Badge, Button, EmptyState } from "@/components/ui";
 
 export function Changes() {
   const diffs = useRun((s) => s.diffs);
@@ -21,27 +22,41 @@ export function Changes() {
   const activeDiff = useEditor((s) => s.diff?.path ?? null);
 
   if (diffs.length === 0) {
-    const EmptyIcon = runStage === "applied" ? ShieldCheck : runStage === "restored" ? RotateCcw : FileDiff;
-    const emptyIconClass = runStage === "applied" || runStage === "restored" ? "text-ok" : "text-faint";
-    const message = runStage === "applied"
-      ? "Değişiklikler uygulandı. Bu turun checkpoint'i geri alma için hazır."
-      : runStage === "restored"
-        ? "Dosyalar checkpoint anına geri döndürüldü. Yeni bir tur başlatabilirsiniz."
-      : runStage === "ready"
-        ? "Ekip bu tur için uygulanacak dosya önermedi."
-        : "Öneri bekleniyor — ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir.";
+    const ok = runStage === "applied" || runStage === "restored";
+    const [EmptyIcon, title, description] =
+      runStage === "applied"
+        ? ([ShieldCheck, "Değişiklikler uygulandı",
+            "Bu turun checkpoint'i geri alma için hazır."] as const)
+        : runStage === "restored"
+          ? ([RotateCcw, "Checkpoint geri yüklendi",
+              "Dosyalar checkpoint anına döndürüldü. Yeni bir tur başlatabilirsiniz."] as const)
+          : runStage === "ready"
+            ? ([FileDiff, "Uygulanacak dosya yok",
+                "Ekip bu tur için dosya değişikliği önermedi."] as const)
+            : ([FileDiff, "Öneri bekleniyor",
+                "Ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir."] as const);
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        <EmptyIcon size={26} className={emptyIconClass} strokeWidth={1.5} />
-        <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          {message}
-        </p>
-        {runStage === "applied" && checkpointId && (
-          <button disabled={checkpointBusy} aria-busy={checkpointBusy} onClick={() => void restoreCheckpoint()} className="pressable mt-1 flex items-center gap-1.5 rounded-[var(--r-sm)] border border-warn/40 px-3 py-1.5 text-warn hover:bg-warn/10 disabled:opacity-50" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
-            {checkpointBusy ? <LoaderCircle size={13} className="animate-spin" /> : <RotateCcw size={13} />} Geri Al
-          </button>
-        )}
-      </div>
+      <EmptyState
+        icon={EmptyIcon}
+        tone={ok ? "ok" : "neutral"}
+        title={title}
+        description={description}
+        className="h-full"
+        action={
+          runStage === "applied" && checkpointId ? (
+            <Button
+              variant="warn-outline"
+              size="sm"
+              icon={RotateCcw}
+              loading={checkpointBusy}
+              aria-busy={checkpointBusy}
+              onClick={() => void restoreCheckpoint()}
+            >
+              Geri Al
+            </Button>
+          ) : undefined
+        }
+      />
     );
   }
 
@@ -82,9 +97,9 @@ export function Changes() {
                 {d.path}
               </span>
               {d.isNew && (
-                <span className="flex shrink-0 items-center gap-1 rounded-[var(--r-pill)] border border-ok/40 px-1.5 text-ok" style={{ fontSize: "10px", fontWeight: 700 }}>
+                <Badge tone="ok" className="shrink-0">
                   <FilePlus2 size={10} /> YENİ
-                </span>
+                </Badge>
               )}
             </div>
           );
@@ -96,35 +111,32 @@ export function Changes() {
           <ShieldCheck size={12} className="text-ok" /> Uygulamadan önce checkpoint oluşturulur.
         </div>
         {verdict && (
-          <div
-            className={
-              "mb-2 inline-flex items-center rounded-[var(--r-pill)] border px-2 py-0.5 " +
-              (verdict === "APPROVED" ? "border-ok/50 text-ok" : "border-warn/50 text-warn")
-            }
-            style={{ fontSize: "10px", fontWeight: 800, letterSpacing: "0.06em" }}
-          >
+          <Badge tone={verdict === "APPROVED" ? "ok" : "warn"} className="mb-2">
             {verdict === "APPROVED" ? "ONAYLANDI" : "DÜZELTME GEREK"}
-          </div>
+          </Badge>
         )}
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Check}
+            block
             onClick={() => void apply()}
             disabled={!canApply}
+            loading={checkpointBusy}
             aria-busy={checkpointBusy}
-            className="pressable flex flex-1 items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2 disabled:opacity-40"
-            style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
-            {checkpointBusy ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} strokeWidth={2.2} />}
             {checkpointBusy ? "Uygulanıyor…" : `Uygula · checkpoint oluştur (${checkedCount})`}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={X}
             onClick={() => void reject()}
             disabled={checkpointBusy}
-            className="pressable flex items-center justify-center gap-1.5 rounded-[var(--r-sm)] border border-border-w2 px-3 py-1.5 text-text2 hover:bg-card disabled:opacity-40"
-            style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
           >
-            <X size={14} /> Vazgeç
-          </button>
+            Vazgeç
+          </Button>
         </div>
       </div>
     </div>

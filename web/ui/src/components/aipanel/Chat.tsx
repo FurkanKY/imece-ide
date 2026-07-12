@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Info, AlertCircle, CheckCircle2, BrainCircuit, Code2, SearchCheck, Activity } from "lucide-react";
 import { useRun, STAGE_ROLE, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
+import { Badge, EmptyState, StatusDot } from "@/components/ui";
 import { Markdown } from "./Markdown";
 
 const STAGE_META: Record<string, { label: string; Icon: typeof Code2 }> = {
@@ -51,9 +52,7 @@ function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
             {info.latency_s.toFixed(1)}sn · {info.tokens}tok · {fmtCost(info.cost_usd)}
           </span>
         )}
-        {running && (
-          <span className="shrink-0 text-accent" style={{ fontSize: "var(--t-caption)" }}>●</span>
-        )}
+        {running && <StatusDot tone="accent" pulse size={6} className="text-accent" />}
       </button>
       {open && info.output && (
         running ? (
@@ -88,15 +87,12 @@ export function Chat() {
 
   if (flow.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        <BrainCircuit size={28} className="text-faint" strokeWidth={1.5} />
-        <p className="text-muted" style={{ fontSize: "var(--t-label)" }}>
-          Ekip hazır.
-        </p>
-        <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          Alttan bir görev yaz — Planner böler, Coder yazar, Reviewer denetler.
-        </p>
-      </div>
+      <EmptyState
+        icon={BrainCircuit}
+        title="Ekip hazır"
+        description="Alttan bir görev yaz — Planner böler, Coder yazar, Reviewer denetler."
+        className="h-full"
+      />
     );
   }
 
@@ -138,18 +134,11 @@ export function Chat() {
       })}
 
       {verdict && (
-        <div
-          className={
-            "flex items-center gap-2 self-start rounded-[var(--r-pill)] border px-2.5 py-1 " +
-            (verdict === "APPROVED"
-              ? "border-ok/50 text-ok"
-              : "border-warn/50 text-warn")
-          }
-          style={{ fontSize: "var(--t-caption)", fontWeight: 700 }}
-          title={verdictNote}
-        >
-          İNCELEME: {verdict === "APPROVED" ? "ONAYLANDI" : verdict === "NEEDS_FIX" ? "DÜZELTME GEREK" : verdict}
-        </div>
+        <span title={verdictNote} className="self-start">
+          <Badge tone={verdict === "APPROVED" ? "ok" : "warn"} className="px-2.5 py-1">
+            İNCELEME: {verdict === "APPROVED" ? "ONAYLANDI" : verdict === "NEEDS_FIX" ? "DÜZELTME GEREK" : verdict}
+          </Badge>
+        </span>
       )}
       <div ref={endRef} />
     </div>

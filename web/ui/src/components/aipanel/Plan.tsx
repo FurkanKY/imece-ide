@@ -3,6 +3,7 @@
 
 import { ClipboardList, FileSearch, Lightbulb, FileCode2, ShieldAlert } from "lucide-react";
 import { useRun } from "@/state/run";
+import { EmptyState, StatusDot } from "@/components/ui";
 import { Markdown } from "./Markdown";
 
 export function Plan() {
@@ -13,13 +14,12 @@ export function Plan() {
 
   if (!task) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        <ClipboardList size={27} className="text-faint" strokeWidth={1.5} />
-        <p className="text-muted" style={{ fontSize: "var(--t-label)" }}>Önce hedefi belirleyin.</p>
-        <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          Ekip, görevinizi planlayıp değişiklikleri incelemeniz için hazırlar.
-        </p>
-      </div>
+      <EmptyState
+        icon={ClipboardList}
+        title="Önce hedefi belirleyin"
+        description="Ekip, görevinizi planlayıp değişiklikleri incelemeniz için hazırlar."
+        className="h-full"
+      />
     );
   }
 
@@ -35,7 +35,11 @@ export function Plan() {
       <section className="mt-2 rounded-[var(--r-md)] border border-border-w bg-panel/50">
         <div className="flex items-center gap-2 border-b border-border-w px-3 py-2 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
           <FileSearch size={12} /> PLANNER PLANI
-          {planner.state === "running" && <span className="ml-auto text-accent" style={{ fontSize: "var(--t-caption)", letterSpacing: 0 }}>hazırlanıyor…</span>}
+          {planner.state === "running" && (
+            <span className="ml-auto flex items-center gap-1.5 text-accent" style={{ fontSize: "var(--t-caption)", letterSpacing: 0 }}>
+              <StatusDot tone="accent" pulse size={5} /> hazırlanıyor…
+            </span>
+          )}
         </div>
         {plan?.summary || planner.output ? (
           <div className="max-h-80 overflow-y-auto px-3 py-2"><Markdown text={plan?.summary || planner.output} /></div>

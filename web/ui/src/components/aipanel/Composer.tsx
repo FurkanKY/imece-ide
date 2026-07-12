@@ -8,6 +8,7 @@ import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
 import { Role } from "@/bridge";
 import { Select } from "@/components/ui/Select";
+import { Button } from "@/components/ui";
 
 const ROLE_ICONS: Record<Role, LucideIcon> = {
   planner: BrainCircuit,
@@ -99,32 +100,34 @@ export function Composer() {
           className="selectable min-h-[54px] w-full resize-none rounded-[var(--r-md)] border border-border-w2 bg-field px-3 py-2 text-text outline-none transition-colors placeholder:text-faint focus:border-accent"
           style={{ fontSize: "var(--t-body)" }}
         />
+        {/* üç durum aynı slotta yer değiştirir → hepsi 36px kare Button (ikon-only) */}
         {running ? (
-          <button
+          <Button
+            variant="danger-outline"
+            icon={Square}
             onClick={() => void cancel()}
             title="Durdur"
-            className="pressable flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] border border-err/50 text-err hover:bg-err/15"
-          >
-            <Square size={15} strokeWidth={2.2} />
-          </button>
+            aria-label="Koşuyu durdur"
+            className="w-9 shrink-0 px-0"
+          />
         ) : reviewReady ? (
-          <button
+          <Button
+            variant="secondary"
+            icon={ClipboardCheck}
             disabled
             title="Önce inceleme kararını verin"
             aria-label="İnceleme kararı bekleniyor"
-            className="flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] border border-border-w text-faint opacity-60"
-          >
-            <ClipboardCheck size={15} strokeWidth={2.2} />
-          </button>
+            className="w-9 shrink-0 px-0"
+          />
         ) : (
-          <button
+          <Button
+            variant="primary"
+            icon={Play}
             onClick={() => void start()}
             title="Çalıştır (Enter)"
-            className="pressable flex size-9 shrink-0 items-center justify-center rounded-[var(--r-md)] bg-accent text-on-accent hover:bg-accent2"
-            style={{ boxShadow: "var(--shadow-1)" }}
-          >
-            <Play size={15} strokeWidth={2.2} className="ml-0.5" />
-          </button>
+            aria-label="Çalıştır"
+            className="w-9 shrink-0 px-0"
+          />
         )}
       </div>
     </div>

@@ -8,7 +8,7 @@ import { cx } from "@/lib/cx";
 import { Spinner } from "./Spinner";
 import type { LucideIcon } from "lucide-react";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "danger-outline" | "warn-outline";
 type Size = "sm" | "md";
 
 const VARIANT: Record<Variant, string> = {
@@ -17,6 +17,12 @@ const VARIANT: Record<Variant, string> = {
   ghost: "text-text2 hover:bg-surface-hover hover:text-text",
   // yıkıcı-birincil (silme/geri alma onayı): dolu kırmızı
   danger: "bg-err text-white hover:brightness-110",
+  // yıkıcı-ikincil (koşuyu durdur): kalıcı kırmızı çerçeve, dolgusuz —
+  // DECISIONS "Danger buton varyantı": Composer'ın durdur deseni dolu kırmızıdan ayrı kalır
+  "danger-outline": "border border-err/50 bg-transparent text-err hover:bg-err/15",
+  // dikkat-ikincil (checkpoint geri-al tetikleyicisi): sarı çerçeve; asıl onay
+  // DialogHost'ta dolu-kırmızı danger ile alınır
+  "warn-outline": "border border-warn/40 bg-transparent text-warn hover:bg-warn/10",
 };
 
 const SIZE: Record<Size, string> = {
