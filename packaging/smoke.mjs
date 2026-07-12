@@ -96,7 +96,30 @@ try {
   const keys = await bridgeCall("keys.status", {});
   const log = await bridgeCall("app.log", { level: "info", message: "Beta-3 package smoke" });
   const terminal = await bridgeCall("terminal.create", { cols: 80, rows: 24 });
-  if (terminal.ok) await bridgeCall("terminal.kill", { termId: terminal.result.termId });
+  // Beta-3: create YETMEZ (termId ConPTY ölmeden önce döner). GERÇEK kanıt: write →
+  // terminal.data olayında marker geri gelmeli (ConPTY OpenConsole.exe'yi bulabildi mi).
+  let terminalWriteOk = false;
+  if (terminal.ok) {
+    const termId = terminal.result.termId;
+    terminalWriteOk = await evaluate(`new Promise((resolve) => {
+      new window.QWebChannel(window.qt.webChannelTransport, (channel) => {
+        const host = channel.objects.host;
+        let done = false;
+        const finish = (v) => { if (!done) { done = true; resolve(v); } };
+        host.event.connect((raw) => {
+          try {
+            const m = JSON.parse(raw);
+            if (m.channel === "terminal.data" && m.payload.termId === ${JSON.stringify(termId)}
+                && String(m.payload.data).includes("SMOKE_PTY_OK")) finish(true);
+          } catch {}
+        });
+        host.call(JSON.stringify({id: 990001, method: "terminal.write",
+          params: {termId: ${JSON.stringify(termId)}, data: "Write-Output SMOKE_PTY_OK\\r"}}));
+        setTimeout(() => finish(false), 12000);
+      });
+    })`);
+    await bridgeCall("terminal.kill", { termId });
+  }
   const welcomeVisible = await evaluate("document.body.innerText.includes('Klasör Aç')");
 
   const result = {
@@ -109,10 +132,12 @@ try {
     envPath: keys.result?.envPath,
     logPath: log.result?.logPath,
     terminalOk: terminal.ok,
+    terminalWriteOk,
     consoleErrors: errors,
   };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (!bridgePresent || !welcomeVisible || !settings.ok || !keys.ok || !terminal.ok || errors.length) {
+  if (!bridgePresent || !welcomeVisible || !settings.ok || !keys.ok
+      || !terminal.ok || !terminalWriteOk || errors.length) {
     process.exitCode = 1;
   }
 } finally {
