@@ -155,6 +155,13 @@ export class MockBridge implements Bridge {
       }
       case "debug.status":
         return { active: this.dbgActive, stopped: this.dbgActive } as R;
+      // ---- app.log (Beta-2): tarayıcıda konsola ----
+      case "app.log": {
+        const p = params as { level: string; message: string; stack?: string };
+        // eslint-disable-next-line no-console
+        console.warn("[app.log:" + p.level + "]", p.message, p.stack ?? "");
+        return { logPath: "C:/mock/app.log" } as R;
+      }
       // ---- keys (beta onboarding): sahte anahtar durumu ----
       case "keys.status": {
         const dk = localStorage.getItem("magent.mock.dk") ?? "";

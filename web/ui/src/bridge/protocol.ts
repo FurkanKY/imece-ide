@@ -45,6 +45,11 @@ export interface Api {
   "app.pickFolder": { params: {}; result: { path: string | null } };
   "app.revealInOS": { params: { path: string }; result: {} };
   "app.clipboardWrite": { params: { text: string }; result: {} };
+  /** Beta-2: web hataları dosya log'una — istem/anahtar içeriği GÖNDERİLMEZ */
+  "app.log": {
+    params: { level: "info" | "warn" | "error"; message: string; stack?: string };
+    result: { logPath: string };
+  };
 
   // settings
   "settings.get": { params: {}; result: Prefs };
@@ -274,6 +279,8 @@ export interface Events {
   "lsp.event": { method: string; params: unknown };
   "exec.output": { execId: string; data: string };
   "exec.exited": { execId: string; code: number; durationS: number };
+  /** Beta-2: yakalanmamış Python istisnası — UI hata toast'ı gösterir */
+  "app.error": { message: string; logPath: string };
   /** debug (P8.2): durdu (top frame + yığın dahil — ekstra round-trip yok) */
   "debug.stopped": {
     reason: string;

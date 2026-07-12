@@ -1,6 +1,6 @@
 /* App — pencere kabuğu + çalışma alanı. Proje açıksa workspace, değilse welcome. */
 
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { bridge } from "@/bridge";
 import { useSettings } from "@/state/settings";
@@ -23,6 +23,7 @@ import { DialogHost } from "@/components/dialogs/DialogHost";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { AiPanel } from "@/components/aipanel/AiPanel";
 import { BottomPanel } from "@/components/bottompanel/BottomPanel";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditor } from "@/state/editor";
 import { useUi, PANEL_LIMITS, NARROW_BP } from "@/state/ui";
 import { useRun } from "@/state/run";
@@ -30,6 +31,12 @@ import { useRun } from "@/state/run";
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
 const smokeMode = new URLSearchParams(location.search).get("smoke");
 const scenario = new URLSearchParams(location.search).get("scenario");
+
+/** Beta-2 DEV tetiği: ?boom → AI paneli sınırında kasıtlı render hatası (smoke) */
+function Boom(): ReactNode {
+  throw new Error("boom: kasıtlı test hatası");
+}
+const devBoom = import.meta.env.DEV && new URLSearchParams(location.search).has("boom");
 
 function Workspace() {
   const view = useUi((s) => s.sideView);
@@ -174,7 +181,10 @@ function Workspace() {
             className="workspace-ai-panel shrink-0 overflow-hidden"
           >
             <div className="h-full" style={{ width: aiPanelWidth }}>
+              <ErrorBoundary label="AI paneli">
+                {devBoom && <Boom />}
                 <AiPanel onClose={hideAiPanel} />
+              </ErrorBoundary>
             </div>
           </motion.div>
         )}
@@ -191,6 +201,7 @@ export default function App() {
 
   useEffect(() => {
     installKeymap();
+    void import("@/lib/errlog").then((m) => m.installErrlog()); // Beta-2
     const off = bridge.on("window.state", (s) => setMaximized(s.maximized));
     void (async () => {
       const { installSessionPersistence } = await import("@/lib/session");
@@ -254,7 +265,9 @@ export default function App() {
     <div className={"window" + (maximized ? " maximized" : "")}>
       <ResizeEdges maximized={maximized} />
       <Titlebar maximized={maximized} />
-      {root ? <Workspace /> : <Welcome />}
+      <ErrorBoundary label="Çalışma alanı">
+        {root ? <Workspace /> : <Welcome />}
+      </ErrorBoundary>
       <StatusBar />
       <Palette />
       <DialogHost />

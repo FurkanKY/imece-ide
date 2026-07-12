@@ -9,8 +9,22 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from webhost.bridge import handler, BridgeError
+from webhost import applog
 
 APP_VERSION = "0.2.0-webshell"
+
+
+@handler("app.log")
+def _log(params, ctx):
+    """Web tarafı hataları dosya log'una (Beta-2). Mesaj kırpılır; istem/anahtar
+    içeriği taşınmaz — çağıran yalnız hata mesajı + stack gönderir."""
+    import logging
+    level = {"error": logging.ERROR, "warn": logging.WARNING}.get(
+        params.get("level"), logging.INFO)
+    message = str(params.get("message", ""))[:2000]
+    stack = str(params.get("stack") or "")[:4000]
+    applog.logger.log(level, "WEB %s%s", message, ("\n" + stack) if stack else "")
+    return {"logPath": str(applog.LOG_PATH)}
 
 
 @handler("app.info")
