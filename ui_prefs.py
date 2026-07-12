@@ -10,8 +10,10 @@ theme.set_accent / set_density ve anim.set_enabled bunları okur; ayarlar ekran�
 import os
 import json
 
-_DIR = os.path.join(os.path.expanduser("~"), ".multi_agent_ide")
-_PATH = os.path.join(_DIR, "prefs.json")
+from runtime_paths import prefs_path
+
+_PATH = str(prefs_path())
+_DIR = os.path.dirname(_PATH)
 
 DEFAULTS = {
     "accent": "blue",           # theme.ACCENTS anahtarı

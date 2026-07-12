@@ -21,6 +21,7 @@ verilir — yanıtsız bırakmak LS'i kilitleyebilir.
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -28,6 +29,7 @@ from PySide6.QtCore import QThread, Signal
 from webhost import state
 from webhost.bridge import handler, BridgeError
 from webhost.jsonrpc import encode, FrameDecoder
+from runtime_paths import is_frozen
 
 SERVER_EXE = "basedpyright-langserver"
 
@@ -152,13 +154,17 @@ def _stop_current() -> None:
 
 
 def _spawn(root: str, bridge) -> None:
-    exe = shutil.which(SERVER_EXE)
-    if exe is None:
+    if is_frozen():
+        command = [sys.executable, "--magent-lsp", "--stdio"]
+    else:
+        exe = shutil.which(SERVER_EXE)
+        command = [exe, "--stdio"] if exe else []
+    if not command:
         raise BridgeError("no_server",
                           "basedpyright kurulu değil (pip install basedpyright).")
     flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW — konsol flaşı yok
     proc = subprocess.Popen(
-        [exe, "--stdio"],
+        command,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         cwd=root, creationflags=flags,
     )

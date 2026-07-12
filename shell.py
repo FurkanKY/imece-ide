@@ -9,8 +9,30 @@ import os
 import sys
 
 
+def _run_packaged_helper() -> bool:
+    """Tek exe içindeki alt-süreç girişleri (Qt kurulmadan önce çalışır)."""
+    if "--magent-debugpy" in sys.argv:
+        sys.argv.remove("--magent-debugpy")
+        from debugpy.server.cli import main as debugpy_main
+        debugpy_main()
+        return True
+    if "--magent-lsp" in sys.argv:
+        sys.argv.remove("--magent-lsp")
+        from basedpyright.langserver import main as lsp_main
+        lsp_main()
+        return True
+    return False
+
+
 def main() -> int:
+    if _run_packaged_helper():
+        return 0
     dev = "--dev" in sys.argv
+
+    # Kaynak modunda depo .env'i; pakette yazılabilir LOCALAPPDATA kopyası.
+    from dotenv import load_dotenv
+    from runtime_paths import env_path
+    load_dotenv(env_path())
 
     # Beta-2: dosya log'u + global istisna yakalama — HER ŞEYDEN önce.
     from webhost import applog

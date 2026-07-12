@@ -10,10 +10,10 @@ import os
 import shutil
 from pathlib import Path
 
+from runtime_paths import env_path
 from webhost.bridge import handler, BridgeError
 
-ROOT = Path(__file__).resolve().parents[2]  # repo/uygulama kökü
-ENV_PATH = ROOT / ".env"
+ENV_PATH = env_path()
 
 # köprü alan adı → env değişkeni
 KEY_VARS = {"deepseek": "DEEPSEEK_API_KEY", "gemini": "GEMINI_API_KEY"}
@@ -70,6 +70,7 @@ def _set(params, ctx):
     if not updates:
         raise BridgeError("empty", "Kaydedilecek anahtar yok.")
     try:
+        ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
         write_env(ENV_PATH, updates)
     except OSError as e:
         raise BridgeError("write_failed", f".env yazılamadı: {e}")

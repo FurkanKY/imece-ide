@@ -24,6 +24,7 @@ from PySide6.QtCore import QThread, QTimer, Signal
 from webhost import state
 from webhost.bridge import handler, BridgeError
 from webhost.jsonrpc import encode, FrameDecoder
+from runtime_paths import is_frozen
 
 FLUSH_MS = 16
 FLUSH_MAX = 256 * 1024
@@ -315,9 +316,10 @@ def _start(params, ctx):
     env["PYTHONIOENCODING"] = "utf-8"
     script = os.path.normpath(os.path.join(proj.root, rel))
     try:
+        command = ([sys.executable, "--magent-debugpy"] if is_frozen()
+                   else [sys.executable, "-m", "debugpy"])
         proc = subprocess.Popen(
-            [sys.executable, "-m", "debugpy", "--listen", f"127.0.0.1:{port}",
-             "--wait-for-client", script],
+            command + ["--listen", f"127.0.0.1:{port}", "--wait-for-client", script],
             cwd=proj.root, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )

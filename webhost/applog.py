@@ -16,8 +16,9 @@ import threading
 import traceback
 from pathlib import Path
 
-LOG_DIR = Path.home() / ".multi_agent_ide" / "logs"
-LOG_PATH = LOG_DIR / "app.log"
+from runtime_paths import log_path
+
+LOG_PATH = log_path()
 
 logger = logging.getLogger("magent")
 _bridge = None
