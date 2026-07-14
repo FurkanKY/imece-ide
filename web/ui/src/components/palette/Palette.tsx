@@ -132,7 +132,7 @@ export function Palette() {
             <Kbd className="shrink-0">Esc</Kbd>
           </div>
 
-          <div ref={listRef} className="max-h-[46vh] overflow-y-auto p-1.5">
+          <div ref={listRef} role="listbox" aria-label={mode === "files" ? "Dosya sonuçları" : "Komut sonuçları"} className="max-h-[46vh] overflow-y-auto p-1.5">
             {results.length === 0 ? (
               <EmptyState title="Eşleşme yok" description="Farklı bir dosya adı veya komut deneyin." className="py-7" />
             ) : (
@@ -145,6 +145,8 @@ export function Palette() {
                   <div
                     key={r.key}
                     data-idx={i}
+                    role="option"
+                    aria-selected={on}
                     onPointerEnter={() => setSel(i)}
                     onClick={() => pick(i)}
                     className={
