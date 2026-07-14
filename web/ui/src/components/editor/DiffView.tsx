@@ -56,7 +56,7 @@ export function DiffView({ path, original, modified }: {
     edRef.current?.updateOptions({ renderSideBySide: sideBySide });
   }, [sideBySide]);
 
-  return <div ref={hostRef} className="min-h-0 flex-1" />;
+  return <div ref={hostRef} className="review-diff-canvas min-h-0 flex-1" />;
 }
 
 /** Diff açıkken sekme çubuğunda görünen özel sekme */

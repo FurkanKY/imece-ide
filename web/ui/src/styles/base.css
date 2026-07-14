@@ -85,6 +85,140 @@ button {
     transform: none;
   }
 }
+
+/* ---- V3-1 visual directions (DEV only via App's import.meta.env.DEV guard) ----
+   Bunlar üretim yönü değil, aynı gerçek ürün durumunda üç tasarım yönünü
+   karşılaştırmak için sınırlı token/kompozisyon önizlemeleridir. */
+.window[data-visual-direction] {
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+}
+.window[data-visual-direction="kinetic"] {
+  --bg: #090d12;
+  --activity: #0b1017;
+  --side: #0e141c;
+  --panel: #111923;
+  --panel2: #172130;
+  --card: #15202c;
+  --card2: #1d2a39;
+  --line: #263140;
+  --border: rgb(160 187 216 / 12%);
+  --border2: rgb(180 207 236 / 20%);
+  --text: #f1f5f9;
+  --text2: #cbd5e1;
+  --muted: #92a0b4;
+  --faint: #5f6e83;
+  --surface-grad: none;
+  --glow-accent: none;
+  --glow-accent-soft: none;
+}
+.window[data-visual-direction="kinetic"] .welcome-layout {
+  grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.58fr);
+  max-width: 78rem;
+}
+.window[data-visual-direction="kinetic"] .welcome-layout > section:first-child {
+  padding: clamp(1rem, 4vw, 4rem) 0;
+}
+.window[data-visual-direction="kinetic"] .welcome-layout > section:last-child {
+  margin-top: clamp(2rem, 8vh, 7rem);
+  border-left-color: var(--accent);
+}
+.window[data-visual-direction="kinetic"] .workspace-review-scene {
+  background: var(--panel);
+}
+.window[data-visual-direction="kinetic"] .workspace-review-scene .review-diff-canvas {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 75%, transparent);
+}
+.window[data-visual-direction="kinetic"] .workspace-review-scene .workspace-ai-panel {
+  background: var(--activity);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.window[data-visual-direction="monograph"] {
+  --bg: #0d0f12;
+  --activity: #101216;
+  --side: #121419;
+  --panel: #16191e;
+  --panel2: #1b1f25;
+  --card: #191d23;
+  --card2: #20252d;
+  --line: #2b3038;
+  --border: rgb(228 232 239 / 9%);
+  --border2: rgb(228 232 239 / 16%);
+  --surface-grad: none;
+  --shadow-1: none;
+  --shadow-2: none;
+  --shadow-3: none;
+  --bevel: none;
+  --bevel-strong: none;
+  --glow-accent: none;
+  --glow-accent-soft: none;
+}
+.window[data-visual-direction="monograph"] .welcome-layout {
+  max-width: 66rem;
+  gap: clamp(2rem, 6vw, 7rem);
+}
+.window[data-visual-direction="monograph"] .welcome-layout > section:last-child {
+  border-left-color: var(--border2);
+}
+.window[data-visual-direction="monograph"] .workspace-review-scene .review-diff-canvas {
+  border-top: 2px solid var(--accent);
+}
+
+.window[data-visual-direction="signal"] {
+  --bg: #0a0e12;
+  --activity: #0b1117;
+  --side: #101720;
+  --panel: #121b25;
+  --panel2: #182431;
+  --card: #17222e;
+  --card2: #213040;
+  --line: #263848;
+  --border: rgb(171 205 235 / 12%);
+  --border2: rgb(171 205 235 / 20%);
+  --surface-grad: none;
+  --glow-accent: none;
+  --glow-accent-soft: none;
+}
+.window[data-visual-direction="signal"] .workspace-review-scene {
+  position: relative;
+}
+.window[data-visual-direction="signal"] .workspace-review-scene::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  content: "";
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.window[data-visual-direction="signal"] .workspace-review-scene .review-diff-canvas {
+  box-shadow: inset 0 2px 0 var(--accent), inset 0 -1px 0 var(--border);
+}
+.window[data-visual-direction="signal"] .workspace-review-scene .workspace-ai-panel {
+  background: color-mix(in srgb, var(--side) 88%, var(--accent) 2%);
+}
+.window[data-visual-direction="signal"] .welcome-layout > section:last-child {
+  border-left-color: var(--accent);
+  border-left-width: 2px;
+}
+@media (max-width: 1023px) {
+  .window[data-visual-direction="kinetic"] .welcome-layout,
+  .window[data-visual-direction="monograph"] .welcome-layout {
+    grid-template-columns: 1fr;
+  }
+  .window[data-visual-direction="kinetic"] .welcome-layout > section:first-child {
+    padding: 0;
+  }
+  .window[data-visual-direction="kinetic"] .welcome-layout > section:last-child {
+    margin-top: 0;
+  }
+}
 .selectable, input, textarea {
   user-select: text;
   cursor: auto;
