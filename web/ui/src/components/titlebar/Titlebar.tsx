@@ -2,7 +2,7 @@
    deseni; tık → Ctrl+K paleti) + pencere düğmeleri. Sürükleme: pointerdown →
    bridge window.startSystemMove (Tauri deseni; chrome.py portu). */
 
-import { Minus, Play, Square, Copy, X, Search } from "lucide-react";
+import { Minus, Play, Square, Copy, X, Command } from "lucide-react";
 import { bridge } from "@/bridge";
 import { useWorkspace } from "@/state/workspace";
 import { useEditor } from "@/state/editor";
@@ -105,17 +105,19 @@ export function Titlebar({ maximized }: { maximized: boolean }) {
       {/* Esnek sürükleme alanı (sol) */}
       <div className="min-w-2 flex-1 self-stretch" />
 
-      {/* Merkez komut kapsülü — tık → komut paleti */}
+      {/* Merkez komut kapsülü — ürünün klavye öncelikli kontrol noktası */}
       <button
         data-no-drag
         onClick={() => openCommandsPalette()}
-        className="pressable group flex w-[340px] max-w-[36vw] items-center gap-2 rounded-[var(--r-sm)] border border-border-w bg-field px-3 py-[5px] hover:border-border-w2 hover:bg-card"
+        className="pressable group flex w-[400px] max-w-[42vw] items-center gap-2 rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-[4px] hover:border-border-w2 hover:bg-card"
         title="Komut paleti (Ctrl+K)"
       >
-        <Search size={12.5} className="shrink-0 text-faint" />
-        <span className="min-w-0 flex-1 truncate text-left text-faint transition-colors group-hover:text-muted"
-              style={{ fontSize: "var(--t-caption)" }}>
-          {project ?? S.common.noProject}
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-[var(--r-xs)] bg-accentdim text-accent">
+          <Command size={12} strokeWidth={2.2} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-left text-text2" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
+          Komut Merkezi
+          {project && <span className="ml-1.5 text-faint" style={{ fontWeight: "var(--w-body)" }}>· {project}</span>}
         </span>
         <Kbd className="shrink-0">Ctrl K</Kbd>
       </button>

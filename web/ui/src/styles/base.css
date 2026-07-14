@@ -90,6 +90,13 @@ button {
   cursor: auto;
 }
 
+/* Welcome geniş ekranda sahne gibi merkezde kalır. Minimum pencere yüksekliğinde
+   bilgi kartlarını kırpmak yerine içeride kaydırılabilir, üstten başlayan akışa geçer. */
+@media (max-height: 600px) {
+  .welcome-shell { align-items: flex-start; padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
+  .welcome-layout { gap: var(--sp-5); }
+}
+
 /* Pencere gövdesi: yuvarlak köşe + hairline kenar (maximize'da düzleşir) */
 #root > .window {
   height: 100%;
