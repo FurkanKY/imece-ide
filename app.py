@@ -55,4 +55,4 @@ def run():
 if __name__ == "__main__":
     # use_reloader=False: aksi halde her çalıştırmada yazılan output/result.py
     # dosyası reloader'ı tetikleyip devam eden isteği koparıyor.
-    app.run(debug=True, use_reloader=False, threaded=True, port=5000)
+    app.run(debug=False, use_reloader=False, threaded=True, port=5000)

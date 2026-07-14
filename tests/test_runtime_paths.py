@@ -1,5 +1,6 @@
 """Kaynak/paketli çalışma yol sözleşmesi."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -18,13 +19,13 @@ def test_source_mode_keeps_legacy_paths(monkeypatch):
 def test_frozen_mode_separates_resources_and_writable_data(tmp_path, monkeypatch):
     bundle = tmp_path / "bundle" / "_internal"
     local = tmp_path / "local"
-    exe = tmp_path / "bundle" / "MultiAgentIDE.exe"
+    exe = tmp_path / "bundle" / "ImeceIDE.exe"
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
     monkeypatch.setattr(sys, "executable", str(exe))
     monkeypatch.setenv("LOCALAPPDATA", str(local))
 
-    data = local / "MultiAgentIDE"
+    data = local / "ImeceIDE"
     assert runtime_paths.resource_path("web", "ui", "dist") == bundle / "web" / "ui" / "dist"
     assert runtime_paths.env_path() == data / ".env"
     assert runtime_paths.prefs_path() == data / "prefs.json"
@@ -32,9 +33,10 @@ def test_frozen_mode_separates_resources_and_writable_data(tmp_path, monkeypatch
 
 
 def test_frozen_helper_resolves_next_to_executable(tmp_path, monkeypatch):
-    exe = tmp_path / "MultiAgentIDE.exe"
-    helper = tmp_path / "magent-helper.exe"
+    suffix = ".exe" if os.name == "nt" else ""
+    exe = tmp_path / f"ImeceIDE{suffix}"
+    helper = tmp_path / f"imece-helper{suffix}"
     helper.touch()
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(exe))
-    assert runtime_paths.helper_executable("magent-helper") == helper
+    assert runtime_paths.helper_executable("imece-helper") == helper
