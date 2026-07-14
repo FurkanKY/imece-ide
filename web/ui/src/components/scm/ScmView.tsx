@@ -11,7 +11,7 @@ import { ScmChange } from "@/bridge";
 import { useScm, SCM_STATUS } from "@/state/scm";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
-import { EmptyState, IconButton } from "@/components/ui";
+import { Badge, EmptyState, IconButton, PanelHeader } from "@/components/ui";
 
 function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
   const { stage, unstage, discard, openDiff } = useScm();
@@ -96,12 +96,7 @@ function Group({ title, changes, staged, action }: {
         >
           {title}
         </span>
-        <span
-          className="rounded-[var(--r-pill)] bg-card px-1.5 text-muted"
-          style={{ fontSize: "10px", fontWeight: 700 }}
-        >
-          {changes.length}
-        </span>
+        <Badge tone="neutral">{changes.length}</Badge>
         <span className="flex-1" />
         {action && (
           <button
@@ -134,15 +129,12 @@ export function ScmView() {
   return (
     <div className="flex h-full flex-col">
       {/* başlık */}
-      <div className="material-panel group/head flex h-8 shrink-0 items-center border-b border-border-w pl-3 pr-1.5">
-        <span
-          className="min-w-0 flex-1 truncate text-muted"
-          style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}
-        >
-          KAYNAK DENETİMİ
-        </span>
-        <IconButton size="sm" icon={RefreshCw} label="Yenile" className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" onClick={() => void s.refresh()} />
-      </div>
+      <PanelHeader
+        title="KAYNAK DENETİMİ"
+        icon={GitBranch}
+        className="group/head"
+        actions={<IconButton size="sm" icon={RefreshCw} label="Yenile" className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" onClick={() => void s.refresh()} />}
+      />
 
       {!s.loaded ? null : s.error ? (
         <EmptyState icon={CircleAlert} title="Kaynak denetimi okunamadı" description={s.error}
