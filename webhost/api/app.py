@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from webhost.bridge import handler, BridgeError
 from webhost import applog
 
-APP_VERSION = "0.2.0-webshell"
+APP_VERSION = "0.3.0-beta.1"
 
 
 @handler("app.log")
