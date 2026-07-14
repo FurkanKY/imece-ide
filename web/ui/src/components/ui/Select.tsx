@@ -36,7 +36,7 @@ export function Select({
         <RSelect.Content
           position="popper"
           sideOffset={4}
-          className="material-panel z-[160] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-[var(--r-md)] border border-border-w p-1"
+          className="material-panel z-[var(--z-select)] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-[var(--r-md)] border border-border-w p-1"
           style={{ boxShadow: "var(--bevel-strong), var(--shadow-2)", transformOrigin: "var(--radix-select-content-transform-origin)" }}
         >
           <RSelect.Viewport>

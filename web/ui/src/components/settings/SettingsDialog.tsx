@@ -13,12 +13,12 @@ import { Button, StatusDot } from "@/components/ui";
 import { toast } from "@/components/toasts/toasts";
 
 const ACCENTS: { id: Prefs["accent"]; color: string }[] = [
-  { id: "blue", color: "#6aa1ff" },
-  { id: "indigo", color: "#8b8cf0" },
-  { id: "violet", color: "#b07cf0" },
-  { id: "green", color: "#4bd48a" },
-  { id: "amber", color: "#e9b45a" },
-  { id: "rose", color: "#ff7a8a" },
+  { id: "blue", color: "#8aa6c6" },
+  { id: "indigo", color: "#9898c4" },
+  { id: "violet", color: "#b095c2" },
+  { id: "green", color: "#6bbf93" },
+  { id: "amber", color: "#c7a36b" },
+  { id: "rose", color: "#cf8b96" },
 ];
 
 function Row({ label, hint, children }: {
@@ -150,7 +150,7 @@ function ApiKeysSection() {
     <div className="py-2.5">
       <div className="mb-1 flex items-center gap-1.5 text-muted"
            style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
-        <KeyRound size={11} /> API ANAHTARLARI
+        <KeyRound size={11} /> API anahtarları
       </div>
       <div className="flex items-center gap-2 py-1.5">
         <span className="flex w-24 shrink-0 items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)" }}>
@@ -192,7 +192,7 @@ export function SettingsDialog() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: animate ? 0.15 : 0 }}
-          className="fixed inset-0 z-[150] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
+          className="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
@@ -227,15 +227,15 @@ export function SettingsDialog() {
             </div>
 
             <div className="min-h-0 overflow-y-auto divide-y divide-[var(--line)] px-4 py-1">
-              <Row label="Vurgu rengi" hint="Tüm arayüze anında uygulanır">
+              <Row label="Vurgu rengi" hint="Anında uygulanır">
                 <div className="flex gap-1.5">
                   {ACCENTS.map((a) => (
                     <button
                       key={a.id}
                       title={a.id}
-                      aria-label={`Accent: ${a.id}`}
+                      aria-label={`Vurgu rengi: ${a.id}`}
                       onClick={() => void update({ accent: a.id })}
-                      className="pressable flex size-6 items-center justify-center rounded-full border"
+                      className="pressable flex size-6 items-center justify-center rounded-[var(--r-xs)] border"
                       style={{
                         background: a.color,
                         borderColor: prefs.accent === a.id ? "white" : "transparent",

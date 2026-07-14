@@ -38,7 +38,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       )}
       {...rest}
     >
-      <Icon size={ICON[size]} strokeWidth={1.9} />
+      <Icon size={ICON[size]} strokeWidth="var(--icon-stroke)" />
     </button>
   );
 });

@@ -60,7 +60,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)", ...shadow, ...style }}
       {...rest}
     >
-      {loading ? <Spinner size={size === "sm" ? 13 : 15} /> : Icon ? <Icon size={size === "sm" ? 14 : 15} strokeWidth={2} className="shrink-0" /> : null}
+      {loading ? <Spinner size={size === "sm" ? 13 : 15} /> : Icon ? <Icon size={size === "sm" ? 14 : 15} strokeWidth="var(--icon-stroke)" className="shrink-0" /> : null}
       {children}
     </button>
   );

@@ -55,7 +55,7 @@ export function StatusBar() {
       )}
       {status === "running" && (
         <span className="flex shrink-0 items-center gap-1.5 text-accent">
-          <StatusDot tone="accent" pulse /> ekip çalışıyor…
+          <StatusDot tone="accent" pulse /> çalışıyor…
         </span>
       )}
       {totals && (

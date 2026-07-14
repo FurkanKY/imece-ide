@@ -77,10 +77,10 @@ export function BottomPanel() {
     <section className="flex h-full flex-col bg-field">
       {/* başlık şeridi: görünüm sekmeleri + bağlama göre araçlar */}
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border-w bg-side px-1">
-        <ViewTab label="TERMİNAL" active={view === "terminal"}
+        <ViewTab label="Terminal" active={view === "terminal"}
                  onClick={() => setView("terminal")} icon={<TerminalSquare size={12} />}
                  badge={terms.length > 0 ? <Badge tone="neutral">{terms.length}</Badge> : undefined} />
-        <ViewTab label="ÇIKTI" active={view === "output"}
+        <ViewTab label="Çıktı" active={view === "output"}
                  onClick={() => setView("output")} icon={<Play size={11} />} badge={exitBadge} />
 
         {view === "terminal" ? (
@@ -130,7 +130,7 @@ export function BottomPanel() {
           <>
             <span className="min-w-0 flex-1 truncate px-2 font-mono text-faint"
                   style={{ fontSize: "var(--t-caption)" }}>
-              {exec.command || "F5: aktif dosyayı koş · Ctrl+F5: projeyi koş"}
+              {exec.command || "F5 aktif dosya / Ctrl+F5 proje"}
               {exec.durationS !== null && !exec.running && (
                 <span className="ml-2 text-muted">{exec.durationS.toFixed(1)} sn</span>
               )}
@@ -176,7 +176,7 @@ export function BottomPanel() {
         <OutputView visible={view === "output"} />
         {view === "terminal" && terms.length === 0 && (
           <div className="flex h-full items-center justify-center text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            Terminal kapandı — Ctrl+Shift+` ile yeni aç.
+            Terminal kapandı. Ctrl+Shift+` ile yeni terminal açın.
           </div>
         )}
       </div>

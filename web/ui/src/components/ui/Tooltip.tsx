@@ -22,7 +22,7 @@ export function Tooltip({
           <RTooltip.Content
             side={side}
             sideOffset={6}
-            className="material-panel z-[170] flex items-center gap-2 rounded-[var(--r-sm)] border border-border-w px-2 py-1 text-text2"
+            className="material-panel z-[var(--z-tooltip)] flex items-center gap-2 rounded-[var(--r-sm)] border border-border-w px-2 py-1 text-text2"
             style={{ fontSize: "var(--t-caption)", boxShadow: "var(--bevel-strong), var(--shadow-2)" }}
           >
             {content}

@@ -81,7 +81,7 @@ export function SearchView() {
               if (e.key === "Enter") void s.start();
               if (e.key === "Escape" && s.searching) void s.cancel();
             }}
-            placeholder="Projede ara… (Enter)"
+            placeholder="Projede ara"
             spellCheck={false}
             className="selectable w-full min-w-0 bg-transparent text-text outline-none placeholder:text-faint"
             style={{ fontSize: "var(--t-label)" }}
@@ -100,7 +100,7 @@ export function SearchView() {
           {s.searching
             ? "aranıyor…"
             : s.total > 0
-              ? `${s.total} eşleşme · ${groups.length} dosya${s.limitHit ? " (sınıra takıldı)" : ""}`
+              ? `${s.total} eşleşme / ${groups.length} dosya${s.limitHit ? " (sınıra takıldı)" : ""}`
               : s.query && s.matches.length === 0 && s.total === 0
                 ? "" : ""}
         </div>
@@ -147,7 +147,7 @@ export function SearchView() {
             action={<button onClick={() => void s.start()} className="text-accent" style={{ fontSize: "var(--t-label)" }}>Tekrar Dene</button>}
           />
         ) : !s.searching && s.query.trim().length >= 2 && s.matches.length === 0 && s.searchId ? (
-          <EmptyState icon={SearchX} title="Eşleşme bulunamadı" description="Sorguyu veya arama seçeneklerini değiştirip yeniden dene." />
+          <EmptyState icon={SearchX} title="Eşleşme bulunamadı" description="Sorguyu veya seçenekleri değiştirip tekrar deneyin." />
         ) : null}
       </div>
     </div>

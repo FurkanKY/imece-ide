@@ -87,7 +87,7 @@ export function Palette() {
 
   return (
     <div
-        className="fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto bg-black/55 p-4 pt-[12vh]"
+        className="fixed inset-0 z-[var(--z-overlay)] flex items-start justify-center overflow-y-auto bg-black/55 p-4 pt-[12vh]"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) close();
         }}
@@ -110,7 +110,7 @@ export function Palette() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKey}
-                placeholder={mode === "files" ? "Dosya adı yaz…" : "Bir eylem veya AI görevi ara…"}
+                placeholder={mode === "files" ? "Dosya adı" : "Komut ara"}
                 aria-label={mode === "files" ? "Dosya ara" : "Komut ara"}
                 spellCheck={false}
                 className="selectable w-full bg-transparent text-text outline-none placeholder:text-faint"

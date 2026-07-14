@@ -140,7 +140,7 @@ export function ScmView() {
         <EmptyState icon={CircleAlert} title="Kaynak denetimi okunamadı" description={s.error}
           action={<button onClick={() => void s.refresh()} className="text-accent" style={{ fontSize: "var(--t-label)" }}>Tekrar Dene</button>} />
       ) : !s.isRepo ? (
-        <EmptyState icon={FileQuestion} title="Git deposu değil" description="Bu klasörü terminalden git init ile başlatabilirsin." />
+        <EmptyState icon={FileQuestion} title="Git deposu değil" description="Terminalden git init ile başlatın." />
       ) : (
         <>
           {/* dal satırı */}
@@ -173,7 +173,7 @@ export function ScmView() {
                   void s.commit();
                 }
               }}
-              placeholder={`"${s.branch}" dalına commit mesajı (Ctrl+Enter)`}
+              placeholder="Commit mesajı (Ctrl+Enter)"
               rows={2}
               className="selectable w-full resize-none rounded-[var(--r-sm)] border border-border-w bg-field px-2.5 py-1.5 text-text outline-none transition-colors placeholder:text-faint focus:border-accent"
               style={{ fontSize: "var(--t-body)" }}
@@ -195,7 +195,7 @@ export function ScmView() {
           {/* değişiklik listeleri */}
           <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
             <Group
-              title="HAZIRLANANLAR"
+              title="Hazırlananlar"
               changes={s.staged}
               staged
               action={{
@@ -205,7 +205,7 @@ export function ScmView() {
               }}
             />
             <Group
-              title="DEĞİŞİKLİKLER"
+              title="Değişiklikler"
               changes={s.unstaged}
               staged={false}
               action={{
@@ -215,7 +215,7 @@ export function ScmView() {
               }}
             />
             {s.staged.length === 0 && s.unstaged.length === 0 && (
-              <EmptyState icon={FileCheck2} title="Çalışma ağacı temiz" description="Commitlenecek veya incelenecek değişiklik yok." className="py-8" />
+              <EmptyState icon={FileCheck2} title="Çalışma ağacı temiz" description="Değişiklik yok." className="py-8" />
             )}
           </div>
         </>
