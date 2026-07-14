@@ -80,15 +80,18 @@ export function DialogHost() {
           style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
           role="dialog"
           aria-modal="true"
+          aria-labelledby="app-dialog-title"
+          aria-describedby={current.message ? "app-dialog-message" : undefined}
         >
           <h2
+            id="app-dialog-title"
             className="text-text"
             style={{ fontSize: "var(--t-title)", fontWeight: "var(--w-title)" }}
           >
             {current.title}
           </h2>
           {current.message && (
-            <p className="mt-1.5 text-muted" style={{ fontSize: "var(--t-body)" }}>
+            <p id="app-dialog-message" className="mt-1.5 text-muted" style={{ fontSize: "var(--t-body)" }}>
               {current.message}
             </p>
           )}

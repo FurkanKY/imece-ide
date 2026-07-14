@@ -1,7 +1,7 @@
 /* SettingsDialog — arayüz tercihleri: accent (canlı), yoğunluk, Enter davranışı,
    animasyonlar. settings_panel.py'nin halefi; değişiklik anında uygulanır + kalıcı. */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X, Check, KeyRound } from "lucide-react";
 import { useUi } from "@/state/ui";
@@ -176,6 +176,11 @@ export function SettingsDialog() {
   const update = useSettings((s) => s.update);
   const reduceMotion = useReducedMotion();
   const animate = (prefs?.animations ?? true) && !reduceMotion;
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (open) requestAnimationFrame(() => closeRef.current?.focus());
+  }, [open]);
 
   if (!prefs) return null;
 
@@ -202,15 +207,17 @@ export function SettingsDialog() {
             style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
             role="dialog"
             aria-modal="true"
+            aria-labelledby="settings-dialog-title"
           >
             <div className="flex items-center justify-between border-b border-border-w px-4 py-3">
               <div className="flex items-center gap-2">
                 <Logo size={16} />
-                <h2 className="text-text" style={{ fontSize: "var(--t-title)", fontWeight: "var(--w-title)" }}>
+                <h2 id="settings-dialog-title" className="text-text" style={{ fontSize: "var(--t-title)", fontWeight: "var(--w-title)" }}>
                   Ayarlar
                 </h2>
               </div>
               <button
+                ref={closeRef}
                 onClick={() => setOpen(false)}
                 aria-label="Kapat"
                 className="icon-btn size-7"
