@@ -1,5 +1,8 @@
 # Multi-Agent Kodlama Asistanı
 
+> **Açık beta: v0.3.0-beta.1.** Windows paketiyle kullanıma hazırdır; kurulum,
+> bilinen sınırlar ve yayın kabul listesi için [RELEASE.md](docs/RELEASE.md)'ye bakın.
+
 Farklı yapay zeka modellerini (**Claude · DeepSeek · Gemini**) bir "yazılım ekibi"
 gibi çalıştıran, çok-modelli bir kodlama asistanı. Her model bir role atanır
 (planlama / kod yazma / inceleme), bir orkestratör onları sırayla çalıştırır ve
@@ -24,6 +27,13 @@ python shell.py                     # ★ masaüstü mini-IDE
 python app.py                       # web arayüzü  -> http://127.0.0.1:5000
 python orchestrator.py "..." --run  # terminal (sıfırdan tek dosya üret + çalıştır)
 ```
+
+### Windows paketiyle başlamak
+
+`dist/MultiAgentIDE/MultiAgentIDE.exe` dosyasını çalıştırın. Python ve Node gerekmez.
+İlk açılışta **Klasör Aç** ile yerel projenizi seçin; Ayarlar'dan DeepSeek/Gemini
+anahtarlarını girin ve Claude kullanacaksanız Claude Code CLI'ı ayrıca kurun. Kullanıcı
+verileri `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
 
 Ayrıntılı kurulum ve API anahtarları için → [docs/SETUP.md](docs/SETUP.md)
 
