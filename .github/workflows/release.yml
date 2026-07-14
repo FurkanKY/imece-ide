@@ -7,6 +7,11 @@ on:
         description: Release tag, for example v0.3.0-beta.1
         required: true
         type: string
+      publish:
+        description: Publish a GitHub Release (false = build and smoke only; the ZIP is uploaded as a workflow artifact for acceptance testing)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -40,6 +45,7 @@ jobs:
             ImeceIDE-windows.zip
             SHA256SUMS.txt
       - name: Publish GitHub Release
+        if: ${{ inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
