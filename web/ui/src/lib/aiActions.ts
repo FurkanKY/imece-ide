@@ -149,7 +149,7 @@ export async function runTests() {
     toast.info("Önce bir proje klasörü aç.");
     return;
   }
-  const remembered = localStorage.getItem("magent.testCommand") ?? "";
+  const remembered = localStorage.getItem("imece.testCommand") ?? "";
   const { promptDialog } = await import("@/components/dialogs/dialogs");
   const next = await promptDialog({
     title: "Testleri çalıştır",
@@ -160,7 +160,7 @@ export async function runTests() {
   });
   if (!next?.trim()) return;
   const cmd = next.trim();
-  localStorage.setItem("magent.testCommand", cmd);
+  localStorage.setItem("imece.testCommand", cmd);
   const { useExec } = await import("@/state/exec");
   void useExec.getState().run(null, cmd);
 }

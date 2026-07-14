@@ -91,7 +91,7 @@ export const useExec = create<ExecState>((set, get) => ({
       const params = command ? { rel: null, command } : { rel: rel ?? null };
       const preflight = await bridge.call("exec.preflight", params);
       if (preflight.requiresConfirmation) {
-        const source = preflight.source === "project_config" ? ".magent/run.json" : "proje algısı";
+        const source = preflight.source === "project_config" ? ".imece/run.json" : "proje algısı";
         const accepted = await confirmDialog({
           title: "Proje komutunu çalıştır",
           message: `${source} bu komutu ${preflight.cwd} içinde çalıştıracak:\n\n${preflight.command}`,

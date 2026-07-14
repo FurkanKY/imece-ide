@@ -7,7 +7,7 @@ import { bridge } from "@/bridge";
 import { logError } from "@/lib/errlog";
 import { Button, EmptyState } from "@/components/ui";
 
-const ISSUES_URL = "https://github.com/FurkanKY/multi-agent/issues/new";
+const ISSUES_URL = "https://github.com/FurkanKY/imece-ide/issues/new";
 
 interface Props {
   /** fallback başlığında görünen bölge adı (ör. "AI paneli") */

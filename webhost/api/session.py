@@ -1,6 +1,6 @@
-"""session.* — proje-içi oturum kalıcılığı (.magent/session.json).
+"""session.* — proje-içi oturum kalıcılığı (.imece/session.json).
 Açık sekmeler + aktif sekme + kabuk düzeni (panel görünürlük/boyutları, kenar
-görünümü — P4); history.py ile aynı .magent klasörünü paylaşır."""
+görünümü — P4); history.py ile aynı .imece klasörünü paylaşır."""
 
 import json
 import os
@@ -15,7 +15,7 @@ def _path() -> str | None:
     proj = state.get_project()
     if proj is None:
         return None
-    return os.path.join(proj.root, ".magent", "session.json")
+    return os.path.join(proj.root, ".imece", "session.json")
 
 
 @handler("session.get")

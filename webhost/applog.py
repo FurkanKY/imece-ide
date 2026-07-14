@@ -20,7 +20,7 @@ from runtime_paths import log_path
 
 LOG_PATH = log_path()
 
-logger = logging.getLogger("magent")
+logger = logging.getLogger("imece")
 _bridge = None
 
 

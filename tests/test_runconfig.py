@@ -1,4 +1,4 @@
-"""runconfig.py testleri — komut sezgisi + .magent/run.json kalıcılığı."""
+"""runconfig.py testleri — komut sezgisi + .imece/run.json kalıcılığı."""
 
 import json
 import sys
@@ -37,7 +37,7 @@ def test_saved_command_wins_and_roundtrips(tmp_path):
     runconfig.save_project_command(str(tmp_path), "python -m paket --debug")
     assert runconfig.project_command(str(tmp_path)) == "python -m paket --debug"
     # dosya bozuksa sezgiye düşer
-    (tmp_path / ".magent" / "run.json").write_text("{bozuk", encoding="utf-8")
+    (tmp_path / ".imece" / "run.json").write_text("{bozuk", encoding="utf-8")
     assert runconfig.project_command(str(tmp_path)) == 'python "main.py"'
 
 

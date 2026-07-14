@@ -20,7 +20,7 @@ const DEFAULT_PREFS: Prefs = {
   animations: true,
   lastProject: null,
   recentProjects: [
-    { path: "C:/Projeler/multi-agent", name: "multi-agent", lastOpened: "2026-07-05T12:00:00Z" },
+    { path: "C:/Projeler/imece", name: "imece", lastOpened: "2026-07-05T12:00:00Z" },
     { path: "C:/Projeler/demo-api", name: "demo-api", lastOpened: "2026-07-01T09:30:00Z" },
   ],
 };
@@ -43,7 +43,7 @@ export class MockBridge implements Bridge {
   ];
   private prefs: Prefs = (() => {
     try {
-      const raw = localStorage.getItem("magent.prefs");
+      const raw = localStorage.getItem("imece.prefs");
       return raw ? { ...DEFAULT_PREFS, ...JSON.parse(raw) } : DEFAULT_PREFS;
     } catch {
       return DEFAULT_PREFS;
@@ -76,7 +76,7 @@ export class MockBridge implements Bridge {
           ? command
           : rel
             ? `python "${rel}"`
-            : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"';
+            : localStorage.getItem("imece.mock.runcmd") ?? 'python "main.py"';
         const execId = "x" + ++this.termCounter;
         const lines = [
           `\x1b[36m$ ${cmd}\x1b[0m\r\n`,
@@ -92,21 +92,21 @@ export class MockBridge implements Bridge {
       case "exec.stop":
         return {} as R;
       case "exec.getCommand":
-        return { command: localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"', source: "project_config" } as R;
+        return { command: localStorage.getItem("imece.mock.runcmd") ?? 'python "main.py"', source: "project_config" } as R;
       case "exec.preflight": {
         const p = params as { rel?: string | null; command?: string };
-        const cmd = p.command ?? (p.rel ? `python "${p.rel}"` : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"');
-        const key = `magent.mock.trusted.${cmd}`;
+        const cmd = p.command ?? (p.rel ? `python "${p.rel}"` : localStorage.getItem("imece.mock.runcmd") ?? 'python "main.py"');
+        const key = `imece.mock.trusted.${cmd}`;
         return { command: cmd, source: p.command ? "explicit" : p.rel ? "file" : "project_config", cwd: "C:/Projeler/demo-api", fingerprint: key, requiresConfirmation: !p.command && !p.rel && !localStorage.getItem(key) } as R;
       }
       case "exec.approveCommand": {
         const p = params as { rel?: string | null; command?: string };
-        const cmd = p.command ?? (p.rel ? `python "${p.rel}"` : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"');
-        localStorage.setItem(`magent.mock.trusted.${cmd}`, "1");
+        const cmd = p.command ?? (p.rel ? `python "${p.rel}"` : localStorage.getItem("imece.mock.runcmd") ?? 'python "main.py"');
+        localStorage.setItem(`imece.mock.trusted.${cmd}`, "1");
         return {} as R;
       }
       case "exec.setCommand":
-        localStorage.setItem("magent.mock.runcmd", (params as { command: string }).command);
+        localStorage.setItem("imece.mock.runcmd", (params as { command: string }).command);
         return {} as R;
       // ---- debug (P8.2): sahte DAP oturumu — breakpoint'te durur, adımlar ----
       case "debug.start": {
@@ -177,8 +177,8 @@ export class MockBridge implements Bridge {
       }
       // ---- keys (beta onboarding): sahte anahtar durumu ----
       case "keys.status": {
-        const dk = localStorage.getItem("magent.mock.dk") ?? "";
-        const gk = localStorage.getItem("magent.mock.gk") ?? "";
+        const dk = localStorage.getItem("imece.mock.dk") ?? "";
+        const gk = localStorage.getItem("imece.mock.gk") ?? "";
         return {
           providers: {
             claude: { ok: true, detail: "C:\\mock\\claude.exe" },
@@ -190,8 +190,8 @@ export class MockBridge implements Bridge {
       }
       case "keys.set": {
         const p = params as { deepseek?: string; gemini?: string };
-        if (p.deepseek) localStorage.setItem("magent.mock.dk", p.deepseek);
-        if (p.gemini) localStorage.setItem("magent.mock.gk", p.gemini);
+        if (p.deepseek) localStorage.setItem("imece.mock.dk", p.deepseek);
+        if (p.gemini) localStorage.setItem("imece.mock.gk", p.gemini);
         return {} as R;
       }
       case "receipt.get": {
@@ -208,7 +208,7 @@ export class MockBridge implements Bridge {
         return { receipt } as R;
       }
       case "receipt.export":
-        return { path: "C:/mock/multi-agent-receipt.md" } as R;
+        return { path: "C:/mock/imece-receipt.md" } as R;
       // ---- lsp (P7): tarayıcıda dil sunucusu yok — zararsız no-op ----
       case "lsp.start":
         return { running: false, ready: false } as R;
@@ -221,12 +221,12 @@ export class MockBridge implements Bridge {
         return { result: null } as R;
       case "session.get":
         try {
-          return JSON.parse(sessionStorage.getItem("magent.session") ?? "") as R;
+          return JSON.parse(sessionStorage.getItem("imece.session") ?? "") as R;
         } catch {
           return { openTabs: [], activeTab: null } as R;
         }
       case "session.save":
-        sessionStorage.setItem("magent.session", JSON.stringify(params));
+        sessionStorage.setItem("imece.session", JSON.stringify(params));
         return {} as R;
       case "window.toggleMaximize":
         this.maximized = !this.maximized;
@@ -281,7 +281,7 @@ export class MockBridge implements Bridge {
         return this.prefs as R;
       case "settings.set":
         this.prefs = params as Prefs;
-        localStorage.setItem("magent.prefs", JSON.stringify(this.prefs));
+        localStorage.setItem("imece.prefs", JSON.stringify(this.prefs));
         return {} as R;
       case "run.providers":
         return {

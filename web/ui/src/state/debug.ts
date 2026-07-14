@@ -1,5 +1,5 @@
 /* debug store — P8.2 (debugpy/DAP): breakpoint'ler + oturum durumu + yığın.
-   Breakpoint'ler proje köküne göre localStorage'da kalıcı (magent.bp.<root>).
+   Breakpoint'ler proje köküne göre localStorage'da kalıcı (imece.bp.<root>).
    Program çıktısı ÇIKTI sekmesine akar (exec store'un dış-koşu kanalı). */
 
 import { create } from "zustand";
@@ -14,7 +14,7 @@ import { beginExternalRun, feedExternalOutput, endExternalRun } from "@/state/ex
 export type DebugStatus = "idle" | "starting" | "running" | "stopped";
 
 function bpKey(root: string) {
-  return "magent.bp." + root;
+  return "imece.bp." + root;
 }
 
 function loadBp(root: string | null): Record<string, number[]> {

@@ -282,10 +282,10 @@ export async function installLsp() {
 
   // sunucu olayları
   bridge.on("lsp.event", ({ method, params }) => {
-    if (method === "$/magentReady") {
+    if (method === "$/imeceReady") {
       useLsp.setState({ status: "ready" });
       monaco.editor.getModels().forEach(didOpen); // taze sunucuya açıkları tanıt
-    } else if (method === "$/magentExited") {
+    } else if (method === "$/imeceExited") {
       useLsp.setState({ status: "off" });
     } else if (method === "textDocument/publishDiagnostics") {
       const p = params as { uri: string; diagnostics: LspDiagnostic[] };

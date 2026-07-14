@@ -316,7 +316,7 @@ def _start(params, ctx):
     env["PYTHONIOENCODING"] = "utf-8"
     script = os.path.normpath(os.path.join(proj.root, rel))
     try:
-        command = ([sys.executable, "--magent-debugpy"] if is_frozen()
+        command = ([sys.executable, "--imece-debugpy"] if is_frozen()
                    else [sys.executable, "-m", "debugpy"])
         proc = subprocess.Popen(
             command + ["--listen", f"127.0.0.1:{port}", "--wait-for-client", script],
@@ -353,7 +353,7 @@ def _start(params, ctx):
             _request("attach", {"justMyCode": True})
 
         _request("initialize", {
-            "clientID": "magent", "adapterID": "debugpy",
+            "clientID": "imece", "adapterID": "debugpy",
             "pathFormat": "path", "linesStartAt1": True, "columnsStartAt1": True,
             "supportsVariableType": True,
         }, _after_init)

@@ -35,7 +35,7 @@ export interface Api {
   "window.confirmClose": { params: {}; result: {} };
   "window.ready": { params: {}; result: {} };
 
-  // session (proje-içi .magent/session.json)
+  // session (proje-içi .imece/session.json)
   "session.get": { params: {}; result: SessionData };
   "session.save": { params: SessionData; result: {} };
 
@@ -301,7 +301,7 @@ export interface Events {
   "terminal.exit": { termId: string; code: number };
   "search.results": { searchId: string; matches: SearchMatch[] };
   "search.done": { searchId: string; total: number; limitHit: boolean };
-  /** LSP sunucu bildirimleri (publishDiagnostics, $/magentReady, $/magentExited) */
+  /** LSP sunucu bildirimleri (publishDiagnostics, $/imeceReady, $/imeceExited) */
   "lsp.event": { method: string; params: unknown };
   "exec.output": { execId: string; data: string };
   "exec.exited": { execId: string; code: number; durationS: number };

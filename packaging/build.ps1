@@ -22,10 +22,10 @@ if (-not (Test-Path $Index)) {
 
 Push-Location $Root
 try {
-    & $Python -m PyInstaller --noconfirm --clean "packaging\MultiAgentIDE.spec"
+    & $Python -m PyInstaller --noconfirm --clean "packaging\ImeceIDE.spec"
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller başarısız (exit $LASTEXITCODE)." }
 } finally {
     Pop-Location
 }
 
-Write-Host "Paket hazır: $Root\dist\MultiAgentIDE\MultiAgentIDE.exe"
+Write-Host "Paket hazır: $Root\dist\ImeceIDE\ImeceIDE.exe"

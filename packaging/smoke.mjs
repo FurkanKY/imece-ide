@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const exe = path.join(ROOT, "dist", "MultiAgentIDE", "MultiAgentIDE.exe");
+const exe = path.join(ROOT, "dist", "ImeceIDE", "ImeceIDE.exe");
 const port = 9333;
 const windowsPath = [
   process.env.SystemRoot,

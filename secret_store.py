@@ -1,7 +1,7 @@
 """Windows paketinde API anahtarlarını DPAPI ile yerelde korur.
 
 Kaynak modunda geliştiricinin .env akışı korunur. Paketli Windows sürümünde ise
-anahtarlar %LOCALAPPDATA%/MultiAgentIDE/secrets.dat içinde, kullanıcı hesabına
+anahtarlar %LOCALAPPDATA%/ImeceIDE/secrets.dat içinde, kullanıcı hesabına
 bağlı Windows Data Protection API ile şifrelenir.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _protect(data: bytes) -> bytes:
     target = _DATA_BLOB()
     crypt32 = ctypes.windll.crypt32
     kernel32 = ctypes.windll.kernel32
-    if not crypt32.CryptProtectData(ctypes.byref(source), "MultiAgentIDE", None, None, None, 0, ctypes.byref(target)):
+    if not crypt32.CryptProtectData(ctypes.byref(source), "ImeceIDE", None, None, None, 0, ctypes.byref(target)):
         raise SecretStoreError("Windows anahtar koruması başarısız oldu.")
     try:
         return ctypes.string_at(target.pbData, target.cbData)

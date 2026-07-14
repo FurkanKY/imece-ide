@@ -11,13 +11,13 @@ import sys
 
 def _run_packaged_helper() -> bool:
     """Tek exe içindeki alt-süreç girişleri (Qt kurulmadan önce çalışır)."""
-    if "--magent-debugpy" in sys.argv:
-        sys.argv.remove("--magent-debugpy")
+    if "--imece-debugpy" in sys.argv:
+        sys.argv.remove("--imece-debugpy")
         from debugpy.server.cli import main as debugpy_main
         debugpy_main()
         return True
-    if "--magent-lsp" in sys.argv:
-        sys.argv.remove("--magent-lsp")
+    if "--imece-lsp" in sys.argv:
+        sys.argv.remove("--imece-lsp")
         from basedpyright.langserver import main as lsp_main
         lsp_main()
         return True

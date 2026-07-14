@@ -1,7 +1,7 @@
 """Kaynak ve PyInstaller paketli çalışma için merkezi yol çözümleme.
 
 Paket içeriği salt-okunur kabul edilir; kullanıcı tarafından değişen her şey
-LOCALAPPDATA/MultiAgentIDE altında tutulur. Kaynak modunda mevcut geliştirme
+LOCALAPPDATA/ImeceIDE altında tutulur. Kaynak modunda mevcut geliştirme
 yolları korunur, böylece yerel kurulumlar sessizce taşınmaz.
 """
 
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 
-APP_DIR_NAME = "MultiAgentIDE"
+APP_DIR_NAME = "ImeceIDE"
 SOURCE_ROOT = Path(__file__).resolve().parent
 
 

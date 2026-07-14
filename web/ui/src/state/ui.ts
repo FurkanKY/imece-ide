@@ -88,25 +88,25 @@ export const useUi = create<UiState>((set) => ({
   bottomHeight: PANEL_LIMITS.bottom.def,
   settingsOpen: false,
   resizing: false,
-  diffSideBySide: localStorage.getItem("magent.diffSideBySide") === "1",
+  diffSideBySide: localStorage.getItem("imece.diffSideBySide") === "1",
   toggleDiffSideBySide: () =>
     set((s) => {
       const v = !s.diffSideBySide;
-      localStorage.setItem("magent.diffSideBySide", v ? "1" : "0");
+      localStorage.setItem("imece.diffSideBySide", v ? "1" : "0");
       return { diffSideBySide: v };
     }),
-  zoom: Number(localStorage.getItem("magent.zoom")) || 1,
+  zoom: Number(localStorage.getItem("imece.zoom")) || 1,
   setZoom: (z) => {
     const v = Math.round(clamp(z, 0.7, 1.6) * 10) / 10;
-    localStorage.setItem("magent.zoom", String(v));
+    localStorage.setItem("imece.zoom", String(v));
     void bridge.call("window.setZoom", { factor: v });
     set({ zoom: v });
   },
-  wordWrap: localStorage.getItem("magent.wordWrap") === "1",
+  wordWrap: localStorage.getItem("imece.wordWrap") === "1",
   toggleWordWrap: () =>
     set((s) => {
       const v = !s.wordWrap;
-      localStorage.setItem("magent.wordWrap", v ? "1" : "0");
+      localStorage.setItem("imece.wordWrap", v ? "1" : "0");
       return { wordWrap: v };
     }),
   bottomView: "terminal",

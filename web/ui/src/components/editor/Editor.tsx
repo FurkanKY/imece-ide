@@ -134,7 +134,7 @@ export function Editor() {
     void import("@/lib/lsp").then(({ installLsp }) => installLsp());
     if (!hostRef.current) return;
     const ed = monaco.editor.create(hostRef.current, {
-      theme: "magent-dark",
+      theme: "imece-dark",
       automaticLayout: true,
       fontFamily: "JetBrains Mono",
       fontSize: 13,

@@ -2,7 +2,7 @@
 history.py
 ----------
 Faz E — proje başına oturum/iterasyon geçmişi. Her ajan koşusu (görev → sonuç →
-maliyet) proje-içi `.magent/history.json`'a kaydedilir; AI panelindeki geçmiş
+maliyet) proje-içi `.imece/history.json`'a kaydedilir; AI panelindeki geçmiş
 drawer'ı bunları listeler, tıklanınca görev geri yüklenir.
 """
 
@@ -15,7 +15,7 @@ MAX_ITEMS = 100
 
 class HistoryStore:
     def __init__(self, project_root: str):
-        self.dir = os.path.join(project_root, ".magent")
+        self.dir = os.path.join(project_root, ".imece")
         self.path = os.path.join(self.dir, "history.json")
 
     def all(self) -> list[dict]:
