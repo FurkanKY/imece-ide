@@ -50,13 +50,14 @@ DEEPSEEK_API_KEY=sk-...
 DEEPSEEK_MODEL=deepseek-chat        # veya deepseek-v4-pro
 
 GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-3.5-flash       # hesabında olan bir model (bkz. MODELS.md)
+GEMINI_MODEL=gemini-3.5-flash       # hesabınızda kullanılabilen bir model
 
 CLAUDE_CLI=claude                   # Claude için anahtar YOK, sadece CLI adı
 ```
 
-> **Önemli:** Model adları API'nin gerçek adları olmalı. `gemini-3.1-pro` gibi bir ad
-> 404/429 verir. Çalışan adlar için → [MODELS.md](MODELS.md).
+> **Önemli:** Model adları API sağlayıcınızın kabul ettiği gerçek adlar olmalı.
+> Kullanılabilir modelleri ve kota sınırlarını sağlayıcınızın güncel belgelerinden
+> doğrulayın.
 
 `.env` gizlidir ve `.gitignore` ile dışlanmıştır — kimseyle paylaşma. Bu yöntem
 yalnız kaynak geliştirme içindir. Paketli Windows uygulamasında anahtarları

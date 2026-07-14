@@ -123,7 +123,6 @@ sekmeli, dirty noktası), altta **durum çubuğu**.
   Proje köküne açılır; UTF-8.
 
 Güvenlik: ajanlar seçtiğin klasörün **dışına çıkamaz** (yol güvenliği `project.py`).
-Yol haritası için bkz. [ROADMAP.md](ROADMAP.md).
 
 > **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
 > gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +

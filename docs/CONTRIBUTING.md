@@ -10,35 +10,30 @@ Amaç: kod ile doküman arasındaki farkın hiçbir zaman birikmemesi.
 
 ### Her iterasyonun sonunda yapılacaklar (checklist)
 
-1. **`docs/CHANGELOG.md`'ye bir satır ekle** — ne değişti, hangi tarihte.
-2. Aşağıdaki tabloya göre **etkilenen dokümanı güncelle**.
-3. Yeni bir modül/dosya eklediysen **README dosya haritasına** ekle.
-4. Bir yol haritası maddesi tamamlandıysa **`docs/ROADMAP.md`'de durumunu güncelle**
-   (⏳ → ✅) ve gerekiyorsa `docs/OPTIMIZATIONS.md` tablosundaki durumu değiştir.
-5. Anahtar, dosya yazma, komut çalıştırma veya dış veri aktarımı etkileniyorsa
+1. Kullanıcıyı veya katkıcıyı etkileyen değişikliklerde **`docs/CHANGELOG.md`'yi güncelle**.
+2. Aşağıdaki tabloya göre **etkilenen public dokümanı güncelle**.
+3. Yeni bir kullanıcı yüzeyi veya komut eklediysen README ya da kullanım rehberine ekle.
+4. Anahtar, dosya yazma, komut çalıştırma veya dış veri aktarımı etkileniyorsa
    `PRIVACY.md` ve gerektiğinde `SECURITY.md` aynı değişiklikte güncellenir.
 
 ### Değişiklik türü → güncellenecek doküman
 
 | Değişiklik | Güncellenecek |
 |-----------|---------------|
-| Yeni model/sağlayıcı, fiyat, model adı | `docs/MODELS.md` |
+| Yeni model/sağlayıcı davranışı | `README.md` + `docs/SETUP.md` |
 | Yeni modül, katman, olay tipi, veri akışı | `docs/ARCHITECTURE.md` |
 | Yeni köprü metodu/olayı (webhost ↔ web/ui) | `web/ui/src/bridge/protocol.ts` (tek kaynak) + `docs/ARCHITECTURE.md` |
-| Yeni tasarım tokenı / değeri | `web/ui/src/styles/tokens.css` + `docs/DESIGN.md` |
+| Yeni tasarım tokenı / değeri | `web/ui/src/styles/tokens.css` |
 | Yeni arayüz özelliği / kullanım biçimi | `docs/USAGE.md` |
-| Yeni optimizasyon tekniği veya durumu | `docs/OPTIMIZATIONS.md` |
 | Kurulum, bağımlılık, ortam tuzağı | `docs/SETUP.md` + `requirements.txt` |
-| Faz ilerlemesi / yayın durumu | `docs/ROADMAP.md` + `docs/CHANGELOG.md` |
-| Yol haritası ilerlemesi / faz durumu | `docs/ROADMAP.md` |
-| **Her değişiklik (istisnasız)** | `docs/CHANGELOG.md` |
+| Yayınlanmış kullanıcı etkisi | `docs/CHANGELOG.md` |
 
 ### Faz tamamlama tanımı (Definition of Done)
 
-Bir faz/özellik şu üçü tamamlanınca biter:
+Bir özellik şu üçü tamamlanınca biter:
 1. Kod yazıldı ve **doğrulandı** (headless test ve/veya kullanıcı onayı).
 2. İlgili dokümanlar güncellendi (yukarıdaki tablo).
-3. `docs/CHANGELOG.md`'ye kayıt düşüldü.
+3. Kullanıcıyı etkileyen değişiklikse `docs/CHANGELOG.md`'ye kayıt düşüldü.
 
 ---
 

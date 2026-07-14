@@ -193,7 +193,7 @@ sunucusu (`localhost:5173`, HMR) yüklenir — **gerçek köprüyle**.
 `state/editor.ts` (sekmeler/dirty/kaydet/merkez diff), `state/run.ts` (koşu olayları),
 `state/scm.ts` (git durumu), `state/terminal.ts`, `state/search.ts`, `state/ui.ts`
 (panel görünürlük/boyutları), `state/settings.ts` (prefs → `<html data-*>`).
-Tasarım tokenları `web/ui/src/styles/tokens.css`'te (bkz. DESIGN.md).
+Tasarım tokenları `web/ui/src/styles/tokens.css`'te tanımlanır.
 
 **Editör:** Monaco npm paketiyle gelir (`lib/monaco.ts` — worker kablolaması + tokenlardan
 üretilmiş `magent-dark` teması + diff renkleri). Merkez **inline diff** hem AI önerileri
