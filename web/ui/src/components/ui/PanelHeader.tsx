@@ -1,5 +1,5 @@
-/* PanelHeader — tüm kenar/alt panellerin ortak başlık yapısı: overline başlık +
-   opsiyonel ikon + sağda aksiyon alanı. Sabit yükseklik → layout shift olmaz. */
+/* PanelHeader — tüm kenar/alt panellerin ortak, sakin başlık satırı. Sabit
+   yükseklik layout shift'i önler; yüzey yerine ayracı hiyerarşi kurar. */
 
 import { cx } from "@/lib/cx";
 import type { LucideIcon } from "lucide-react";
@@ -18,7 +18,7 @@ export function PanelHeader({
   return (
     <div
       className={cx(
-        "material-panel flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-w px-3",
+        "flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-w bg-side px-3",
         className,
       )}
     >
@@ -27,9 +27,8 @@ export function PanelHeader({
         <span
           className="truncate"
           style={{
-            fontSize: "var(--t-overline)",
-            fontWeight: "var(--w-overline)",
-            letterSpacing: "var(--ls-overline)",
+            fontSize: "var(--t-caption)",
+            fontWeight: "var(--w-label)",
           }}
         >
           {title}

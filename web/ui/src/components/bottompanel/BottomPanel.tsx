@@ -76,7 +76,7 @@ export function BottomPanel() {
   return (
     <section className="flex h-full flex-col bg-field">
       {/* başlık şeridi: görünüm sekmeleri + bağlama göre araçlar */}
-      <div className="material-panel flex h-8 shrink-0 items-center gap-1 border-b border-border-w px-1">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border-w bg-side px-1">
         <ViewTab label="TERMİNAL" active={view === "terminal"}
                  onClick={() => setView("terminal")} icon={<TerminalSquare size={12} />}
                  badge={terms.length > 0 ? <Badge tone="neutral">{terms.length}</Badge> : undefined} />
@@ -99,8 +99,8 @@ export function BottomPanel() {
                   }}
                   onAuxClick={(e) => { if (e.button === 1) void kill(t.id); }} // orta tık → kapat
                   className={
-                    "group flex cursor-pointer items-center gap-1.5 rounded-[var(--r-xs)] px-2 py-1 " +
-                    (t.id === activeId ? "bg-card text-text" : "text-muted hover:bg-card/50")
+                    "group flex cursor-pointer items-center gap-1.5 border-b-2 px-2 py-1 " +
+                    (t.id === activeId ? "border-accent text-text" : "border-transparent text-muted hover:bg-card/50")
                   }
                   style={{ fontSize: "var(--t-caption)" }}
                 >

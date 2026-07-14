@@ -11,7 +11,7 @@ import { ScmChange } from "@/bridge";
 import { useScm, SCM_STATUS } from "@/state/scm";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
-import { Badge, Button, EmptyState, IconButton, PanelHeader } from "@/components/ui";
+import { Button, EmptyState, IconButton, PanelHeader } from "@/components/ui";
 
 function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
   const { stage, unstage, discard, openDiff } = useScm();
@@ -32,8 +32,8 @@ function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
       }}
       title={`${change.path} — ${st.label}`}
       className={
-        "group flex cursor-pointer items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pl-2 pr-1 " +
-        (active ? "bg-accentdim" : "hover:bg-card")
+        "group flex cursor-pointer items-center gap-1.5 border-l-2 py-[3px] pl-2 pr-1 " +
+        (active ? "border-accent bg-accentdim/60" : "border-transparent hover:bg-card/45")
       }
     >
       <Icon size={14} strokeWidth={1.8} style={{ color }} className="shrink-0" />
@@ -96,7 +96,7 @@ function Group({ title, changes, staged, action }: {
         >
           {title}
         </span>
-        <Badge tone="neutral">{changes.length}</Badge>
+        <span className="text-faint" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>{changes.length}</span>
         <span className="flex-1" />
         {action && (
           <button
@@ -130,7 +130,7 @@ export function ScmView() {
     <div className="flex h-full flex-col">
       {/* başlık */}
       <PanelHeader
-        title="KAYNAK DENETİMİ"
+        title="Kaynak denetimi"
         icon={GitBranch}
         className="group/head"
         actions={<IconButton size="sm" icon={RefreshCw} label="Yenile" className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" onClick={() => void s.refresh()} />}
@@ -144,7 +144,7 @@ export function ScmView() {
       ) : (
         <>
           {/* dal satırı */}
-          <div className="material-card mx-2 mb-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--r-sm)] border border-border-w px-2">
+          <div className="mx-2 mb-2 flex h-7 shrink-0 items-center gap-1.5 border-b border-border-w px-1">
             <GitBranch size={13} className="shrink-0 text-accent" />
             <span className="truncate text-text2" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
               {s.branch}
