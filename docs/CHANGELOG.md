@@ -5,7 +5,7 @@ planning records are intentionally not part of the published repository.
 
 ## v0.3.0-beta.1
 
-- First Windows public beta of Multi-Agent IDE.
+- First Windows public beta of Imece IDE.
 - Local Planner, Coder and Reviewer workflow with reviewable diffs, apply/reject
   controls, checkpoints and project-local change receipts.
 - Windows package API keys protected for the current user with DPAPI; project F5
