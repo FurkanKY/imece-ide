@@ -13,6 +13,7 @@ interface SearchState {
   matches: SearchMatch[];
   total: number;
   limitHit: boolean;
+  error: string | null;
   /** arama girişine odak isteği (Ctrl+Shift+F) — nonce */
   focusNonce: number;
   setQuery: (q: string) => void;
@@ -35,6 +36,7 @@ export const useSearch = create<SearchState>((set, get) => ({
   matches: [],
   total: 0,
   limitHit: false,
+  error: null,
   focusNonce: 0,
 
   setQuery: (q) => set({ query: q }),
@@ -45,7 +47,7 @@ export const useSearch = create<SearchState>((set, get) => ({
   start: async () => {
     const { query, regex, caseSensitive } = get();
     if (query.trim().length < 2) return;
-    set({ searching: true, matches: [], total: 0, limitHit: false });
+    set({ searching: true, matches: [], total: 0, limitHit: false, error: null });
     try {
       const { searchId } = await bridge.call("search.start", {
         query: query.trim(),
@@ -54,14 +56,21 @@ export const useSearch = create<SearchState>((set, get) => ({
       });
       set({ searchId });
     } catch (e) {
-      set({ searching: false });
-      toast.err(e instanceof BridgeError ? e.message : "Arama başlatılamadı.");
+      const error = e instanceof BridgeError ? e.message : "Arama başlatılamadı.";
+      set({ searching: false, error });
+      toast.err(error);
     }
   },
 
   cancel: async () => {
-    await bridge.call("search.cancel", {});
-    set({ searching: false });
+    try {
+      await bridge.call("search.cancel", {});
+      set({ searching: false });
+    } catch (e) {
+      const error = e instanceof BridgeError ? e.message : "Arama durdurulamadı.";
+      set({ searching: false, error });
+      toast.err(error);
+    }
   },
 
   install: () => {
