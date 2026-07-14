@@ -78,7 +78,8 @@ export function BottomPanel() {
       {/* başlık şeridi: görünüm sekmeleri + bağlama göre araçlar */}
       <div className="material-panel flex h-8 shrink-0 items-center gap-1 border-b border-border-w px-1">
         <ViewTab label="TERMİNAL" active={view === "terminal"}
-                 onClick={() => setView("terminal")} icon={<TerminalSquare size={12} />} />
+                 onClick={() => setView("terminal")} icon={<TerminalSquare size={12} />}
+                 badge={terms.length > 0 ? <Badge tone="neutral">{terms.length}</Badge> : undefined} />
         <ViewTab label="ÇIKTI" active={view === "output"}
                  onClick={() => setView("output")} icon={<Play size={11} />} badge={exitBadge} />
 
