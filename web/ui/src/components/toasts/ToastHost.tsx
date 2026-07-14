@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 import { useToasts, ToastKind } from "./toasts";
 import { useSettings } from "@/state/settings";
+import { IconButton } from "@/components/ui";
 
 const ICONS: Record<ToastKind, { Icon: typeof Info; cls: string }> = {
   ok: { Icon: CheckCircle2, cls: "text-ok" },
@@ -41,13 +42,7 @@ export function ToastHost() {
                   {t.action.label}
                 </button>
               )}
-              <button
-                onClick={() => dismiss(t.id)}
-                aria-label="Kapat"
-                className="icon-btn size-5 shrink-0"
-              >
-                <X size={13} />
-              </button>
+              <IconButton size="sm" icon={X} label="Bildirimi kapat" className="shrink-0" onClick={() => dismiss(t.id)} />
             </motion.div>
           );
         })}

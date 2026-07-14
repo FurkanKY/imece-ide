@@ -5,12 +5,13 @@
 import { useEffect } from "react";
 import {
   GitBranch, GitCommitHorizontal, RefreshCw, Plus, Minus, Undo2,
-  ArrowUp, ArrowDown, FileQuestion,
+  ArrowUp, ArrowDown, FileQuestion, CircleAlert, FileCheck2,
 } from "lucide-react";
 import { ScmChange } from "@/bridge";
 import { useScm, SCM_STATUS } from "@/state/scm";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
+import { EmptyState, IconButton } from "@/components/ui";
 
 function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
   const { stage, unstage, discard, openDiff } = useScm();
@@ -140,23 +141,14 @@ export function ScmView() {
         >
           KAYNAK DENETİMİ
         </span>
-        <button
-          onClick={() => void s.refresh()}
-          title="Yenile"
-          aria-label="Yenile"
-          className="icon-btn size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100"
-        >
-          <RefreshCw size={13} strokeWidth={1.9} />
-        </button>
+        <IconButton size="sm" icon={RefreshCw} label="Yenile" className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/head:opacity-100" onClick={() => void s.refresh()} />
       </div>
 
-      {!s.loaded ? null : !s.isRepo ? (
-        <div className="flex flex-col items-center gap-2 px-5 py-8 text-center">
-          <FileQuestion size={24} className="text-faint" strokeWidth={1.5} />
-          <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            Bu klasör bir git deposu değil. Terminalden <span className="font-mono">git init</span> ile başlatabilirsin.
-          </p>
-        </div>
+      {!s.loaded ? null : s.error ? (
+        <EmptyState icon={CircleAlert} title="Kaynak denetimi okunamadı" description={s.error}
+          action={<button onClick={() => void s.refresh()} className="text-accent" style={{ fontSize: "var(--t-label)" }}>Tekrar Dene</button>} />
+      ) : !s.isRepo ? (
+        <EmptyState icon={FileQuestion} title="Git deposu değil" description="Bu klasörü terminalden git init ile başlatabilirsin." />
       ) : (
         <>
           {/* dal satırı */}
@@ -228,9 +220,7 @@ export function ScmView() {
               }}
             />
             {s.staged.length === 0 && s.unstaged.length === 0 && (
-              <p className="px-3 py-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-                Çalışma ağacı temiz — değişiklik yok.
-              </p>
+              <EmptyState icon={FileCheck2} title="Çalışma ağacı temiz" description="Commitlenecek veya incelenecek değişiklik yok." className="py-8" />
             )}
           </div>
         </>

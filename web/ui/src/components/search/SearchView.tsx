@@ -2,11 +2,12 @@
    Sorgu + (Aa / .*) toggle'ları → dosyaya gruplu sonuçlar → tık: satıra git. */
 
 import { useEffect, useMemo, useRef } from "react";
-import { CaseSensitive, Regex, Search, X, Loader2, ChevronRight } from "lucide-react";
+import { CaseSensitive, Regex, Search, X, Loader2, ChevronRight, SearchX } from "lucide-react";
 import { useSearch } from "@/state/search";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
 import { SearchMatch } from "@/bridge";
+import { EmptyState, IconButton } from "@/components/ui";
 
 function OptionToggle({ on, label, Icon, onClick }: {
   on: boolean;
@@ -91,9 +92,7 @@ export function SearchView() {
             style={{ fontSize: "var(--t-label)" }}
           />
           {s.searching ? (
-            <button onClick={() => void s.cancel()} title="Durdur" className="icon-btn size-5 hover:text-err">
-              <X size={12} />
-            </button>
+            <IconButton size="sm" icon={X} label="Aramayı durdur" title="Durdur" className="hover:text-err" onClick={() => void s.cancel()} />
           ) : (
             <>
               <OptionToggle on={s.caseSensitive} label="Büyük/küçük harfe duyarlı" Icon={CaseSensitive} onClick={s.toggleCase} />
@@ -145,11 +144,16 @@ export function SearchView() {
             </div>
           );
         })}
-        {!s.searching && s.query.trim().length >= 2 && s.matches.length === 0 && s.searchId && (
-          <p className="px-3 py-3 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            Eşleşme bulunamadı.
-          </p>
-        )}
+        {s.error ? (
+          <EmptyState
+            icon={SearchX}
+            title="Arama tamamlanamadı"
+            description={s.error}
+            action={<button onClick={() => void s.start()} className="text-accent" style={{ fontSize: "var(--t-label)" }}>Tekrar Dene</button>}
+          />
+        ) : !s.searching && s.query.trim().length >= 2 && s.matches.length === 0 && s.searchId ? (
+          <EmptyState icon={SearchX} title="Eşleşme bulunamadı" description="Sorguyu veya arama seçeneklerini değiştirip yeniden dene." />
+        ) : null}
       </div>
     </div>
   );

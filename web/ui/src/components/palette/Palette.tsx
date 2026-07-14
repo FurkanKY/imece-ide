@@ -8,6 +8,7 @@ import { usePalette, Command } from "./paletteStore";
 import { fuzzyFilter, FuzzyHit } from "@/lib/fuzzy";
 import { fileIcon } from "@/lib/fileIcons";
 import { useEditor } from "@/state/editor";
+import { EmptyState, Kbd } from "@/components/ui";
 
 function Highlight({ text, hit }: { text: string; hit: FuzzyHit }) {
   const marks = new Set(hit.indices);
@@ -117,19 +118,12 @@ export function Palette() {
               className="selectable w-full bg-transparent text-text outline-none placeholder:text-faint"
               style={{ fontSize: "var(--t-body)" }}
             />
-            <kbd
-              className="shrink-0 rounded border border-border-w bg-card px-1.5 py-0.5 text-faint"
-              style={{ fontSize: "var(--t-caption)" }}
-            >
-              esc
-            </kbd>
+            <Kbd className="shrink-0">Esc</Kbd>
           </div>
 
           <div ref={listRef} className="max-h-[46vh] overflow-y-auto p-1.5">
             {results.length === 0 ? (
-              <p className="px-3 py-4 text-center text-faint" style={{ fontSize: "var(--t-label)" }}>
-                Eşleşme yok.
-              </p>
+              <EmptyState title="Eşleşme yok" description="Farklı bir dosya adı veya komut deneyin." className="py-7" />
             ) : (
               results.map((r, i) => {
                 const on = i === sel;
@@ -155,11 +149,7 @@ export function Palette() {
                     <span className="min-w-0 flex-1 truncate">
                       <Highlight text={label} hit={r.hit} />
                     </span>
-                    {r.cmd?.hint && (
-                      <span className="shrink-0 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-                        {r.cmd.hint}
-                      </span>
-                    )}
+                    {r.cmd?.hint && <Kbd className="shrink-0">{r.cmd.hint}</Kbd>}
                     {on && <CornerDownLeft size={13} className="shrink-0 text-faint" />}
                   </div>
                 );

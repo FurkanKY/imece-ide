@@ -23,6 +23,7 @@ export const SCM_STATUS: Record<string, { color: string; label: string }> = {
 interface ScmState extends ScmStatus {
   loaded: boolean;
   busy: boolean;
+  error: string | null;
   message: string;
   setMessage: (m: string) => void;
   refresh: () => Promise<void>;
@@ -45,6 +46,7 @@ export const useScm = create<ScmState>((set, get) => ({
   unstaged: [],
   loaded: false,
   busy: false,
+  error: null,
   message: "",
 
   setMessage: (m) => set({ message: m }),
@@ -52,9 +54,10 @@ export const useScm = create<ScmState>((set, get) => ({
   refresh: async () => {
     try {
       const st = await bridge.call("scm.status", {});
-      set({ ...st, loaded: true });
-    } catch {
-      set({ isRepo: false, staged: [], unstaged: [], loaded: true });
+      set({ ...st, loaded: true, error: null });
+    } catch (e) {
+      set({ isRepo: false, staged: [], unstaged: [], loaded: true,
+        error: e instanceof BridgeError ? e.message : "Kaynak denetimi okunamadı." });
     }
   },
 
@@ -151,7 +154,7 @@ export function installScm() {
       if (s.root !== prev.root) {
         useScm.setState({
           isRepo: false, branch: "", ahead: 0, behind: 0,
-          staged: [], unstaged: [], loaded: false, message: "",
+          staged: [], unstaged: [], loaded: false, message: "", error: null,
         });
         if (s.root) void useScm.getState().refresh();
       }
