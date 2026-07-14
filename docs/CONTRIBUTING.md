@@ -1,69 +1,77 @@
-# Katkı ve Çalışma Kuralları
+# Contributing
 
-## 📌 Dokümantasyon Güncelleme Kuralı (ZORUNLU)
+Thanks for your interest in Imece IDE. This document explains how to get a
+working dev environment, how changes are verified, and the few rules the
+codebase holds strictly.
 
-> **Her adımda ve her iterasyonda, o değişikliğin etkilediği dokümanlar AYNI turda
-> güncellenir. Bir değişiklik, dokümantasyonu güncellenmeden "bitti" sayılmaz.**
+## Dev environment
 
-Bu kural hem insan katkıcılar hem de yapay zeka ajanları (Claude dahil) için geçerlidir.
-Amaç: kod ile doküman arasındaki farkın hiçbir zaman birikmemesi.
+Follow [SETUP.md](SETUP.md). In short: Python 3.14 venv +
+`requirements-dev.txt`, Node ≥ 20 for `web/ui`, and optionally one configured
+model provider for end-to-end AI runs. The desktop shell targets Windows;
+the engine and frontend build also work on Linux/macOS for development.
 
-### Her iterasyonun sonunda yapılacaklar (checklist)
+## Verify your change
 
-1. Kullanıcıyı veya katkıcıyı etkileyen değişikliklerde **`docs/CHANGELOG.md`'yi güncelle**.
-2. Aşağıdaki tabloya göre **etkilenen public dokümanı güncelle**.
-3. Yeni bir kullanıcı yüzeyi veya komut eklediysen README ya da kullanım rehberine ekle.
-4. Anahtar, dosya yazma, komut çalıştırma veya dış veri aktarımı etkileniyorsa
-   `PRIVACY.md` ve gerektiğinde `SECURITY.md` aynı değişiklikte güncellenir.
+Every change should pass the following before a PR:
 
-### Değişiklik türü → güncellenecek doküman
+```bash
+cd web/ui && npm run typecheck && npm run build && cd ../..
+python -m pytest -q
+```
 
-| Değişiklik | Güncellenecek |
-|-----------|---------------|
-| Yeni model/sağlayıcı davranışı | `README.md` + `docs/SETUP.md` |
-| Yeni modül, katman, olay tipi, veri akışı | `docs/ARCHITECTURE.md` |
-| Yeni köprü metodu/olayı (webhost ↔ web/ui) | `web/ui/src/bridge/protocol.ts` (tek kaynak) + `docs/ARCHITECTURE.md` |
-| Yeni tasarım tokenı / değeri | `web/ui/src/styles/tokens.css` |
-| Yeni arayüz özelliği / kullanım biçimi | `docs/USAGE.md` |
-| Kurulum, bağımlılık, ortam tuzağı | `docs/SETUP.md` + `requirements.txt` |
-| Yayınlanmış kullanıcı etkisi | `docs/CHANGELOG.md` |
+- **UI changes** additionally need a visual check:
+  `node tools/webshot.mjs` renders the mock-bridge UI in real Chromium and
+  writes `.uishots/*.png` (Monaco/xterm included). UI work is not "done"
+  until the screenshots have been looked at. For the real app use
+  `python shell.py --dev`.
+- **Bridge/engine changes:** `python -m pytest tests/test_bridge.py -q` runs
+  the contract tests without a webview.
+- CI runs the same typecheck/build (Ubuntu) and pytest (Windows) on every
+  push and PR, plus a gitleaks secret scan.
 
-### Faz tamamlama tanımı (Definition of Done)
+## Documentation rule
 
-Bir özellik şu üçü tamamlanınca biter:
-1. Kod yazıldı ve **doğrulandı** (headless test ve/veya kullanıcı onayı).
-2. İlgili dokümanlar güncellendi (yukarıdaki tablo).
-3. Kullanıcıyı etkileyen değişiklikse `docs/CHANGELOG.md`'ye kayıt düşüldü.
+A change that affects users or contributors updates the relevant document in
+the same PR — otherwise it isn't done:
 
----
+| Change | Update |
+|--------|--------|
+| New model/provider behavior | `README.md` + `docs/SETUP.md` |
+| New module, layer, event type, data flow | `docs/ARCHITECTURE.md` |
+| New bridge method/event (webhost ↔ web/ui) | `web/ui/src/bridge/protocol.ts` (single source) + `docs/ARCHITECTURE.md` |
+| New UI feature or usage pattern | `docs/USAGE.md` |
+| Install, dependency or environment note | `docs/SETUP.md` + `requirements*.txt` |
+| User-visible release impact | `docs/CHANGELOG.md` |
+| Keys, file writes, command execution or data leaving the machine | `PRIVACY.md` and, if needed, `SECURITY.md` |
 
-## 🎨 Tasarım Özgürlüğü Kuralı (KALICI)
+## Code rules
 
-> **Arayüz/deneyim kalitesini artırmak için gereken her türlü dış içeriği indirip
-> projeye gömmekte serbestsin:** kütüphaneler (pip), fontlar (Inter, JetBrains Mono,
-> Geist vb.), ikon setleri, görsel stiller, UI/UX bileşenleri, referans temalar.**
+- **Design tokens:** all visual values come from
+  `web/ui/src/styles/tokens.css`; raw hex/px in components is not accepted.
+  Add a missing semantic token instead.
+- **Motion:** every new animation must respect the OS reduced-motion
+  preference and the in-app `animations` setting.
+- **Engine compatibility:** `adapters.py`, `agents.py`, `runner.py`,
+  `project_runner.py` and `project.py` may only be extended
+  backward-compatibly (new parameters need defaults; smoke-test
+  `orchestrator.py` and `app.py` after touching them).
+- **Subprocesses:** always `encoding="utf-8", errors="replace"`, plus
+  `PYTHONUTF8=1` where output is decoded (see SETUP.md, "Windows development
+  notes").
+- **Turkish text:** never use CSS `text-transform` on UI strings (the Turkish
+  İ/i problem); uppercase with `toLocaleUpperCase("tr")`.
+- **Protected contracts** (change only with a verified need and matching
+  tests): `web/ui/src/bridge/protocol.ts`, the `run.event` schema in
+  `project_runner.py`, `Project._safe()` path safety, the checkpoint snapshot
+  format, and the frameless-window bridge methods in `webhost/window.py`.
 
-Kural gerekçesi: kullanıcı, mümkün olan en **premium ve profesyonel** masaüstü deneyimini
-istiyor; "yeterince iyi" ile yetinme. Uygulama:
+## Pull requests
 
-- Gerekli paketi/varlığı indir (ör. `pip install`, font TTF'i `assets/fonts/`'a), gömülü
-  ve **offline** çalışacak şekilde projeye dahil et; lisansı uygun olsun (tercihen açık
-  kaynak — SIL OFL, MIT, Apache).
-- Yeni bir bağımlılık/varlık eklediğinde `docs/SETUP.md` + (pip ise) `requirements.txt`
-  güncellenir (bkz. Dokümantasyon Güncelleme Kuralı).
-- Görsel değişiklikler **canlı ekran görüntüsüyle** doğrulanır; kod yollarında mümkünse
-  headless testle regresyon önlenir.
-- Python 3.14 gibi çok yeni ortamlarda wheel bulunmayan paketler için elle/native yol
-  uygulanabilir (ör. frameless pencere: HTML titlebar → köprü `startSystemMove/Resize`).
-
-## Doğrulama alışkanlığı
-
-- **Web-shell UI görseli:** `node tools/webshot.mjs` mock-bridge'li UI'ı gerçek Chromium'da
-  açıp `.uishots/*.png` üretir (Monaco/xterm dahil — her şey görünür). Ekran görüntüsü
-  incelenmeden UI işi "bitti" sayılmaz. Gerçek uygulama: `python shell.py --dev` +
-  `QTWEBENGINE_REMOTE_DEBUGGING` → CDP.
-- **Köprü/motor:** `pytest tests/test_bridge.py` (webview'suz sözleşme testleri) +
-  motor headless script.
-- Alt-süreçlerde daima `encoding="utf-8", errors="replace"` ve gerektiğinde
-  `PYTHONUTF8=1` (bkz. `docs/SETUP.md` — cp1254 tuzağı).
-- Python komutları için gerçek yorumlayıcı yolu / PowerShell (bkz. `docs/SETUP.md`).
+- Keep PRs focused; describe the user-visible effect and the verification you
+  ran.
+- New dependencies or embedded assets must have an open-source license
+  (Apache/MIT/BSD/OFL preferred) and an entry in
+  [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
+- Security issues never go through public issues/PRs — see
+  [SECURITY.md](../SECURITY.md).

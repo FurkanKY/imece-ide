@@ -1,117 +1,137 @@
-# Kurulum
+# Setup
 
-## 1. Gereksinimler
+This guide covers running Imece IDE from source. To use the packaged Windows
+app instead, see the [README](../README.md) — no Python or Node is required
+there.
 
-| Bileşen | Sürüm / not |
-|---------|-------------|
-| Python | 3.14 (bu makinede kurulu) |
-| Claude Code CLI | `claude --version` çalışmalı; Pro/Max aboneliği yeter (API anahtarı gerekmez) |
-| DeepSeek API anahtarı | https://platform.deepseek.com → API Keys |
-| Gemini API anahtarı | https://aistudio.google.com/apikey |
+## 1. Prerequisites
 
-## 2. Bağımlılıklar
+| Component | Version / notes |
+|-----------|-----------------|
+| Windows | 10/11 — the desktop shell targets Windows (ConPTY terminal, DPAPI key store) |
+| Python | 3.14 (what CI and packaging use; PySide6 ≥ 6.11.1 requires a recent Python) |
+| Node.js | ≥ 20, for building the frontend |
+| Claude Code CLI | optional — `claude --version` must work; a Pro/Max subscription is enough, no API key needed |
+| DeepSeek API key | optional — https://platform.deepseek.com → API Keys |
+| Gemini API key | optional — https://aistudio.google.com/apikey |
+
+At least one provider (Claude CLI, DeepSeek or Gemini) must be configured for
+AI runs; everything else in the IDE works without any keys.
+
+## 2. Python dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-Test ve katkı ortamında bunun yerine `pip install -r requirements-dev.txt`
-kullanın; bu dosya uygulama bağımlılıklarına ek olarak `pytest` içerir.
+For a test/contribution environment use `requirements-dev.txt` instead, which
+adds `pytest`.
 
-İçerik: `requests`, `python-dotenv`, `flask` (web arayüzü), `PySide6 ≥ 6.11.1`
-(masaüstü; Python 3.14 gerekliliği), `pywinpty` (entegre terminal, ConPTY),
-`basedpyright` (Python IntelliSense — Node gömülü gelir, ek kurulum istemez).
+Contents: `requests`, `python-dotenv`, `flask` (web interface),
+`PySide6` (desktop shell), `pywinpty` (integrated terminal, ConPTY;
+Windows-only), `basedpyright` (Python IntelliSense — ships its own Node
+runtime), `debugpy` (debugger).
 
-**Yazı tipi:** arayüz Windows'ta `Segoe UI Variable` / `Segoe UI` sistem zincirini,
-kod ve sayısal veri için gömülü JetBrains Mono'yu kullanır. Ek kurulum gerekmez.
-Eski `Inter.ttf` repo uyumluluğu için durur fakat arayüz tarafından yüklenmez.
+**Fonts:** the UI uses the Windows `Segoe UI Variable` / `Segoe UI` system
+chain, plus bundled JetBrains Mono for code and numeric data
+([OFL license](../web/ui/public/fonts/JetBrainsMono-OFL.txt)). Nothing to
+install.
 
-## 2b. Masaüstü arayüzü (`shell.py`)
+## 3. Frontend build
 
-Arayüz `web/ui/` altında Vite ile derlenir (Node ≥ 20 gerekir; Monaco/xterm dahil tüm
-web bağımlılıkları npm ile gelir):
+The UI lives in `web/ui/` and is built with Vite (Monaco, xterm and all other
+web dependencies come from npm):
 
 ```bash
 cd web/ui
-npm ci            # ilk kurulumda (veya npm install)
-npm run build     # → web/ui/dist  (python shell.py bunu app:// üzerinden yükler)
+npm ci            # first time (or npm install)
+npm run build     # → web/ui/dist  (python shell.py serves this via app://)
 ```
 
-Geliştirme: `npm run dev` (HMR, mock-bridge ile düz tarayıcıda) + `python shell.py --dev`
-(aynı arayüz gerçek köprüyle yerleşik pencerede). Görsel doğrulama:
-`node tools/webshot.mjs` → `.uishots/*.png`.
+Development loop: `npm run dev` (HMR; the same UI runs in a plain browser with
+a mock bridge) plus `python shell.py --dev` (the real bridge inside the
+embedded window). Visual verification: `node tools/webshot.mjs` →
+`.uishots/*.png`.
 
-## 4. API anahtarları (.env, kaynak geliştirme)
+## 4. API keys (source development)
 
-`.env.example` dosyasını `.env` olarak kopyala ve doldur:
+Copy `.env.example` to `.env` and fill it in:
 
 ```ini
 DEEPSEEK_API_KEY=sk-...
-DEEPSEEK_MODEL=deepseek-chat        # veya deepseek-v4-pro
+DEEPSEEK_MODEL=deepseek-chat        # any model your account can use
 
 GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-3.5-flash       # hesabınızda kullanılabilen bir model
+GEMINI_MODEL=gemini-2.5-flash       # any model your account can use
 
-CLAUDE_CLI=claude                   # Claude için anahtar YOK, sadece CLI adı
+CLAUDE_CLI=claude                   # no key for Claude — just the CLI name
 ```
 
-> **Önemli:** Model adları API sağlayıcınızın kabul ettiği gerçek adlar olmalı.
-> Kullanılabilir modelleri ve kota sınırlarını sağlayıcınızın güncel belgelerinden
-> doğrulayın.
+> Model names must be real names your provider accepts. Check your provider's
+> current documentation for available models and quota limits.
 
-`.env` gizlidir ve `.gitignore` ile dışlanmıştır — kimseyle paylaşma. Bu yöntem
-yalnız kaynak geliştirme içindir. Paketli Windows uygulamasında anahtarları
-Ayarlar'dan girin; Windows DPAPI bunları mevcut kullanıcı hesabına bağlı şifreli
-depoda saklar. Eski paket `.env` anahtarları ilk Ayarlar durum kontrolünde taşınır
-ve düz metin değerleri temizlenir.
+`.env` is git-ignored — never commit or share it. This flow is for source
+development only. In the packaged Windows app, enter keys in Settings instead:
+Windows DPAPI stores them encrypted for the current user account, and any
+legacy plain-text `.env` keys are migrated and cleared on the first Settings
+status check.
 
-## 5. Doğrulama
+## 5. Verify
 
 ```bash
 python -c "from dotenv import load_dotenv; load_dotenv(); \
 from adapters import call_deepseek, call_gemini; \
-print(call_deepseek('Kısa cevap.', 'tek kelime: test')); \
-print(call_gemini('Kısa cevap.', 'tek kelime: test'))"
+print(call_deepseek('Short answer.', 'one word: test')); \
+print(call_gemini('Short answer.', 'one word: test'))"
 ```
 
-Claude'u ayrıca test etmek için:
+To test Claude separately:
 
 ```bash
-python -c "from adapters import call_claude; print(call_claude('Kısa cevap.', '2+2?'))"
+python -c "from adapters import call_claude; print(call_claude('Short answer.', '2+2?'))"
+```
+
+Then run the test suite and the app:
+
+```bash
+python -m pytest -q
+python shell.py
 ```
 
 ---
 
-## Ortam tuzakları (bu makineye özgü, önemli)
+## Windows development notes
 
-Bu üç konu, geliştirme sırasında zaman kaybettiren gerçek tuzaklardı; not edildi.
+Three environment pitfalls worth knowing before they cost you time.
 
-### A) git-bash'te `python` bulunamıyor
+### A) `python` not found in git-bash
 
-git-bash'te `python`, gerçek yorumlayıcı yerine **Microsoft Store yönlendirme
-stub'ına** (`AppData/Local/Microsoft/WindowsApps/python`) düşebilir ve
-"Python bulunamadı" verir.
+In git-bash, `python` can resolve to the **Microsoft Store redirect stub**
+(`AppData/Local/Microsoft/WindowsApps/python`) instead of a real interpreter
+and fail with "Python was not found".
 
-- **PowerShell'de** `python` genelde doğru çalışır — komutları orada çalıştır.
-- git-bash'te gerçek yorumlayıcının tam yolu:
-  `/c/Users/<kullanıcı>/AppData/Local/Python/bin/python`
-- Kalıcı çözüm: Windows Ayarları → *Uygulama yürütme takma adları* → `python.exe`
-  ve `python3.exe` toggle'larını kapat; ve gerçek Python'u PATH'e ekle.
+- In **PowerShell**, `python` usually resolves correctly — prefer it.
+- Permanent fix: Windows Settings → *App execution aliases* → disable the
+  `python.exe` / `python3.exe` toggles, and put your real Python on `PATH`.
 
-### B) Windows Türkçe (cp1254) kodlaması
+### B) Legacy code pages (e.g. Turkish cp1254)
 
-Alt-süreçle kod çalıştırınca (execution grounding, konsol) çocuk süreç Türkçe
-karakterleri cp1254 ile yazar; utf-8 çözme çökerse çıktı sessizce kaybolur.
-Kod bunu şöyle çözer (`runner.py: run_python_code`):
+When running code in a subprocess (execution grounding, console), the child
+process may write non-ASCII characters in the legacy code page; if UTF-8
+decoding crashes, output is silently lost. The codebase handles this pattern
+consistently (`runner.py: run_python_code`):
 
 ```python
 env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 subprocess.run(..., encoding="utf-8", errors="replace", env=env)
 ```
 
-Terminal çıktısında emoji için: `sys.stdout.reconfigure(encoding="utf-8")`.
+Keep the same `encoding="utf-8", errors="replace"` discipline in any new
+subprocess call.
 
 ### C) Flask debug reloader
 
-`app.py` `use_reloader=False` ile çalışır; aksi halde her çalıştırmada yazılan
-`output/result.py` reloader'ı tetikleyip devam eden isteği koparır.
+`app.py` runs with `use_reloader=False`; otherwise each run writes
+`output/result.py`, which triggers the reloader and kills the in-flight
+request.

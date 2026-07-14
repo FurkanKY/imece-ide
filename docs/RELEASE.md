@@ -1,59 +1,55 @@
-# Açık Beta Sürüm Rehberi
+# Release Guide
 
-## Sürüm
+## Current release
 
-**v0.3.0-beta.1** — Windows `onedir` dağıtımı.
+**v0.3.0-beta.1** — Windows `onedir` distribution, published as
+`ImeceIDE-windows.zip` + `SHA256SUMS.txt` on GitHub Releases.
 
-> **Kaynak dalı notu (2026-07-14):** Bu dalda paketli sürümden sonra gelen UI
-> kalite değişiklikleri ve ayrıca yürütülmekte olan görsel yön sıfırlama işi vardır.
-> Bu nedenle yeni kaynak durumunu doğrulamadan mevcut EXE'yi nihai görsel kabul veya
-> yayın adayı olarak değerlendirmeyin; önce Windows'ta yeniden paketleyin.
+## Quick start for end users
 
-## Son kullanıcı için hızlı başlangıç
+1. Run `ImeceIDE.exe` from the extracted package.
+2. Choose **Open Folder** on the welcome screen and select a project.
+3. In Settings → API keys, enter your DeepSeek and/or Gemini key.
+4. To use Claude, install the Claude Code CLI and make sure it is on `PATH`.
+5. Type a task in the team panel; review the proposal as a diff and confirm
+   with **Apply**. Every run has a change receipt available from history.
 
-1. `MultiAgentIDE.exe` dosyasını çalıştırın.
-2. Karşılama ekranından **Klasör Aç** ile çalışacağınız projeyi seçin.
-3. Ayarlar → **API Anahtarları** bölümüne DeepSeek ve/veya Gemini anahtarınızı girin.
-4. Claude kullanmak için ayrıca Claude Code CLI'ı kurun ve PATH üzerinden erişilebilir
-   olduğundan emin olun.
-5. Sağdaki ekip paneline görevi yazın; öneriyi diff olarak inceleyip **Uygula** ile
-   onaylayın. Her koşunun geçmişten açılabilen bir değişiklik makbuzu vardır.
+Python and Node are not required to use the packaged app. Keys, preferences
+and logs live under `%LOCALAPPDATA%/ImeceIDE`.
 
-Python ve Node, paketli uygulamayı kullanmak için gerekli değildir. Anahtarlar,
-tercihler ve günlükler `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
+## Release checklist
 
-## Dağıtımcı kontrol listesi
+- [ ] Rebuild the package on Windows with `packaging/build.ps1`.
+- [ ] Run `node packaging/smoke.mjs`; verify QWebChannel, settings/keys and
+      the PTY write→read result are clean.
+- [ ] Short visible tour with the packaged EXE: open a folder, edit/save a
+      file, type into the terminal, check key status in Settings, close and
+      reopen.
+- [ ] Check titlebar, panels, Monaco, terminal, dialogs and toasts for
+      overflow at 125% and 150% Windows scaling.
+- [ ] Type file names, searches, commit messages and team tasks with a
+      Turkish IME; verify `İ/i/ş/ğ/ü/ö/ç` characters.
+- [ ] Produce `SHA256SUMS.txt` and verify the ZIP hash.
+- [ ] Secret scan on git history and a dependency/license review are clean.
+- [ ] When everything passes, create the git tag and run the manual
+      **Build Windows beta release** GitHub Actions workflow, which builds,
+      smokes, zips, checksums and publishes the release.
 
-- [ ] Windows'ta `packaging/build.ps1` ile paketi yeniden üret.
-- [ ] `node packaging/smoke.mjs` çalıştır; QWebChannel, ayarlar/anahtarlar ve PTY
-      write→read sonucunun temiz olduğunu doğrula.
-- [ ] Paketli EXE ile kısa görünür tur: klasör aç, dosya düzenle/kaydet, terminale
-      komut yaz, Ayarlar'da anahtar durumunu gör, kapatıp yeniden aç.
-- [ ] `%125` ve `%150` Windows ölçeklemesinde titlebar, paneller, Monaco, terminal,
-      diyalog ve toast taşmalarını kontrol et.
-- [ ] Türkçe IME/girdi ile dosya adı, arama, commit mesajı ve ekip görevi yaz;
-      `İ/i/ş/ğ/ü/ö/ç` karakterlerini kontrol et.
-- [ ] `SHA256SUMS.txt` üret ve ZIP içeriğinin hash'ini doğrula.
-- [ ] Git geçmişinde secret taraması ve bağımlılık/lisans kontrolü temiz.
-- [ ] Tüm maddeler geçerse `v0.3.0-beta.1` Git etiketi oluştur; GitHub Actions
-      manuel release workflow'u ile ZIP + checksum yayınla.
+## Known limits
 
-## Bilinen sınırlar
+- This beta is Windows-only; there is no auto-update.
+- The package is large (it bundles QtWebEngine, the Python language server
+  and terminal helpers).
+- Claude requires the Claude Code CLI and an eligible subscription;
+  DeepSeek/Gemini require separate API keys.
+- Single dark theme. A light theme, split editor, token cost dashboard,
+  inline AI editing and autonomy levels are on the v1 scope.
+- The Git surface covers local status, stage/unstage, discard, diff and
+  commit; remote push/pull/branch operations are not included.
+- The package is unsigned; release notes must explain the SmartScreen warning
+  and checksum verification. Authenticode signing is a stable-release gate.
 
-- Bu beta yalnız Windows içindir; otomatik güncelleme yoktur.
-- Paket büyüktür (QtWebEngine, Python dil sunucusu ve terminal yardımcıları içerir).
-- Claude modeli Claude Code CLI ve uygun abonelik gerektirir; DeepSeek/Gemini ayrı API
-  anahtarı ister.
-- Tek koyu tema sunulur; açık tema, split editör, token maliyet panosu, inline AI düzenleme
-  ve otonomi seviyeleri v1 kapsamındadır.
-- Git yüzeyi yerel durum, stage/unstage, discard, diff ve commit içindir; remote
-  push/pull/branch işlemleri sunmaz.
-- Fiziksel frameless pencere sürükleme testi otomatik ortamda doğrulanamadı; dağıtım
-  öncesi görünür Windows masaüstü turunda kontrol edilmelidir.
-- Paket imzasızdır; GitHub Release notu SmartScreen uyarısını ve checksum doğrulamasını
-  açıkça anlatmalıdır. Authenticode imzalama kararlı sürüm kapısıdır.
-
-## Geliştirici doğrulaması
+## Developer verification
 
 ```bash
 cd web/ui
@@ -64,7 +60,7 @@ cd ../..
 python -m pytest -q
 ```
 
-Paketleme yalnız Windows PowerShell'de çalışır:
+Packaging runs only in Windows PowerShell:
 
 ```powershell
 packaging/build.ps1

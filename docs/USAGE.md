@@ -1,171 +1,162 @@
-# Kullanım
+# Usage
 
-## Değişiklik makbuzu
+> The application UI is currently Turkish. This guide names UI actions in
+> English with the Turkish label in parentheses where it helps you find the
+> control.
 
-Her AI koşusu bittikten sonra sağ paneldeki geçmişten **Makbuz** seçilebilir.
-Makbuz, görev, plan/kapsam, önerilen diff, reviewer kararı, maliyet, uygulama ve
-checkpoint durumunu saklar. Test veya komut çalıştırılmadıysa bunu kanıt gibi
-göstermek yerine açıkça bildirir. Kullanıcı isterse makbuzu seçtiği klasöre
-Markdown olarak dışa aktarabilir.
+All three interfaces share the same engine; pick the one that fits the job.
 
-## Proje komutu güveni
-
-F5/Ctrl+F5 ile proje komutu ilk kez çalıştırılmadan önce uygulama komutu, kaynağını
-ve çalışma klasörünü gösterir. Onay aynı proje ve aynı komut için hatırlanır;
-`.magent/run.json` ya da sezgi sonucu değişirse tekrar sorulur.
-
-Arayüzler aynı motoru kullanır; hangisini seçeceğin işine bağlı.
-
-| Arayüz | En iyi olduğu iş |
-|--------|------------------|
-| **Masaüstü mini-IDE** (`shell.py`) ★ | Var olan projede çalışmak — tam IDE deneyimi |
-| **Web** (`app.py`) | Sıfırdan tek dosya üretmek, akışı canlı izlemek |
-| **Terminal** (`orchestrator.py`) | Hızlı, otomasyona uygun tek dosya üretimi |
+| Interface | Best for |
+|-----------|----------|
+| **Desktop IDE** (`shell.py`) ★ | working on an existing project — the full experience |
+| **Web** (`app.py`) | generating a single file from scratch, watching the flow live |
+| **CLI** (`orchestrator.py`) | quick, automation-friendly single-file generation |
 
 ---
 
-## Masaüstü mini-IDE (`shell.py`) ★
+## Desktop IDE (`shell.py`) ★
 
 ```bash
-# önce bir kez derle (bkz. SETUP.md 2b):
+# build the frontend once (see SETUP.md §3):
 cd web/ui && npm ci && npm run build && cd ../..
 
-python shell.py            # web/ui/dist'i app:// üzerinden yükler
-python shell.py --dev      # Vite dev sunucusu (HMR) + F12 DevTools — geliştirme
+python shell.py            # loads web/ui/dist via app://
+python shell.py --dev      # Vite dev server (HMR) + F12 DevTools — development
 ```
 
-Düzen: üstte **web titlebar** (frameless — sürükle/çift-tık maximize, kendi min/max/kapat),
-solda **aktivite çubuğu** + **dosya gezgini** (lazy ağaç), ortada **Monaco editör** (çok
-sekmeli, dirty noktası), altta **durum çubuğu**.
+Layout: a web **titlebar** on top (frameless — drag / double-click to
+maximize, its own min/max/close), the **activity bar** and **explorer** on the
+left, the multi-tab **Monaco editor** in the center, the **AI team panel** on
+the right, and the **status bar** at the bottom.
 
-**Şu an çalışan (P0+P1 tamam):**
-- **Klasör Aç** (karşılama ekranı veya son projeler) → gezgin ağacı gelir.
-- Klasöre tıkla → genişler; **dosyaya tıkla** → Monaco'da sekmede açılır (sözdizimi
-  renklendirmeli). **Ctrl+S** kaydet (sekmede • = kaydedilmemiş), **Ctrl+W** kapat.
-- **Sağ-tık** (gezgin): Yeni Dosya/Klasör, Yeniden Adlandır, Sil, Yolu Kopyala, Sistemde
-  Göster — hepsi koyu temalı diyaloglarla (native beyaz pencere yok).
-- **Sürükle-taşı** (gezgin): dosya/klasörü başka klasöre sürükle → taşınır (hedef accent
-  çerçeveyle vurgulanır; boş alana bırak → köke). Sekmeler de sürüklenerek sıralanır;
-  sekmeye **sağ-tık** → Diğerlerini/Sağdakileri/Tümünü Kapat (kaydedilmemişler korunur).
-- **Zoom & kaydırma:** Ctrl+= / Ctrl+- / Ctrl+0 arayüzü büyütür-küçültür (kalıcı);
-  **Alt+Z** editörde satır kaydırmayı açar. Diff sekmesindeki düğmeyle **yan-yana ↔
-  inline** görünüm değişir.
-- **Ctrl+P** dosyaya git (fuzzy), **Ctrl+K** komut paleti, **Ctrl+B** gezgini aç/kapat.
-- İşlem sonuçları sağ altta **toast** olarak görünür.
-- **Kapatma koruması:** kaydedilmemiş sekme varken pencereyi kapatınca onay sorulur.
-- **Oturum:** açık sekmeler + aktif sekme + **kabuk düzeni** (panel görünürlük/boyutları,
-  aktif kenar görünümü) proje-içi `.magent/session.json`'da; yeniden açılışta geri gelir.
-  Pencere geometrisi ve son projeler de hatırlanır.
-- **Panel boyutlandırma:** gezgin/AI paneli/terminal kenarlarından **sürüklenerek**
-  boyutlanır (üzerine gelince accent çizgisi belirir); ayırıcıya Tab ile odaklanıp
-  ok tuşlarıyla da ayarlanabilir. Boyutlar oturumla saklanır.
-- Dosyalar dışarıdan değişirse (başka editör/git) gezgin kendini tazeler.
+### Working with an AI team
 
-**IntelliSense / dil zekâsı (P7):**
-- **Python** — basedpyright dil sunucusu proje açılınca otomatik başlar (statusbar'da
-  sağ altta "dil sunucusu hazırlanıyor…" → yeşil **⏻ Py**). Yazarken **otomatik
-  tamamlama** (Ctrl+Space ile elle de tetiklenir), hatalı kodda **kırmızı alt çizgi**
-  (üzerine gel → mesaj), **F12 / Ctrl+tık** tanıma git (başka dosyaya da sekmede
-  açarak gider), hover'da **imza + docstring**, `(` yazınca **parametre yardımı**.
-- **TS/JS** — aynı dörtlü Monaco'nun kendi dil servisinden; tanıma-git açık sekmeler
-  arasında çalışır.
+1. Type a task in the composer (e.g. *"convert the date format in utils.py to
+   ISO 8601"*), optionally change the role→model assignments, press **▶** (or
+   Enter).
+2. The **team pipeline** runs live: the active agent pulses; finished stages
+   show model · time · tokens · cost. The flow tab shows stage cards with
+   rendered markdown output; errors appear as red cards.
+3. When a proposal arrives, the **Changes** tab opens together with the center
+   **inline diff**. Review file by file; untick anything you don't want.
+4. **Apply (Uygula)** writes the files — a checkpoint is taken first, and the
+   toast offers one-click **Undo**. **Reject (Vazgeç)** writes nothing. Stop a
+   run any time with **■**.
+5. The status bar streams total tokens/cost; the clock icon opens run history —
+   click an entry to bring its task back into the composer. `Ctrl+J` toggles
+   the panel.
 
-**Çalıştır (P8.1) & Debug (P8.2):**
-- **F5** — VS Code düzeni: debug oturumu durmuşsa **devam eder**; aktif dosya
-  `.py` ise **debug başlatır**; değilse dosyayı debugsuz koşar. **Ctrl+F5**
-  projeyi debugsuz koşar (npm dev/start, cargo, go veya main/app.py — sezgisel;
-  paletten "Çalıştırma Komutunu Değiştir…" → `.magent/run.json`). Titlebar'daki
-  **▶** aktif dosyayı debugsuz koşar. **Shift+F5** veya ■ durdurur.
-- Çıktı (koşu da debug de) alt paneldeki **ÇIKTI** sekmesine akar (renkli);
-  bitince yeşil/kırmızı **çıkış kodu rozeti** + süre.
-- **Debug** — satır numarasının soluna tıkla (veya **F9**) → kırmızı breakpoint
-  (proje başına kalıcı). Aktivite çubuğundaki 🐞 → **ÇALIŞTIR VE DEBUG** görünümü:
-  Debug Başlat düğmesi; durunca kontrol şeridi (devam · **F10** üzerinden ·
-  **F11** içine · **Shift+F11** dışına · durdur), **çağrı yığını** (tık →
-  satıra git), **değişkenler** (tembel ağaç — genişlet), breakpoint listesi.
-  Durulan satır amber vurgulanır ve editör oraya kayar.
+**Safety:** agents can never write outside the folder you opened
+(path safety in `project.py`).
 
-**Ajanlarla değişiklik (P2 — sağdaki AI EKİBİ paneli):**
-1. Görev kutusuna yaz (ör. *"utils.py'deki tarih biçimini ISO 8601 yap"*), istersen
-   rol→model seçimlerini değiştir, **▶** (veya Enter).
-2. **EKİP hattı** canlı işler: aktif ajan nefes alır, biten aşamada model·süre·token·
-   maliyet görünür. **Akış** sekmesinde aşama kartları + çıktılar; hata olursa kırmızı
-   kart. Aşama bitince çıktı **markdown** olarak işlenir — kod blokları editör temasında
-   renklenir, üzerine gelince kopyala düğmesi çıkar.
-3. Öneri gelince **Değişiklikler** sekmesi açılır + **merkez inline diff** kendiliğinden
-   gelir (⇄ sekmesi). Satırlara tıklayıp dosya dosya incele; istemediklerinin işaretini kaldır.
-4. **Uygula (n)** → dosyalar yazılır (.bak yedekli), açık sekmeler + ağaç tazelenir.
-   **Vazgeç** → hiçbir şey yazılmaz. Koşuyu **■** ile durdurabilirsin.
-5. Alt çubukta toplam token/maliyet sayaçla akar; ⏱ (saat) ikonu geçmiş koşuları açar —
-   tıkla → görev composer'a geri gelir. Ctrl+J paneli gizler/gösterir.
+### Change receipts
 
-**Projede arama (P4):**
-- **Ctrl+Shift+F** → kenar çubuğunda ARA görünümü. Aa (büyük/küçük) ve .* (regex)
-  toggle'ları; sonuçlar dosyaya gruplu; satıra tıkla → editörde o satıra gider.
-  ripgrep kuruluysa onunla (çok hızlı), değilse Python taramasıyla çalışır.
+After each run, pick **Receipt (Makbuz)** from the history drawer. A receipt
+stores the task, plan/scope, proposed diff, reviewer verdict, cost, and
+apply/checkpoint state. If no test or command was executed, the receipt says
+so explicitly instead of implying proof. Receipts live in the project's
+ignored `.imece/` directory and can be exported as Markdown to a folder you
+choose.
 
-**Kaynak denetimi / git (P4):**
-- **Ctrl+Shift+G** veya aktivite çubuğunda dal ikonu (veya Ctrl+K → "Kaynak Denetimi"). Dal + ileri/geri
-  sayaçları, değişiklik listeleri (durum harfi renkli: M/A/D/R/U). Satıra tıkla →
-  **merkez diff**; hover'da **+** hazırla, **−** çıkar, **↩** değişikliği at (onaylı).
-  Mesaj yaz + **Commit** (veya Ctrl+Enter). Dosya kaydettikçe görünüm kendini tazeler.
-- Git durumu her yerde: **gezginde** değişen dosya adları renklenir (M sarı, yeni yeşil)
-  ve değişiklik içeren klasörlerde nokta belirir; **durum çubuğunda** dal adı + ileri
-  sayacı + değişiklik sayısı görünür (tıkla → kaynak denetimi).
+### Editor and workspace
 
-**Ayarlar (P4):**
-- Aktivite çubuğu dişli ikonu veya Ctrl+K → "Ayarlar". Vurgu rengi (6 seçenek, anında
-  uygulanır), yoğunluk (Rahat/Sıkı), Enter davranışı, animasyonlar.
+- **Open Folder** from the welcome screen (or recent projects) → lazy explorer
+  tree. Click a file → it opens in a tab with syntax highlighting. `Ctrl+S`
+  saves (• marks unsaved), `Ctrl+W` closes.
+- **Right-click** in the explorer: New File/Folder, Rename, Delete, Copy Path,
+  Reveal in Explorer. **Drag and drop** moves files between folders; tabs
+  reorder by drag, and tab right-click offers Close Others/Right/All.
+- `Ctrl+P` go to file (fuzzy), `Ctrl+K` command center, `Ctrl+B` toggle
+  explorer. `Ctrl+=` / `Ctrl+-` / `Ctrl+0` zoom the UI; `Alt+Z` toggles word
+  wrap; the diff tab has a side-by-side ↔ inline toggle.
+- Unsaved tabs are protected by a close confirmation; open tabs, the active
+  tab and panel layout are restored per project (`.imece/session.json`).
+- External changes (another editor, git) refresh the tree automatically.
 
-**Entegre terminal (gerçek PTY):**
-- **Ctrl+`** panel aç/kapat, **Ctrl+Shift+`** yeni terminal (sekmeli). Gerçek ConPTY
-  PowerShell: ok tuşları, renkler, `python` REPL, interaktif programlar — hepsi çalışır.
-  Proje köküne açılır; UTF-8.
+### Language intelligence
 
-Güvenlik: ajanlar seçtiğin klasörün **dışına çıkamaz** (yol güvenliği `project.py`).
+- **Python** — the basedpyright language server starts when a project opens
+  (status bar shows it becoming ready). Completions (`Ctrl+Space`),
+  diagnostics with red underlines, **F12 / Ctrl+click** go-to-definition
+  across files, hover signatures/docstrings, parameter help on `(`.
+- **TS/JS** — the same features from Monaco's built-in language service.
 
-> **Geliştirici notu — görsel doğrulama:** `node tools/webshot.mjs` mock-bridge'li UI'ı
-> gerçek Chromium'da açıp `.uishots/*.png` üretir (Monaco/xterm dahil). `--dev` +
-> `QTWEBENGINE_REMOTE_DEBUGGING` ile gerçek uygulamanın webview'i de CDP'den görüntülenebilir.
+### Run and debug
+
+- **F5** follows the VS Code convention: continue if a debug session is
+  paused; start debugging if the active file is `.py`; otherwise run the file.
+  **Ctrl+F5** runs the project without debugging (npm dev/start, cargo, go, or
+  main/app.py — heuristic; override via the command palette entry "Change Run
+  Command…" → `.imece/run.json`). **Shift+F5** or ■ stops.
+- A project-provided command is shown for **approval before its first run**,
+  including its source and working directory; approval is remembered per
+  project and re-requested when the command changes.
+- Output (run or debug) streams into the **OUTPUT** tab of the bottom panel,
+  with a green/red exit-code badge and duration.
+- **Debugging** — click left of a line number (or **F9**) for a breakpoint
+  (persisted per project). The bug icon in the activity bar opens the Run and
+  Debug view: start, then when paused you get the control strip (continue ·
+  **F10** step over · **F11** step into · **Shift+F11** step out · stop), the
+  call stack (click → jump to line), a lazy variables tree and the breakpoint
+  list. The paused line is highlighted amber.
+
+### Terminal
+
+`Ctrl+\`` toggles the panel, `Ctrl+Shift+\`` opens a new terminal (tabbed).
+Real ConPTY PowerShell: arrow keys, colors, `python` REPL and interactive
+programs all work. Opens at the project root, UTF-8.
+
+### Search and source control
+
+- `Ctrl+Shift+F` — project-wide search with case and regex toggles; results
+  grouped by file; click a line to jump. Uses ripgrep when installed, a Python
+  scan otherwise.
+- `Ctrl+Shift+G` — source control view: branch + ahead/behind counters, change
+  lists with status letters (M/A/D/R/U). Click a row for the center diff;
+  hover actions stage (+), unstage (−) or discard (↩, confirmed). Write a
+  message and **Commit** (`Ctrl+Enter`). Git status is visible everywhere:
+  changed files are colored in the explorer and counted in the status bar.
+  Remote operations (push/pull/branch) are not included in this beta.
+
+### Settings
+
+Gear icon or `Ctrl+K` → "Settings": accent color (applied live), density,
+Enter behavior, animations. Motion respects the OS reduced-motion preference.
 
 ---
 
-## Web arayüzü — sıfırdan üretim
+## Web interface — generate from scratch
 
 ```bash
-python app.py        # -> http://127.0.0.1:5000
+python app.py        # → http://127.0.0.1:5000
 ```
 
-- Görev gir, her role model ata, tur sayısı ve "kodu çalıştır" seçeneğini ayarla.
-- Her adım kart olarak: **model · süre · token · maliyet**.
-- Sonuç `output/result.py`'a yazılır; üstte toplam metrikler görünür.
-- "Kodu çalıştır" (execution grounding) açıksa üretilen kod gerçekten çalıştırılıp
-  çıktısı/hata varsa Coder'a geri beslenir.
+Enter a task, assign a model to each role, set rounds and the "run the code"
+option. Each step appears as a card with **model · time · tokens · cost**. The
+result is written to `output/result.py`. With "run the code" enabled
+(execution grounding), the generated code is actually executed and any
+output/error is fed back to the Coder.
 
----
-
-## Terminal
+## CLI
 
 ```bash
-python orchestrator.py "1'den 10'a kadar asal sayıları yazan kod"
-python orchestrator.py "..." --run      # üretilen kodu gerçekten çalıştır
+python orchestrator.py "code that prints the primes from 1 to 10"
+python orchestrator.py "..." --run      # actually execute the generated code
 ```
 
-Akış terminale yazılır (PLAN → CODE → çalıştırma → REVIEW → düzeltme), sonuç
-`output/result.py`'a kaydedilir ve toplam süre/token/maliyet gösterilir.
-
-> **Not:** git-bash'te `python` çalışmazsa PowerShell kullan (bkz. [SETUP.md](SETUP.md)
-> "Ortam tuzakları").
+The flow prints to the terminal (PLAN → CODE → run → REVIEW → fix), the result
+is saved to `output/result.py`, and totals (time/tokens/cost) are shown.
 
 ---
 
-## Rolleri / modelleri değiştirme
+## Changing roles and models
 
-- Arayüzden: Planner/Coder/Reviewer açılır menüleri.
-- Koddan kalıcı olarak: `agents.py` içindeki `DEFAULT_ROUTING`.
-- Bir rolün talimatını değiştirmek: `agents.py` içindeki `ROLE_PROMPTS`.
+- From the UI: the Planner/Coder/Reviewer dropdowns.
+- Permanently in code: `DEFAULT_ROUTING` in `agents.py`.
+- To change a role's instructions: `ROLE_PROMPTS` in `agents.py`.
 
-## Maliyeti düşürme
+## Reducing cost
 
-Tipik olarak maliyetin çoğu **Planner (Claude)**'dan gelir. Denemek istersen Planner'ı da
-DeepSeek'e alıp (routing) sonucu karşılaştır. Ölçümler her çalıştırmada arayüzde görünür.
+Most of the cost typically comes from the Planner when it runs on a premium
+model. Try routing the Planner to a cheaper provider and compare — per-step
+metrics are shown on every run.

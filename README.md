@@ -1,36 +1,61 @@
-# Multi-Agent IDE
+# Imece IDE
 
 > Windows public beta · `v0.3.0-beta.1` · [Türkçe](README.tr.md)
 
-Multi-Agent IDE is a local-first desktop coding workspace where a Planner,
-Coder and Reviewer collaborate on a change before you apply it. It combines a
-project explorer, Monaco editor, terminal, Git surface, Python LSP/debugging,
-reviewable diffs, checkpoints and a persistent change receipt.
+**Imece** is a local-first desktop coding workspace where a team of AI agents —
+a Planner, a Coder and a Reviewer, each backed by the model you choose —
+collaborates on a change and presents it to you as a reviewable diff before a
+single file is touched. The name comes from *imece*, the Turkish tradition of
+a community pooling its labor for one shared task.
+
+Around that workflow, Imece is a real IDE: project explorer, Monaco editor,
+integrated terminal, Git surface, Python language intelligence and debugging,
+checkpoints with undo, and a persistent change receipt for every AI run.
+
+![Reviewing an AI-proposed change in Imece IDE](docs/assets/review.png)
+
+## How it works
+
+1. Open a local project folder and describe a task.
+2. The Planner scopes the change, the Coder writes it, the Reviewer checks it —
+   each role can run on a different provider (Claude, DeepSeek or Gemini), with
+   per-step latency, token and cost metrics.
+3. You inspect the proposed diff file by file, then **Apply** or **Reject**.
+   Applying takes a checkpoint first, so one click undoes it.
+4. Every run leaves a change receipt: task, plan, diff, verdict, cost, and
+   apply/checkpoint state.
 
 ## Get started
 
-1. Open the latest GitHub Release and download `MultiAgentIDE-windows.zip`.
-2. Verify its SHA-256 against `SHA256SUMS.txt`, extract it, then run
-   `MultiAgentIDE.exe`.
-3. Open a local project folder. Add a DeepSeek and/or Gemini key in Settings;
-   Claude requires a separately installed Claude Code CLI.
+1. Download `ImeceIDE-windows.zip` from the latest
+   [GitHub Release](../../releases).
+2. Verify its SHA-256 against `SHA256SUMS.txt`, extract it, and run
+   `ImeceIDE.exe`.
+3. Open a project folder. Add a DeepSeek and/or Gemini API key in Settings;
+   using Claude requires a separately installed
+   [Claude Code CLI](https://claude.com/claude-code).
 4. Describe a task, inspect the suggested diff, then choose Apply or Reject.
 
-This beta is Windows-only and the binary is **unsigned**. Windows SmartScreen may
-show a warning. The source is available for review and local builds.
+This beta is **Windows-only** and the binary is **unsigned** — Windows
+SmartScreen may warn on first launch. The source is available for review and
+local builds.
+
+> **Language note:** the application UI is currently Turkish. An English UI is
+> planned; all documentation is in English.
 
 ## Trust and privacy
 
-- No telemetry, analytics, or automatic error reporting.
-- Model calls happen only when you start an AI run; selected context goes to the
-  provider assigned to that role.
-- Packaged-app API keys are protected with Windows DPAPI for the current user.
-- A project-provided F5 command is shown for approval before its first run, and
-  is requested again if the command changes.
-- Each AI run has a project-local change receipt with plan, diff, review,
-  metrics, apply/checkpoint state and optional Markdown export.
+- No telemetry, analytics or automatic error reporting.
+- Model calls happen only when you start an AI run; the selected context goes
+  to the provider assigned to that role and nowhere else.
+- In the packaged app, API keys are protected with Windows DPAPI for the
+  current user.
+- A project-provided run command (F5) is shown for approval before its first
+  run, and re-approved whenever it changes.
+- Agents cannot write outside the project folder you opened.
 
-Read the full [privacy statement](PRIVACY.md) and [security policy](SECURITY.md).
+Read the full [privacy statement](PRIVACY.md) and
+[security policy](SECURITY.md).
 
 ## Build from source
 
@@ -48,10 +73,13 @@ packaging/build.ps1
 node packaging/smoke.mjs
 ```
 
-## Documentation and contributing
+## Documentation
 
-- [Setup](docs/SETUP.md) · [Architecture](docs/ARCHITECTURE.md) · [Usage](docs/USAGE.md)
-- [Release checklist](docs/RELEASE.md) · [Changelog](docs/CHANGELOG.md)
-- [Contributing](docs/CONTRIBUTING.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Setup](docs/SETUP.md) · [Usage](docs/USAGE.md) ·
+  [Architecture](docs/ARCHITECTURE.md)
+- [Release guide](docs/RELEASE.md) · [Changelog](docs/CHANGELOG.md)
+- [Contributing](docs/CONTRIBUTING.md) · [Support](SUPPORT.md) ·
+  [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Third-party notices](THIRD-PARTY-NOTICES.md)
 
 Licensed under [Apache-2.0](LICENSE).
