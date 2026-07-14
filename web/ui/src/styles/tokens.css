@@ -63,6 +63,7 @@
   /* ---- Tipografi (rol → boyut/ağırlık/letter-spacing) ---- */
   --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --t-hero: 30px;    --ls-hero: -0.035em;
   --t-display: 20px; --w-display: 800; --ls-display: 0;
   --t-title: 14px;   --w-title: 700;   --ls-title: 0;
   --t-body: 13px;    --w-body: 400;    --ls-body: 0;
