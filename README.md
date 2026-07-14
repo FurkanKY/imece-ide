@@ -51,7 +51,7 @@ node packaging/smoke.mjs
 ## Documentation and contributing
 
 - [Setup](docs/SETUP.md) · [Architecture](docs/ARCHITECTURE.md) · [Usage](docs/USAGE.md)
-- [Release checklist](docs/RELEASE.md) · [Product differentiation](docs/PRODUCT-DIFFERENTIATION.md)
+- [Release checklist](docs/RELEASE.md) · [Changelog](docs/CHANGELOG.md)
 - [Contributing](docs/CONTRIBUTING.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 Licensed under [Apache-2.0](LICENSE).

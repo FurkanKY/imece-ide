@@ -29,4 +29,22 @@ docs/HANDOFF.md
 docs/CONTINUE-ON-ANOTHER-PC.md
 ui-audit.out.log
 ui-audit.err.log
+
+# Internal planning, product strategy, and design-work records
+docs/AGENTIC-PLAN.md
+docs/AI-NATIVE-DESIGN.md
+docs/AI-NATIVE-UI-PLAN.md
+docs/BETA-PLAN.md
+docs/CHANGELOG.md
+docs/DESIGN.md
+docs/IDE-PLUS-PLAN.md
+docs/MODELS.md
+docs/OPTIMIZATIONS.md
+docs/PRODUCT-DIFFERENTIATION.md
+docs/ROADMAP.md
+docs/UI-QUALITY-PLAN.md
+docs/VISUAL-RESET.md
+docs/VISUAL-SIGNATURE-AUDIT.md
+docs/VISUAL-SIGNATURE-PLAN.md
+docs/WEB-SHELL-PLAN.md
 web/ui/*.tsbuildinfo
