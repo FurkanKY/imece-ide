@@ -5,7 +5,7 @@ import { FileDiff, FilePlus2, Check, X, RotateCcw, ShieldCheck } from "lucide-re
 import { useRun } from "@/state/run";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
-import { Badge, Button, EmptyState } from "@/components/ui";
+import { Button, EmptyState } from "@/components/ui";
 
 export function Changes() {
   const diffs = useRun((s) => s.diffs);
@@ -66,12 +66,11 @@ export function Changes() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 border-b border-border-w px-3 py-2">
+      <div className="shrink-0 border-b border-border-w px-3 py-3">
         <div className="flex items-start gap-2">
-          <Badge tone={verdict === "APPROVED" ? "ok" : "warn"}>
-            {verdict === "APPROVED" ? "İNCELEME ONAYI" : "İNCELEME NOTU"}
-          </Badge>
+          <ShieldCheck size={14} className={verdict === "APPROVED" ? "mt-0.5 shrink-0 text-ok" : "mt-0.5 shrink-0 text-warn"} />
           <div className="min-w-0 flex-1">
+            <p className={verdict === "APPROVED" ? "text-ok" : "text-warn"} style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>{verdict === "APPROVED" ? "İnceleme onayı" : "İnceleme notu"}</p>
             <p className="text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.35 }}>
               {verdictNote || `${checkedCount}/${diffs.length} dosya seçili; uygulamadan önce son kontrolünüz alınır.`}
             </p>
@@ -94,8 +93,8 @@ export function Changes() {
                 if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void openDiff(d.path); }
               }}
               className={
-                "flex cursor-pointer items-center gap-2 rounded-[var(--r-sm)] px-2 py-1.5 " +
-                (active ? "bg-accentdim" : "hover:bg-card")
+                "flex cursor-pointer items-center gap-2 border-l-2 px-2 py-2 " +
+                (active ? "border-accent bg-accentdim/60" : "border-transparent hover:bg-card/45")
               }
             >
               <input
@@ -110,17 +109,13 @@ export function Changes() {
               <span className="min-w-0 flex-1 truncate text-text2" style={{ fontSize: "var(--t-label)" }}>
                 {d.path}
               </span>
-              {d.isNew && (
-                <Badge tone="ok" className="shrink-0">
-                  <FilePlus2 size={10} /> YENİ
-                </Badge>
-              )}
+              {d.isNew && <span className="flex shrink-0 items-center gap-1 text-ok" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}><FilePlus2 size={10} /> Yeni</span>}
             </div>
           );
         })}
       </div>
 
-      <div className="material-panel border-t border-border-w p-2.5">
+      <div className="border-t border-border-w bg-panel px-2.5 py-3">
         <div className="mb-2 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
           <ShieldCheck size={12} className="text-ok" /> Uygulamadan önce checkpoint oluşturulur.
         </div>
