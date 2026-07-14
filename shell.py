@@ -33,6 +33,15 @@ def main() -> int:
     from dotenv import load_dotenv
     from runtime_paths import env_path
     load_dotenv(env_path())
+    # Paketli uygulama .env yerine DPAPI deposunu önceliklendirir. Eski .env
+    # taşıması Ayarlar anahtar durumu ilk okununca güvenle tamamlanır.
+    from secret_store import SecretStoreError, packaged_store
+    try:
+        store = packaged_store()
+        if store:
+            os.environ.update(store.load())
+    except SecretStoreError as exc:
+        print(f"Anahtar deposu okunamadı: {exc}")
 
     # Beta-2: dosya log'u + global istisna yakalama — HER ŞEYDEN önce.
     from webhost import applog

@@ -39,3 +39,13 @@ def test_saved_command_wins_and_roundtrips(tmp_path):
     # dosya bozuksa sezgiye düşer
     (tmp_path / ".magent" / "run.json").write_text("{bozuk", encoding="utf-8")
     assert runconfig.project_command(str(tmp_path)) == 'python "main.py"'
+
+
+def test_resolve_and_fingerprint_changes_when_command_changes(tmp_path):
+    root = str(tmp_path)
+    runconfig.save_project_command(root, "python main.py")
+    info = runconfig.resolve(root)
+    assert info == {"command": "python main.py", "source": "project_config"}
+    before = runconfig.fingerprint(root, info["command"], info["source"])
+    after = runconfig.fingerprint(root, "python other.py", info["source"])
+    assert before != after

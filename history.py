@@ -26,7 +26,7 @@ class HistoryStore:
         except (OSError, ValueError):
             return []
 
-    def add(self, task: str, verdict: str, tokens: int, cost_usd: float, files: list[str]) -> dict:
+    def add(self, task: str, verdict: str, tokens: int, cost_usd: float, files: list[str], receipt_id: str | None = None, status: str = "completed") -> dict:
         rec = {
             "ts": time.time(),
             "task": (task or "").strip(),
@@ -34,6 +34,8 @@ class HistoryStore:
             "tokens": int(tokens or 0),
             "cost_usd": round(float(cost_usd or 0.0), 5),
             "files": list(files or []),
+            "receipt_id": receipt_id,
+            "status": status,
         }
         items = self.all()
         items.insert(0, rec)          # en yeni en üstte

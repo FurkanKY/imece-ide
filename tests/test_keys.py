@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from webhost.api.keys import write_env, _mask  # noqa: E402
+from webhost.api.keys import write_env, clear_env_keys, _mask  # noqa: E402
 
 
 def test_write_env_updates_existing_and_preserves_comments(tmp_path):
@@ -33,3 +33,10 @@ def test_mask_never_leaks_short_keys():
     assert _mask("kisa") == "••••"
     assert _mask("cok-uzun-anahtar-1234").endswith("1234")
     assert "cok-uzun" not in _mask("cok-uzun-anahtar-1234")
+
+
+def test_clear_env_keys_keeps_models_and_comments(tmp_path):
+    p = tmp_path / ".env"
+    p.write_text("# sakla\nDEEPSEEK_API_KEY=secret\nDEEPSEEK_MODEL=deepseek-chat\n", encoding="utf-8")
+    clear_env_keys(p, {"DEEPSEEK_API_KEY"})
+    assert p.read_text(encoding="utf-8") == "# sakla\nDEEPSEEK_API_KEY=\nDEEPSEEK_MODEL=deepseek-chat\n"

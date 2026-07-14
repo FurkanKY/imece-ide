@@ -38,7 +38,7 @@ Geliştirme: `npm run dev` (HMR, mock-bridge ile düz tarayıcıda) + `python sh
 (aynı arayüz gerçek köprüyle yerleşik pencerede). Görsel doğrulama:
 `node tools/webshot.mjs` → `.uishots/*.png`.
 
-## 4. API anahtarları (.env)
+## 4. API anahtarları (.env, kaynak geliştirme)
 
 `.env.example` dosyasını `.env` olarak kopyala ve doldur:
 
@@ -55,7 +55,11 @@ CLAUDE_CLI=claude                   # Claude için anahtar YOK, sadece CLI adı
 > **Önemli:** Model adları API'nin gerçek adları olmalı. `gemini-3.1-pro` gibi bir ad
 > 404/429 verir. Çalışan adlar için → [MODELS.md](MODELS.md).
 
-`.env` gizlidir ve `.gitignore` ile dışlanmıştır — kimseyle paylaşma.
+`.env` gizlidir ve `.gitignore` ile dışlanmıştır — kimseyle paylaşma. Bu yöntem
+yalnız kaynak geliştirme içindir. Paketli Windows uygulamasında anahtarları
+Ayarlar'dan girin; Windows DPAPI bunları mevcut kullanıcı hesabına bağlı şifreli
+depoda saklar. Eski paket `.env` anahtarları ilk Ayarlar durum kontrolünde taşınır
+ve düz metin değerleri temizlenir.
 
 ## 5. Doğrulama
 

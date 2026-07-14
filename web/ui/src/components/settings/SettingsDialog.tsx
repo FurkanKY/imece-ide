@@ -163,7 +163,7 @@ function ApiKeysSection() {
       <KeyRow name="deepseek" label="DeepSeek" placeholder="sk-…  (platform.deepseek.com)" />
       <KeyRow name="gemini" label="Gemini" placeholder="AIza…  (aistudio.google.com/apikey)" />
       <p className="mt-1 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-        Anahtarlar yerelde .env dosyasına yazılır; hiçbir yere gönderilmez ve arayüze geri okunmaz.
+        Paketli Windows sürümünde anahtarlar Windows hesabınıza bağlı şifreli depoda tutulur; hiçbir yere gönderilmez ve arayüze geri okunmaz.
       </p>
     </div>
   );

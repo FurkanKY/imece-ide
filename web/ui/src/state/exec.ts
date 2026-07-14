@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { bridge } from "@/bridge";
 import { toast } from "@/components/toasts/toasts";
 import { useUi } from "@/state/ui";
+import { confirmDialog } from "@/components/dialogs/dialogs";
 
 const RAW_MAX = 2 * 1024 * 1024; // ham tampon üst sınırı (bellek)
 
@@ -87,10 +88,22 @@ export const useExec = create<ExecState>((set, get) => ({
 
   run: async (rel, command) => {
     try {
+      const params = command ? { rel: null, command } : { rel: rel ?? null };
+      const preflight = await bridge.call("exec.preflight", params);
+      if (preflight.requiresConfirmation) {
+        const source = preflight.source === "project_config" ? ".magent/run.json" : "proje algısı";
+        const accepted = await confirmDialog({
+          title: "Proje komutunu çalıştır",
+          message: `${source} bu komutu ${preflight.cwd} içinde çalıştıracak:\n\n${preflight.command}`,
+          okLabel: "Onayla ve çalıştır",
+        });
+        if (!accepted) return;
+        await bridge.call("exec.approveCommand", params);
+      }
       useUi.getState().showBottom("output");
       const { execId, command: cmd } = await bridge.call(
         "exec.run",
-        command ? { rel: null, command } : { rel: rel ?? null },
+        params,
       );
       const early = pendingChunks.get(execId) ?? "";
       pendingChunks.clear();

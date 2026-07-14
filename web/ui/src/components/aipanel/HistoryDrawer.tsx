@@ -3,8 +3,8 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { X, Clock, RotateCcw, ShieldCheck } from "lucide-react";
-import { bridge, Checkpoint, HistoryItem } from "@/bridge";
+import { X, Clock, RotateCcw, ShieldCheck, FileText, Download } from "lucide-react";
+import { bridge, Checkpoint, HistoryItem, Receipt } from "@/bridge";
 import { useRun } from "@/state/run";
 import { toast } from "@/components/toasts/toasts";
 import { useSettings } from "@/state/settings";
@@ -22,6 +22,7 @@ function relTime(ts: number): string {
 export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
   const setTask = useRun((s) => s.setTask);
   const restoreCheckpoint = useRun((s) => s.restoreCheckpoint);
   const activeCheckpointId = useRun((s) => s.checkpointId);
@@ -37,6 +38,27 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
       .then(([history, checkpoints]) => { setItems(history.items); setCheckpoints(checkpoints.checkpoints); })
       .catch(() => toast.err("Geçmiş yüklenemedi."));
   }, [open]);
+
+  const openReceipt = async (receiptId: string) => {
+    try {
+      const result = await bridge.call("receipt.get", { receiptId });
+      setReceipt(result.receipt);
+    } catch (e) {
+      toast.err(e instanceof Error ? e.message : "Makbuz yüklenemedi.");
+    }
+  };
+
+  const exportReceipt = async () => {
+    if (!receipt) return;
+    try {
+      const { path } = await bridge.call("app.pickFolder", { title: "Makbuzu kaydetmek için klasör seç" });
+      if (!path) return;
+      const result = await bridge.call("receipt.export", { receiptId: receipt.id, directory: path });
+      toast.ok(`Makbuz dışa aktarıldı: ${result.path}`);
+    } catch (e) {
+      toast.err(e instanceof Error ? e.message : "Makbuz dışa aktarılamadı.");
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -61,6 +83,24 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {receipt && (
+              <section className="mb-3 rounded-[var(--r-sm)] border border-accent/40 bg-accentdim/25 p-2.5">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}><FileText size={12} /> Değişiklik makbuzu</span>
+                  <div className="flex items-center gap-1">
+                    <button className="icon-btn size-6" aria-label="Makbuzu dışa aktar" title="Markdown dışa aktar" onClick={() => void exportReceipt()}><Download size={12} /></button>
+                    <button className="icon-btn size-6" aria-label="Makbuzu kapat" onClick={() => setReceipt(null)}><X size={12} /></button>
+                  </div>
+                </div>
+                <p className="text-text2" style={{ fontSize: "var(--t-caption)" }}>{receipt.task}</p>
+                <p className="mt-1 text-faint" style={{ fontSize: "var(--t-caption)" }}>{receipt.plan?.summary || "Plan özeti yok."}</p>
+                <div className="mt-2 grid grid-cols-2 gap-1 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+                  <span>Karar: {receipt.review.verdict}</span><span>{receipt.proposals.length} dosya önerisi</span>
+                  <span>{receipt.metrics.tokens} tok · ${receipt.metrics.cost_usd.toFixed(4)}</span><span>Durum: {receipt.status}</span>
+                </div>
+                <p className="mt-2 border-t border-border-w pt-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>{receipt.verification.detail}</p>
+              </section>
+            )}
             {checkpoints.length > 0 && (
               <section className="mb-3">
                 <div className="mb-1 flex items-center gap-1.5 px-1 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}><ShieldCheck size={11} /> CHECKPOINTLER</div>
@@ -99,14 +139,11 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
               </p>
             ) : (
               items.map((it, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setTask(it.task);
-                    onClose();
-                  }}
-                  className="material-card pressable mb-1 w-full rounded-[var(--r-sm)] border border-border-w px-2.5 py-2 text-left hover:bg-card2"
-                >
+                <div key={i} className="material-card pressable mb-1 rounded-[var(--r-sm)] border border-border-w hover:bg-card2">
+                  <button
+                    onClick={() => { setTask(it.task); onClose(); }}
+                    className="w-full px-2.5 py-2 text-left"
+                  >
                   <div className="flex items-center gap-2">
                     <span
                       className={
@@ -124,7 +161,9 @@ export function HistoryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                     <span>· {it.tokens} tok</span>
                     <span>· ${it.cost_usd.toFixed(4)}</span>
                   </div>
-                </button>
+                  </button>
+                  {it.receipt_id && <button onClick={() => void openReceipt(it.receipt_id!)} className="mb-2 ml-3.5 flex items-center gap-1 text-accent hover:text-text" style={{ fontSize: "var(--t-caption)" }}><FileText size={11} /> Makbuz</button>}
+                </div>
               ))
             )}
           </div>

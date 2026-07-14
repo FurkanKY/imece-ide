@@ -24,6 +24,8 @@ DEFAULTS = {
     "window": None,             # {x, y, w, h, maximized} | None
     "last_project": None,       # son açık proje kökü | None
     "recent_projects": [],      # [{path, name, last_opened}]
+    # [{root, fingerprint}] — proje komutu değişince yeniden kullanıcı onayı gerekir.
+    "trusted_run_commands": [],
 }
 
 

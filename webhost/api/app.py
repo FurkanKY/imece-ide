@@ -49,7 +49,7 @@ def _open_external(params, ctx):
 @handler("app.pickFolder")
 def _pick_folder(params, ctx):
     # Tek kalan native diyalog (OS klasör seçici) — bilinçli karar, bkz. plan.
-    path = QFileDialog.getExistingDirectory(None, "Proje klasörü seç")
+    path = QFileDialog.getExistingDirectory(None, params.get("title") or "Proje klasörü seç")
     return {"path": path or None}
 
 

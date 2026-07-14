@@ -1,5 +1,19 @@
 # Kullanım
 
+## Değişiklik makbuzu
+
+Her AI koşusu bittikten sonra sağ paneldeki geçmişten **Makbuz** seçilebilir.
+Makbuz, görev, plan/kapsam, önerilen diff, reviewer kararı, maliyet, uygulama ve
+checkpoint durumunu saklar. Test veya komut çalıştırılmadıysa bunu kanıt gibi
+göstermek yerine açıkça bildirir. Kullanıcı isterse makbuzu seçtiği klasöre
+Markdown olarak dışa aktarabilir.
+
+## Proje komutu güveni
+
+F5/Ctrl+F5 ile proje komutu ilk kez çalıştırılmadan önce uygulama komutu, kaynağını
+ve çalışma klasörünü gösterir. Onay aynı proje ve aynı komut için hatırlanır;
+`.magent/run.json` ya da sezgi sonucu değişirse tekrar sorulur.
+
 Arayüzler aynı motoru kullanır; hangisini seçeceğin işine bağlı.
 
 | Arayüz | En iyi olduğu iş |
