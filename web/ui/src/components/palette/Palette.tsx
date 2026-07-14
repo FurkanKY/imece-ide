@@ -2,7 +2,6 @@
    ↑/↓ gezin, Enter çalıştır/aç, Esc kapat; eşleşen karakterler vurgulanır. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { Command as CommandIcon, FileSearch, CornerDownLeft } from "lucide-react";
 import { usePalette, Command } from "./paletteStore";
 import { fuzzyFilter, FuzzyHit } from "@/lib/fuzzy";
@@ -69,7 +68,7 @@ export function Palette() {
       ?.scrollIntoView({ block: "nearest" });
   }, [sel]);
 
-  if (!open) return <AnimatePresence />;
+  if (!open) return null;
 
   const pick = (i: number) => {
     const r = results[i];
@@ -87,35 +86,24 @@ export function Palette() {
   };
 
   return (
-    <AnimatePresence>
-      <motion.div
-        key="palette-overlay"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0 }}
-        className="fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[12vh]"
+    <div
+        className="fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto bg-black/55 p-4 pt-[12vh]"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) close();
         }}
       >
-        <motion.div
+        <div
           role="dialog"
           aria-modal="true"
           aria-label={mode === "files" ? "Dosyaya git" : "Komut Merkezi"}
-          initial={{ opacity: 0, transform: "translateY(-8px) scale(0.99)" }}
-          animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
-          transition={{ duration: 0 }}
-          className="material-panel w-[min(560px,calc(100vw-2rem))] overflow-hidden rounded-[var(--r-lg)] border border-border-w"
-          style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
+          className="w-[min(600px,calc(100vw-2rem))] overflow-hidden rounded-[var(--r-md)] border border-border-w bg-panel"
+          style={{ boxShadow: "var(--shadow-2)" }}
         >
-          <div className="flex items-center gap-2.5 border-b border-border-w px-3.5 py-2.5">
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-[var(--r-xs)] bg-accentdim text-accent">
-              {mode === "files" ? <FileSearch size={14} /> : <CommandIcon size={14} />}
-            </span>
+          <div className="flex items-center gap-2.5 border-b border-border-w px-4 py-3">
+            {mode === "files" ? <FileSearch size={15} className="shrink-0 text-muted" /> : <CommandIcon size={15} className="shrink-0 text-muted" />}
             <div className="min-w-0 flex-1">
-              <p className="text-faint" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
-                {mode === "files" ? "DOSYAYA GİT" : "KOMUT MERKEZİ"}
+              <p className="text-muted" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
+                {mode === "files" ? "Dosyaya git" : "Komut Merkezi"}
               </p>
               <input
                 ref={inputRef}
@@ -132,7 +120,7 @@ export function Palette() {
             <Kbd className="shrink-0">Esc</Kbd>
           </div>
 
-          <div ref={listRef} role="listbox" aria-label={mode === "files" ? "Dosya sonuçları" : "Komut sonuçları"} className="max-h-[46vh] overflow-y-auto p-1.5">
+          <div ref={listRef} role="listbox" aria-label={mode === "files" ? "Dosya sonuçları" : "Komut sonuçları"} className="max-h-[46vh] overflow-y-auto py-1.5">
             {results.length === 0 ? (
               <EmptyState title="Eşleşme yok" description="Farklı bir dosya adı veya komut deneyin." className="py-7" />
             ) : (
@@ -150,8 +138,8 @@ export function Palette() {
                     onPointerEnter={() => setSel(i)}
                     onClick={() => pick(i)}
                     className={
-                      "flex cursor-pointer items-center gap-2.5 rounded-[var(--r-sm)] px-2.5 py-1.5 " +
-                      (on ? "bg-accentdim text-text" : "text-text2")
+                      "flex cursor-pointer items-center gap-2.5 border-l-2 px-4 py-2 " +
+                      (on ? "border-accent bg-accentdim/60 text-text" : "border-transparent text-text2 hover:bg-card/45")
                     }
                     style={{ fontSize: "var(--t-label)" }}
                   >
@@ -162,9 +150,7 @@ export function Palette() {
                     <span className="min-w-0 flex-1 truncate">
                       <Highlight text={label} hit={r.hit} />
                     </span>
-                    {r.cmd?.id.startsWith("ai-") && (
-                      <span className="shrink-0 rounded-[var(--r-pill)] bg-accentdim px-1.5 py-0.5 text-accent" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>AI</span>
-                    )}
+                    {r.cmd?.id.startsWith("ai-") && <span className="shrink-0 text-faint" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>AI</span>}
                     {r.cmd?.hint && <Kbd className="shrink-0">{r.cmd.hint}</Kbd>}
                     {on && <CornerDownLeft size={13} className="shrink-0 text-faint" />}
                   </div>
@@ -176,8 +162,7 @@ export function Palette() {
             <span>{results.length} {mode === "files" ? "dosya" : "eylem"}</span>
             <span className="flex items-center gap-1.5"><Kbd>↑ ↓</Kbd> seç <Kbd>Enter</Kbd> çalıştır</span>
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      </div>
   );
 }
