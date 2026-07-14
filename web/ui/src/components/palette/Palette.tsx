@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Search, CornerDownLeft } from "lucide-react";
+import { Command as CommandIcon, FileSearch, CornerDownLeft } from "lucide-react";
 import { usePalette, Command } from "./paletteStore";
 import { fuzzyFilter, FuzzyHit } from "@/lib/fuzzy";
 import { fileIcon } from "@/lib/fileIcons";
@@ -94,30 +94,41 @@ export function Palette() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0 }}
-        className="fixed inset-0 z-[140] flex items-start justify-center bg-black/40 pt-[12vh]"
+        className="fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[12vh]"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) close();
         }}
       >
         <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-label={mode === "files" ? "Dosyaya git" : "Komut Merkezi"}
           initial={{ opacity: 0, transform: "translateY(-8px) scale(0.99)" }}
           animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
           transition={{ duration: 0 }}
-          className="material-panel w-[560px] overflow-hidden rounded-[var(--r-lg)] border border-border-w"
+          className="material-panel w-[min(560px,calc(100vw-2rem))] overflow-hidden rounded-[var(--r-lg)] border border-border-w"
           style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
         >
-          <div className="flex items-center gap-2.5 border-b border-border-w px-3.5 py-3">
-            <Search size={15} className="shrink-0 text-faint" />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={onKey}
-              placeholder={mode === "files" ? "Dosya adı yaz…" : "Komut yaz…"}
-              spellCheck={false}
-              className="selectable w-full bg-transparent text-text outline-none placeholder:text-faint"
-              style={{ fontSize: "var(--t-body)" }}
-            />
+          <div className="flex items-center gap-2.5 border-b border-border-w px-3.5 py-2.5">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-[var(--r-xs)] bg-accentdim text-accent">
+              {mode === "files" ? <FileSearch size={14} /> : <CommandIcon size={14} />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-faint" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
+                {mode === "files" ? "DOSYAYA GİT" : "KOMUT MERKEZİ"}
+              </p>
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={onKey}
+                placeholder={mode === "files" ? "Dosya adı yaz…" : "Bir eylem veya AI görevi ara…"}
+                aria-label={mode === "files" ? "Dosya ara" : "Komut ara"}
+                spellCheck={false}
+                className="selectable w-full bg-transparent text-text outline-none placeholder:text-faint"
+                style={{ fontSize: "var(--t-body)" }}
+              />
+            </div>
             <Kbd className="shrink-0">Esc</Kbd>
           </div>
 
@@ -149,12 +160,19 @@ export function Palette() {
                     <span className="min-w-0 flex-1 truncate">
                       <Highlight text={label} hit={r.hit} />
                     </span>
+                    {r.cmd?.id.startsWith("ai-") && (
+                      <span className="shrink-0 rounded-[var(--r-pill)] bg-accentdim px-1.5 py-0.5 text-accent" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>AI</span>
+                    )}
                     {r.cmd?.hint && <Kbd className="shrink-0">{r.cmd.hint}</Kbd>}
                     {on && <CornerDownLeft size={13} className="shrink-0 text-faint" />}
                   </div>
                 );
               })
             )}
+          </div>
+          <div className="flex items-center justify-between border-t border-border-w px-3.5 py-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+            <span>{results.length} {mode === "files" ? "dosya" : "eylem"}</span>
+            <span className="flex items-center gap-1.5"><Kbd>↑ ↓</Kbd> seç <Kbd>Enter</Kbd> çalıştır</span>
           </div>
         </motion.div>
       </motion.div>
