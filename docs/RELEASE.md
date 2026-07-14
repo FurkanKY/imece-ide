@@ -4,6 +4,11 @@
 
 **v0.3.0-beta.1** — Windows `onedir` dağıtımı.
 
+> **Kaynak dalı notu (2026-07-14):** Bu dalda paketli sürümden sonra gelen UI
+> kalite değişiklikleri ve ayrıca yürütülmekte olan görsel yön sıfırlama işi vardır.
+> Bu nedenle yeni kaynak durumunu doğrulamadan mevcut EXE'yi nihai görsel kabul veya
+> yayın adayı olarak değerlendirmeyin; önce Windows'ta yeniden paketleyin.
+
 ## Son kullanıcı için hızlı başlangıç
 
 1. `MultiAgentIDE.exe` dosyasını çalıştırın.
