@@ -42,7 +42,7 @@ export interface Api {
   // app
   "app.info": { params: {}; result: { version: string; platform: string; chromium: string } };
   "app.openExternal": { params: { url: string }; result: {} };
-  "app.pickFolder": { params: {}; result: { path: string | null } };
+  "app.pickFolder": { params: { title?: string }; result: { path: string | null } };
   "app.revealInOS": { params: { path: string }; result: {} };
   "app.clipboardWrite": { params: { text: string }; result: {} };
   /** Beta-2: web hataları dosya log'una — istem/anahtar içeriği GÖNDERİLMEZ */
@@ -85,6 +85,8 @@ export interface Api {
   "checkpoint.restore": { params: { checkpointId: string }; result: { restored: string[] } };
   "run.rejectProposals": { params: {}; result: {} };
   "history.list": { params: {}; result: { items: HistoryItem[] } };
+  "receipt.get": { params: { receiptId: string }; result: { receipt: Receipt } };
+  "receipt.export": { params: { receiptId: string; directory: string }; result: { path: string } };
 
   // ---- terminal (P3, ConPTY) ----
   "terminal.create": {
@@ -109,7 +111,12 @@ export interface Api {
     result: { execId: string; command: string };
   };
   "exec.stop": { params: {}; result: {} };
-  "exec.getCommand": { params: {}; result: { command: string | null } };
+  "exec.getCommand": { params: {}; result: { command: string | null; source?: string | null } };
+  "exec.preflight": {
+    params: { rel?: string | null; command?: string };
+    result: { command: string; source: "explicit" | "file" | "project_config" | "detected"; cwd: string; fingerprint: string; requiresConfirmation: boolean };
+  };
+  "exec.approveCommand": { params: { rel?: string | null; command?: string }; result: {} };
   "exec.setCommand": { params: { command: string }; result: {} };
 
   // ---- keys (beta onboarding — API anahtarları) ----
@@ -225,6 +232,25 @@ export interface HistoryItem {
   tokens: number;
   cost_usd: number;
   files: string[];
+  receipt_id?: string | null;
+  status?: string;
+}
+export interface Receipt {
+  id: string;
+  createdAt: number;
+  finishedAt: number;
+  status: string;
+  task: string;
+  routing: Routing;
+  plan: { summary: string; files: string[] } | null;
+  proposals: { path: string; is_new: boolean; diff: string }[];
+  review: { verdict: string; note: string };
+  metrics: { latency_s: number; tokens: number; cost_usd: number };
+  applied: string[];
+  rejected: string[];
+  checkpointId: string | null;
+  verification: { status: string; detail: string };
+  error?: string;
 }
 export interface Checkpoint {
   id: string;

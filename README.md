@@ -1,125 +1,57 @@
-# Multi-Agent Kodlama Asistanı
+# Multi-Agent IDE
 
-> **Açık beta: v0.3.0-beta.1.** Windows paketiyle kullanıma hazırdır; kurulum,
-> bilinen sınırlar ve yayın kabul listesi için [RELEASE.md](docs/RELEASE.md)'ye bakın.
+> Windows public beta · `v0.3.0-beta.1` · [Türkçe](README.tr.md)
 
-Farklı yapay zeka modellerini (**Claude · DeepSeek · Gemini**) bir "yazılım ekibi"
-gibi çalıştıran, çok-modelli bir kodlama asistanı. Her model bir role atanır
-(planlama / kod yazma / inceleme), bir orkestratör onları sırayla çalıştırır ve
-aralarında bilgi taşır.
+Multi-Agent IDE is a local-first desktop coding workspace where a Planner,
+Coder and Reviewer collaborate on a change before you apply it. It combines a
+project explorer, Monaco editor, terminal, Git surface, Python LSP/debugging,
+reviewable diffs, checkpoints and a persistent change receipt.
 
-Ana arayüz: **masaüstü mini-IDE (`shell.py`)** — yerleşik PySide6 penceresi içinde
-web teknolojisiyle çizilen (React+TS+Vite+Tailwind, Monaco, xterm.js) tam bir IDE:
-dosya gezgini, çok sekmeli editör, gerçek terminal (ConPTY), projede arama, git
-kaynak denetimi ve sağda canlı **AI EKİBİ paneli** (Planner→Coder→Reviewer pipeline,
-merkez inline diff, uygula/vazgeç). Ek arayüzler: **terminal** ve **web**.
+## Get started
 
----
+1. Open the latest GitHub Release and download `MultiAgentIDE-windows.zip`.
+2. Verify its SHA-256 against `SHA256SUMS.txt`, extract it, then run
+   `MultiAgentIDE.exe`.
+3. Open a local project folder. Add a DeepSeek and/or Gemini key in Settings;
+   Claude requires a separately installed Claude Code CLI.
+4. Describe a task, inspect the suggested diff, then choose Apply or Reject.
 
-## Hızlı başlangıç
+This beta is Windows-only and the binary is **unsigned**. Windows SmartScreen may
+show a warning. The source is available for review and local builds.
+
+## Trust and privacy
+
+- No telemetry, analytics, or automatic error reporting.
+- Model calls happen only when you start an AI run; selected context goes to the
+  provider assigned to that role.
+- Packaged-app API keys are protected with Windows DPAPI for the current user.
+- A project-provided F5 command is shown for approval before its first run, and
+  is requested again if the command changes.
+- Each AI run has a project-local change receipt with plan, diff, review,
+  metrics, apply/checkpoint state and optional Markdown export.
+
+Read the full [privacy statement](PRIVACY.md) and [security policy](SECURITY.md).
+
+## Build from source
 
 ```bash
-pip install -r requirements.txt
-# .env dosyasını doldur (DEEPSEEK_API_KEY, GEMINI_API_KEY). Claude için anahtar gerekmez.
-
-cd web/ui && npm ci && npm run build && cd ../..   # arayüzü derle (bir kez)
-python shell.py                     # ★ masaüstü mini-IDE
-python app.py                       # web arayüzü  -> http://127.0.0.1:5000
-python orchestrator.py "..." --run  # terminal (sıfırdan tek dosya üret + çalıştır)
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+cd web/ui && npm ci && npm run build && cd ../..
+python shell.py
 ```
 
-### Windows paketiyle başlamak
+For a distributable package, use Windows PowerShell:
 
-`dist/MultiAgentIDE/MultiAgentIDE.exe` dosyasını çalıştırın. Python ve Node gerekmez.
-Kaynak kodda yapılan UI değişikliklerini görmek için Windows'ta yeniden paketleme
-gereklidir; ayrıntı için [açık beta sürüm rehberine](docs/RELEASE.md) bakın.
-İlk açılışta **Klasör Aç** ile yerel projenizi seçin; Ayarlar'dan DeepSeek/Gemini
-anahtarlarını girin ve Claude kullanacaksanız Claude Code CLI'ı ayrıca kurun. Kullanıcı
-verileri `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
-
-Ayrıntılı kurulum ve API anahtarları için → [docs/SETUP.md](docs/SETUP.md)
-
----
-
-## Ekip / roller
-
-| Rol | Varsayılan model | Görevi |
-|-----|------------------|--------|
-| **Planner** | Claude (Claude Code headless) | Görevi adımlara böler, dosyaları seçer |
-| **Coder** | DeepSeek | Planı koda / diff'e döker |
-| **Reviewer** | Gemini (flash) | Kodu/diff'i inceler, hata bulur |
-
-Roller arayüzden yeniden atanabilir (model yönlendirme). Nedenleri ve model adları →
-[docs/MODELS.md](docs/MODELS.md)
-
-## İki çalışma modu
-
-1. **Sıfırdan üretim** — tek dosya üretir, çalıştırır, inceler, düzeltir (`runner.py`).
-2. **Lokal proje üzerinde çalışma** — var olan bir projeyi okur, ilgili dosyaları seçer,
-   değişiklikleri **diff** olarak önerir; onayınca uygular (`project_runner.py`).
-
-## Uygulanan optimizasyonlar
-
-Execution grounding (kodu gerçekten çalıştırıp hatayı geri besleme) · model yönlendirme ·
-gözlemlenebilirlik (süre/token/maliyet) · yansıma (reflection) döngüsü.
-Ayrıntı → [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)
-
----
-
-## Dokümantasyon
-
-| Belge | İçerik |
-|-------|--------|
-| [SETUP.md](docs/SETUP.md) | Kurulum, API anahtarları, ortam tuzakları (Python/encoding) |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Sistem mimarisi, modüller, veri akışı, olay tipleri |
-| [USAGE.md](docs/USAGE.md) | Üç arayüzün kullanımı, örnekler |
-| [OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md) | Multi-agent optimizasyon teknikleri |
-| [MODELS.md](docs/MODELS.md) | Model sağlayıcıları, çalışan model adları, fiyatlandırma |
-| [ROADMAP.md](docs/ROADMAP.md) | Yol haritası |
-| [IDE-PLUS-PLAN.md](docs/IDE-PLUS-PLAN.md) | **Aktif program (P7–P10)**: LSP · F5/debug · eşli programlama · maliyet panosu |
-| [AGENTIC-PLAN.md](docs/AGENTIC-PLAN.md) | **Sıradaki program (P11–P13)**: agentic araç döngüsü · bağlam motoru · orkestrasyon 2.0 |
-| [DESIGN.md](docs/DESIGN.md) | Tasarım tokenları + ASTRYX/Linear referans kalibrasyonu |
-| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Çalışma kuralları + **dokümantasyon güncelleme kuralı** |
-| [CHANGELOG.md](docs/CHANGELOG.md) | Sürüm/iterasyon günlüğü |
-| [HANDOFF.md](docs/HANDOFF.md) | **Devam notu** — yeni sohbette kaldığın yerden başlamak için |
-
-## Dosya haritası
-
-```
-# --- Motor (tüm arayüzler paylaşır; yalnız geriye-uyumlu genişletilebilir) ---
-adapters.py        modellere bağlanan fonksiyonlar (metin + token + maliyet)
-agents.py          rol talimatları + routing
-runner.py          sıfırdan üretim orkestrasyonu (execution grounding)
-project.py         lokal proje araçları (listele/oku/diff/uygula, yol güvenliği)
-project_runner.py  proje üzerinde çalışma orkestrasyonu (diff öner)
-history.py         oturum geçmişi kalıcılığı (proje-içi .magent/history.json)
-runconfig.py       F5 "çalıştır" komut sezgisi (.magent/run.json)
-orchestrator.py    terminal arayüzü
-app.py + templates/  web arayüzü
-
-# --- ★ Masaüstü mini-IDE (shell.py) ---
-shell.py           giriş (--dev = Vite HMR + DevTools)
-webhost/           PySide6 host: scheme (app://) · bridge (RPC) · jsonrpc (LSP/DAP
-                   çerçeveleme) · window (frameless + kapatma koruması) · state (aktif
-                   proje) · watcher (fs.changed) · api/ (app·settings·project·fs·session·
-                   run·history·terminal·search·scm·lsp·exec·debug)
-web/ui/            React+TS+Vite+Tailwind UI: bridge/ (protocol+qt+mock) · state/ (zustand)
-                   · components/ (titlebar·activitybar·explorer·editor·scm·search·aipanel·
-                   bottompanel·statusbar·welcome·palette·dialogs·toasts·settings) ·
-                   styles/tokens.css (tasarım tokenları) · lib/ (monaco·lsp·keymap·commands…)
-ui_prefs.py        arayüz tercihleri kalıcılığı (accent·window·son projeler)
-tools/webshot.mjs  görsel öz-doğrulama (Playwright + mock bridge → .uishots/*.png)
-tools/webshot-interact.mjs  etkileşim görüntüleri (palet·menü·diyalog·toast)
-tests/             pytest: test_bridge (köprü sözleşmesi) · test_jsonrpc (çerçeveleme +
-                   canlı basedpyright el sıkışması) · test_runconfig (komut sezgisi)
-
-.env               API anahtarları (gizli)
-docs/              bu dokümantasyon
+```powershell
+packaging/build.ps1
+node packaging/smoke.mjs
 ```
 
-## Gereksinimler
+## Documentation and contributing
 
-Python 3.14 · **PySide6 ≥ 6.11.1** (Py3.14) · Claude Code CLI (Pro/Max aboneliği) ·
-DeepSeek ve Gemini API anahtarları · `requirements.txt` (requests, python-dotenv, flask,
-PySide6, pywinpty, basedpyright) · **Node ≥ 20 + npm** (arayüzü `web/ui`'da derlemek
-için, bkz. [SETUP](docs/SETUP.md) 2b).
+- [Setup](docs/SETUP.md) · [Architecture](docs/ARCHITECTURE.md) · [Usage](docs/USAGE.md)
+- [Release checklist](docs/RELEASE.md) · [Product differentiation](docs/PRODUCT-DIFFERENTIATION.md)
+- [Contributing](docs/CONTRIBUTING.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+
+Licensed under [Apache-2.0](LICENSE).

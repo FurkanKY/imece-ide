@@ -85,6 +85,12 @@ bu olayları canlı gösterir. Bu, akışı hem CLI'de hem web'de hem masaüstü
 
 ```
 PLAN (Planner) → CODE (Coder) → [ çalıştır → REVIEW → düzelt ]×N → kaydet
+
+Public beta ekleri: paketli Windows anahtarları `secret_store.py` üzerinden
+DPAPI ile korunur; `exec.preflight`/`exec.approveCommand` proje kaynaklı F5
+komutunun ilk çalıştırma onayını taşır. Koşu sonunda `receipts.py`, proje içi
+`.magent/receipts/<id>.json` makbuzunu atomik yazar; `history.json` yalnız hızlı
+indeks ve makbuz kimliğini tutar.
 ```
 
 `run_python_code(code, execute)` → derleme (`py_compile`) + isteğe bağlı çalıştırma;

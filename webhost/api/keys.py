@@ -1,9 +1,9 @@
-"""keys.* — API anahtarı onboarding'i (beta hazırlığı).
+"""keys.* — API anahtarı onboarding'i.
 
-Anahtarlar kökteki .env'e yazılır ve os.environ ANINDA güncellenir (adapters
-her çağrıda os.getenv okur → yeniden başlatma gerekmez). Claude'un anahtarı yok:
-Claude Code CLI varlığı kontrol edilir. Anahtar UI'a asla geri dönmez — yalnız
-maske (son 4 hane).
+Paketli Windows uygulamasında anahtarlar DPAPI korumalı depoya; kaynak modunda
+geliştirici uyumluluğu için .env'e yazılır. Her iki durumda adapters anahtarı
+os.environ'dan okur; anahtar UI'a asla geri dönmez, yalnız son dört haneli maske
+gösterilir.
 """
 
 import os
@@ -12,6 +12,7 @@ from pathlib import Path
 
 from runtime_paths import env_path
 from webhost.bridge import handler, BridgeError
+from secret_store import SecretStoreError, packaged_store
 
 ENV_PATH = env_path()
 
@@ -45,8 +46,39 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def clear_env_keys(path: Path, keys: set[str]) -> None:
+    """Başarılı paket geçişinden sonra yalnız gizli değerleri boşaltır."""
+    if not path.exists():
+        return
+    out: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key = line.strip().split("=", 1)[0].strip() if "=" in line else ""
+        out.append(f"{key}=" if key in keys and not line.lstrip().startswith("#") else line)
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def _secure_values() -> dict[str, str]:
+    store = packaged_store()
+    if not store:
+        return {}
+    values = store.load()
+    # Önceki paket sürümündeki düz metin .env yalnız bir kez taşınır.
+    legacy = {var: (os.getenv(var) or "").strip() for var in KEY_VARS.values()}
+    legacy = {key: value for key, value in legacy.items() if value and key not in values}
+    if legacy:
+        store.save(legacy)
+        values.update(legacy)
+        clear_env_keys(ENV_PATH, set(legacy))
+    os.environ.update(values)
+    return values
+
+
 @handler("keys.status")
 def _status(params, ctx):
+    try:
+        secure = _secure_values()
+    except SecretStoreError as exc:
+        raise BridgeError("secret_store", str(exc)) from exc
     cli = shutil.which(os.getenv("CLAUDE_CLI", "claude"))
     providers: dict = {
         "claude": {
@@ -55,7 +87,7 @@ def _status(params, ctx):
         },
     }
     for name, var in KEY_VARS.items():
-        val = (os.getenv(var) or "").strip()
+        val = (secure.get(var) or os.getenv(var) or "").strip()
         providers[name] = {"ok": bool(val), "masked": _mask(val) if val else ""}
     return {"providers": providers, "envPath": str(ENV_PATH)}
 
@@ -70,9 +102,14 @@ def _set(params, ctx):
     if not updates:
         raise BridgeError("empty", "Kaydedilecek anahtar yok.")
     try:
-        ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-        write_env(ENV_PATH, updates)
-    except OSError as e:
-        raise BridgeError("write_failed", f".env yazılamadı: {e}")
+        store = packaged_store()
+        if store:
+            store.save(updates)
+            clear_env_keys(ENV_PATH, set(updates))
+        else:
+            ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+            write_env(ENV_PATH, updates)
+    except (OSError, SecretStoreError) as e:
+        raise BridgeError("write_failed", f"Anahtar güvenle kaydedilemedi: {e}")
     os.environ.update(updates)  # adapters bir sonraki çağrıda görür
     return {}

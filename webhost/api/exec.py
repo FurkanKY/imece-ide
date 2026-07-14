@@ -15,6 +15,7 @@ import time
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 import runconfig
+import ui_prefs
 from webhost import state
 from webhost.bridge import handler, BridgeError
 
@@ -22,6 +23,29 @@ FLUSH_MS = 16
 FLUSH_MAX = 256 * 1024
 
 _active: dict = {"exec": None, "next_id": 0}
+
+
+def _command_info(proj, rel=None, command=None) -> dict:
+    info = runconfig.resolve(proj.root, rel, command)
+    if not info or not info.get("command"):
+        raise BridgeError(
+            "no_command",
+            f"'{rel}' için koşu komutu bilinmiyor — paletten 'Çalıştırma Komutunu Değiştir' ile tanımla."
+            if rel else
+            "Proje için koşu komutu bulunamadı — paletten 'Çalıştırma Komutunu Değiştir' ile tanımla.")
+    info["cwd"] = proj.root
+    info["fingerprint"] = runconfig.fingerprint(proj.root, info["command"], info["source"])
+    return info
+
+
+def _trusted(info: dict) -> bool:
+    # Açıkça yazılan komut ve aktif dosya çalıştırma, kullanıcının doğrudan eylemidir.
+    if info["source"] in {"explicit", "file"}:
+        return True
+    return any(
+        item.get("root") == info["cwd"] and item.get("fingerprint") == info["fingerprint"]
+        for item in ui_prefs.load().get("trusted_run_commands", [])
+    )
 
 
 class _Reader(QThread):
@@ -112,14 +136,10 @@ def _run(params, ctx):
     proj = _require_project()
     rel = params.get("rel")
     command = (params.get("command") or "").strip()
-    if not command:
-        command = runconfig.file_command(rel) if rel else runconfig.project_command(proj.root)
-    if not command:
-        raise BridgeError(
-            "no_command",
-            f"'{rel}' için koşu komutu bilinmiyor — paletten 'Çalıştırma Komutunu Değiştir' ile tanımla."
-            if rel else
-            "Proje için koşu komutu bulunamadı — paletten 'Çalıştırma Komutunu Değiştir' ile tanımla.")
+    info = _command_info(proj, rel, command or None)
+    if not _trusted(info):
+        raise BridgeError("command_confirmation", "Bu proje komutu önce onaylanmalı.")
+    command = info["command"]
 
     old = _active.get("exec")
     if old is not None:
@@ -154,7 +174,8 @@ def _stop(params, ctx):
 @handler("exec.getCommand")
 def _get_cmd(params, ctx):
     proj = _require_project()
-    return {"command": runconfig.project_command(proj.root)}
+    info = runconfig.resolve(proj.root)
+    return {"command": info["command"] if info else None, "source": info["source"] if info else None}
 
 
 @handler("exec.setCommand")
@@ -164,6 +185,24 @@ def _set_cmd(params, ctx):
     if not cmd:
         raise BridgeError("empty_command", "Komut boş.")
     runconfig.save_project_command(proj.root, cmd)
+    return {}
+
+
+@handler("exec.preflight")
+def _preflight(params, ctx):
+    proj = _require_project()
+    info = _command_info(proj, params.get("rel"), (params.get("command") or "").strip() or None)
+    return {**info, "requiresConfirmation": not _trusted(info)}
+
+
+@handler("exec.approveCommand")
+def _approve_command(params, ctx):
+    proj = _require_project()
+    info = _command_info(proj, params.get("rel"), (params.get("command") or "").strip() or None)
+    prefs = ui_prefs.load()
+    existing = [item for item in prefs.get("trusted_run_commands", []) if item.get("root") != proj.root]
+    existing.append({"root": proj.root, "fingerprint": info["fingerprint"]})
+    ui_prefs.save({"trusted_run_commands": existing[-100:]})
     return {}
 
 

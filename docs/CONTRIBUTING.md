@@ -15,6 +15,8 @@ Amaç: kod ile doküman arasındaki farkın hiçbir zaman birikmemesi.
 3. Yeni bir modül/dosya eklediysen **README dosya haritasına** ekle.
 4. Bir yol haritası maddesi tamamlandıysa **`docs/ROADMAP.md`'de durumunu güncelle**
    (⏳ → ✅) ve gerekiyorsa `docs/OPTIMIZATIONS.md` tablosundaki durumu değiştir.
+5. Anahtar, dosya yazma, komut çalıştırma veya dış veri aktarımı etkileniyorsa
+   `PRIVACY.md` ve gerektiğinde `SECURITY.md` aynı değişiklikte güncellenir.
 
 ### Değişiklik türü → güncellenecek doküman
 

@@ -10,6 +10,7 @@ geri taşınmaz). Proposal gelince geçmişe kaydedilir (desktop.py davranışı
 from PySide6.QtCore import QThread, Signal
 
 from history import HistoryStore
+from receipts import ReceiptStore
 from checkpoints import CheckpointStore
 from project import Project
 from project_runner import run_project_task
@@ -18,7 +19,7 @@ from adapters import PROVIDERS
 from webhost import state
 from webhost.bridge import handler, BridgeError
 
-_active: dict = {"worker": None, "run_id": 0, "proposals": [], "task": ""}
+_active: dict = {"worker": None, "run_id": 0, "proposals": [], "task": "", "receipt": None}
 
 
 class _Worker(QThread):
@@ -73,20 +74,29 @@ def _start(params, ctx):
     run_id = str(_active["run_id"])
     _active["proposals"] = []
     _active["task"] = task
+    _active["receipt_id"] = None
+    _active["receipt"] = {"task": task, "routing": routing, "plan": None, "proposals": [],
+                          "review": {"verdict": "UNKNOWN", "note": ""},
+                          "metrics": {"latency_s": 0.0, "tokens": 0, "cost_usd": 0.0}}
 
     bridge = ctx._bridge  # ana thread'e sinyalle taşınır (queued connection)
     worker = _Worker(proj.root, task, routing)
 
     def on_event(ev: dict):
+        receipt = _active["receipt"]
+        if ev.get("type") == "plan":
+            receipt["plan"] = {"summary": ev.get("summary", ""), "files": ev.get("files", [])}
+        elif ev.get("type") == "diff":
+            receipt["proposals"].append({"path": ev.get("path", ""), "is_new": bool(ev.get("is_new")), "diff": ev.get("diff", "")})
+        elif ev.get("type") == "metric":
+            metric = receipt["metrics"]
+            metric["latency_s"] = round(metric["latency_s"] + float(ev.get("latency_s", 0)), 2)
+            metric["tokens"] += int(ev.get("tokens", 0))
+            metric["cost_usd"] = round(metric["cost_usd"] + float(ev.get("cost_usd", 0)), 5)
+        elif ev.get("type") == "verdict":
+            receipt["review"] = {"verdict": ev.get("verdict", "UNKNOWN"), "note": ev.get("note", "")}
         if ev.get("type") == "proposal":
             _active["proposals"] = ev.get("proposals", [])
-            # geçmişe kaydet (desktop.py:_on_proposal davranışı)
-            tt = ev.get("totals", {})
-            HistoryStore(proj.root).add(
-                task, ev.get("verdict", "UNKNOWN"),
-                tt.get("tokens", 0), tt.get("cost_usd", 0.0),
-                [p.get("path", "") for p in _active["proposals"]],
-            )
         bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
 
     ended = {"flag": False}  # failed/cancelled sonrası ikinci "done" yayınlanmasın
@@ -95,6 +105,18 @@ def _start(params, ctx):
         if ended["flag"]:
             return
         ended["flag"] = True
+        receipt = dict(_active["receipt"] or {})
+        receipt["status"] = "failed" if status == "failed" else "cancelled" if status == "cancelled" else "proposed" if _active["proposals"] else "completed"
+        if error:
+            receipt["error"] = error
+        try:
+            stored = ReceiptStore(proj.root).create(receipt)
+            _active["receipt_id"] = stored["id"]
+            metric = stored["metrics"]
+            HistoryStore(proj.root).add(task, stored["review"].get("verdict", "UNKNOWN"), metric["tokens"], metric["cost_usd"], [p.get("path", "") for p in stored["proposals"]], stored["id"], stored["status"])
+        except OSError:
+            # Makbuz diske yazılamasa bile koşu sonucu ve kullanıcı kararı kaybolmaz.
+            _active["receipt_id"] = None
         payload = {"runId": run_id, "status": status}
         if error:
             payload["error"] = error
@@ -151,6 +173,8 @@ def _apply(params, ctx):
         ]
     if applied:
         ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
+        if _active.get("receipt_id"):
+            ReceiptStore(proj.root).update(_active["receipt_id"], {"status": "applied", "applied": applied, "checkpointId": checkpoint["id"]})
     return {
         "applied": applied,
         "errors": errors,
@@ -160,6 +184,9 @@ def _apply(params, ctx):
 
 @handler("run.rejectProposals")
 def _reject(params, ctx):
+    proj = _require_project()
+    if _active.get("receipt_id"):
+        ReceiptStore(proj.root).update(_active["receipt_id"], {"status": "rejected", "rejected": [p.get("path", "") for p in _active.get("proposals", [])]})
     _active["proposals"] = []
     return {}
 

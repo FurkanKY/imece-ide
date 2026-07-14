@@ -17,7 +17,7 @@
 4. Claude kullanmak için ayrıca Claude Code CLI'ı kurun ve PATH üzerinden erişilebilir
    olduğundan emin olun.
 5. Sağdaki ekip paneline görevi yazın; öneriyi diff olarak inceleyip **Uygula** ile
-   onaylayın.
+   onaylayın. Her koşunun geçmişten açılabilen bir değişiklik makbuzu vardır.
 
 Python ve Node, paketli uygulamayı kullanmak için gerekli değildir. Anahtarlar,
 tercihler ve günlükler `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
@@ -33,7 +33,10 @@ tercihler ve günlükler `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
       diyalog ve toast taşmalarını kontrol et.
 - [ ] Türkçe IME/girdi ile dosya adı, arama, commit mesajı ve ekip görevi yaz;
       `İ/i/ş/ğ/ü/ö/ç` karakterlerini kontrol et.
-- [ ] Tüm maddeler geçerse `v0.3.0-beta.1` Git etiketi oluştur ve paketi yayınla.
+- [ ] `SHA256SUMS.txt` üret ve ZIP içeriğinin hash'ini doğrula.
+- [ ] Git geçmişinde secret taraması ve bağımlılık/lisans kontrolü temiz.
+- [ ] Tüm maddeler geçerse `v0.3.0-beta.1` Git etiketi oluştur; GitHub Actions
+      manuel release workflow'u ile ZIP + checksum yayınla.
 
 ## Bilinen sınırlar
 
@@ -47,6 +50,8 @@ tercihler ve günlükler `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
   push/pull/branch işlemleri sunmaz.
 - Fiziksel frameless pencere sürükleme testi otomatik ortamda doğrulanamadı; dağıtım
   öncesi görünür Windows masaüstü turunda kontrol edilmelidir.
+- Paket imzasızdır; GitHub Release notu SmartScreen uyarısını ve checksum doğrulamasını
+  açıkça anlatmalıdır. Authenticode imzalama kararlı sürüm kapısıdır.
 
 ## Geliştirici doğrulaması
 

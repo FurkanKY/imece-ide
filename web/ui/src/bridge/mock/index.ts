@@ -32,6 +32,7 @@ export class MockBridge implements Bridge {
   private runCancelled = false;
   private mockProposals: Proposal[] = [];
   private checkpoints: MockCheckpoint[] = [];
+  private receipts = new Map<string, Api["receipt.get"]["result"]["receipt"]>();
   private termCounter = 0;
   // sahte git durumu — ScmView geliştirme/webshot senaryosu
   private scmStaged: ScmChange[] = [{ path: "src/utils.ts", status: "M" }];
@@ -91,7 +92,19 @@ export class MockBridge implements Bridge {
       case "exec.stop":
         return {} as R;
       case "exec.getCommand":
-        return { command: localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"' } as R;
+        return { command: localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"', source: "project_config" } as R;
+      case "exec.preflight": {
+        const p = params as { rel?: string | null; command?: string };
+        const cmd = p.command ?? (p.rel ? `python "${p.rel}"` : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"');
+        const key = `magent.mock.trusted.${cmd}`;
+        return { command: cmd, source: p.command ? "explicit" : p.rel ? "file" : "project_config", cwd: "C:/Projeler/demo-api", fingerprint: key, requiresConfirmation: !p.command && !p.rel && !localStorage.getItem(key) } as R;
+      }
+      case "exec.approveCommand": {
+        const p = params as { rel?: string | null; command?: string };
+        const cmd = p.command ?? (p.rel ? `python "${p.rel}"` : localStorage.getItem("magent.mock.runcmd") ?? 'python "main.py"');
+        localStorage.setItem(`magent.mock.trusted.${cmd}`, "1");
+        return {} as R;
+      }
       case "exec.setCommand":
         localStorage.setItem("magent.mock.runcmd", (params as { command: string }).command);
         return {} as R;
@@ -181,6 +194,21 @@ export class MockBridge implements Bridge {
         if (p.gemini) localStorage.setItem("magent.mock.gk", p.gemini);
         return {} as R;
       }
+      case "receipt.get": {
+        const id = (params as { receiptId: string }).receiptId;
+        const receipt = this.receipts.get(id) ?? {
+          id, createdAt: Date.now() / 1000 - 60, finishedAt: Date.now() / 1000,
+          status: "applied", task: "Tarih biçimini ISO 8601 yap", routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
+          plan: { summary: "Tarih yardımcılarını incele ve ISO 8601 çıktısına geçir.", files: ["src/utils.ts"] },
+          proposals: [{ path: "src/utils.ts", is_new: false, diff: "-return date.toLocaleString()\n+return date.toISOString()" }],
+          review: { verdict: "APPROVED", note: "Değişiklik kapsamla uyumlu." },
+          metrics: { latency_s: 12.4, tokens: 1031, cost_usd: 0.0294 }, applied: ["src/utils.ts"], rejected: [], checkpointId: "mock-checkpoint",
+          verification: { status: "not_run", detail: "Bu koşuda doğrulama komutu çalıştırılmadı." },
+        };
+        return { receipt } as R;
+      }
+      case "receipt.export":
+        return { path: "C:/mock/multi-agent-receipt.md" } as R;
       // ---- lsp (P7): tarayıcıda dil sunucusu yok — zararsız no-op ----
       case "lsp.start":
         return { running: false, ready: false } as R;
@@ -317,7 +345,7 @@ export class MockBridge implements Bridge {
       case "history.list":
         return {
           items: [
-            { ts: Date.now() / 1000 - 3600, task: "utils.py'deki tarih biçimini ISO 8601 yap", verdict: "APPROVED", tokens: 1031, cost_usd: 0.0294, files: ["src/utils.ts"] },
+            { ts: Date.now() / 1000 - 3600, task: "utils.py'deki tarih biçimini ISO 8601 yap", verdict: "APPROVED", tokens: 1031, cost_usd: 0.0294, files: ["src/utils.ts"], receipt_id: "00000000-0000-0000-0000-000000000001", status: "applied" },
             { ts: Date.now() / 1000 - 86400, task: "config.py'ye loglama seviyesi ekle", verdict: "NEEDS_FIX", tokens: 2140, cost_usd: 0.041, files: ["config.py", "main.py"] },
           ],
         } as R;

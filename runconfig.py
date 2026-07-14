@@ -13,6 +13,7 @@ Dosya komutu uzantıdan gelir (FILE_CMDS); bilinmeyen uzantı → None (UI yol g
 """
 
 import json
+import hashlib
 from pathlib import Path
 
 FILE_CMDS = {
@@ -78,3 +79,22 @@ def detect_project_command(root: str) -> str | None:
 
 def project_command(root: str) -> str | None:
     return load_project_command(root) or detect_project_command(root)
+
+
+def resolve(root: str, rel: str | None = None, command: str | None = None) -> dict | None:
+    """Çalıştırma komutunu ve kaynağını döndürür; güven onayı bunun üstüne kurulur."""
+    if command:
+        return {"command": command, "source": "explicit"}
+    if rel:
+        cmd = file_command(rel)
+        return {"command": cmd, "source": "file"} if cmd else None
+    saved = load_project_command(root)
+    if saved:
+        return {"command": saved, "source": "project_config"}
+    detected = detect_project_command(root)
+    return {"command": detected, "source": "detected"} if detected else None
+
+
+def fingerprint(root: str, command: str, source: str) -> str:
+    raw = f"{root}\0{source}\0{command}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
