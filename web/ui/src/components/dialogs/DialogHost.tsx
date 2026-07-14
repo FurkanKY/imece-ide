@@ -58,7 +58,7 @@ export function DialogHost() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.12 }}
-        className="fixed inset-0 z-[150] flex items-start justify-center bg-black/50 pt-[18vh]"
+        className="fixed inset-0 z-[150] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) cancel();
         }}
@@ -72,7 +72,7 @@ export function DialogHost() {
           animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
           exit={{ opacity: 0, transform: "translateY(6px) scale(0.98)" }}
           transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
-          className="material-panel w-[420px] rounded-[var(--r-lg)] border border-border-w p-4"
+          className="material-panel max-h-full w-[min(420px,calc(100vw-2rem))] overflow-y-auto rounded-[var(--r-lg)] border border-border-w p-4"
           style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
           role="dialog"
           aria-modal="true"

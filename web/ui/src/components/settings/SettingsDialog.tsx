@@ -185,7 +185,7 @@ export function SettingsDialog() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[150] flex items-start justify-center bg-black/50 pt-[14vh]"
+          className="fixed inset-0 z-[150] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
@@ -196,7 +196,7 @@ export function SettingsDialog() {
             animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
             exit={{ opacity: 0, transform: "translateY(6px) scale(0.98)" }}
             transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
-            className="material-panel w-[460px] rounded-[var(--r-lg)] border border-border-w"
+            className="material-panel flex max-h-full w-[min(460px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[var(--r-lg)] border border-border-w"
             style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
             role="dialog"
             aria-modal="true"
@@ -217,7 +217,7 @@ export function SettingsDialog() {
               </button>
             </div>
 
-            <div className="divide-y divide-[var(--line)] px-4 py-1">
+            <div className="min-h-0 overflow-y-auto divide-y divide-[var(--line)] px-4 py-1">
               <Row label="Vurgu rengi" hint="Tüm arayüze anında uygulanır">
                 <div className="flex gap-1.5">
                   {ACCENTS.map((a) => (
