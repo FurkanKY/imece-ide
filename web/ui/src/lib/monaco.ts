@@ -7,6 +7,7 @@ import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
+export { langForPath } from "@/lib/languages";
 
 let inited = false;
 
@@ -150,19 +151,4 @@ export function initMonaco() {
   document.fonts.addEventListener("loadingdone", () => monaco.editor.remeasureFonts());
 
   return monaco;
-}
-
-const EXT_LANG: Record<string, string> = {
-  ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
-  ".mjs": "javascript", ".json": "json", ".css": "css", ".scss": "scss", ".less": "less",
-  ".html": "html", ".md": "markdown", ".py": "python", ".rs": "rust", ".go": "go",
-  ".java": "java", ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp", ".cs": "csharp",
-  ".rb": "ruby", ".php": "php", ".sql": "sql", ".sh": "shell", ".yml": "yaml",
-  ".yaml": "yaml", ".xml": "xml", ".toml": "ini", ".ini": "ini", ".cfg": "ini",
-};
-
-export function langForPath(path: string): string {
-  const i = path.lastIndexOf(".");
-  const ext = i >= 0 ? path.slice(i).toLowerCase() : "";
-  return EXT_LANG[ext] ?? "plaintext";
 }

@@ -4,7 +4,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { X, Circle } from "lucide-react";
-import { initMonaco, langForPath } from "@/lib/monaco";
+import { initMonaco } from "@/lib/monaco";
+import { langForPath } from "@/lib/languages";
 import { fileIcon } from "@/lib/fileIcons";
 import { useEditor } from "@/state/editor";
 import { useUi } from "@/state/ui";
@@ -128,6 +129,9 @@ export function Editor() {
   // Monaco'yu bir kez kur
   useEffect(() => {
     const monaco = initMonaco();
+    // LSP Monaco modellerine bağlanır; bu nedenle yalnız editör gerçekten mount
+    // olduğunda kurulur. İlk workspace render'ını ağır Monaco paketinden korur.
+    void import("@/lib/lsp").then(({ installLsp }) => installLsp());
     if (!hostRef.current) return;
     const ed = monaco.editor.create(hostRef.current, {
       theme: "magent-dark",

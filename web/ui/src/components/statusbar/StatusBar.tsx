@@ -7,7 +7,7 @@ import { useEditor } from "@/state/editor";
 import { useRun } from "@/state/run";
 import { useScm } from "@/state/scm";
 import { useUi } from "@/state/ui";
-import { langForPath } from "@/lib/monaco";
+import { langForPath } from "@/lib/languages";
 import { useLsp } from "@/lib/lsp";
 import { StatusDot, Badge } from "@/components/ui";
 import { CountUp } from "./CountUp";
