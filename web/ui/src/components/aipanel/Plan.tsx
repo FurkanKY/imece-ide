@@ -3,7 +3,7 @@
 
 import { ClipboardList, FileSearch, Lightbulb, FileCode2, ShieldAlert } from "lucide-react";
 import { useRun } from "@/state/run";
-import { EmptyState, StatusDot } from "@/components/ui";
+import { Badge, EmptyState, StatusDot } from "@/components/ui";
 import { Markdown } from "./Markdown";
 
 export function Plan() {
@@ -28,6 +28,7 @@ export function Plan() {
       <section className="material-card rounded-[var(--r-md)] border border-border-w p-3">
         <div className="mb-2 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
           <ClipboardList size={12} /> GÖREV
+          {runStage !== "draft" && <Badge tone={runStage === "error" ? "err" : runStage === "ready" ? "warn" : "accent"} className="ml-auto">{runStage === "ready" ? "İNCELEMEDE" : runStage === "error" ? "DURDU" : "AKIŞTA"}</Badge>}
         </div>
         <p className="selectable text-text" style={{ fontSize: "var(--t-body)", lineHeight: 1.5 }}>{task}</p>
       </section>
@@ -40,6 +41,7 @@ export function Plan() {
               <StatusDot tone="accent" pulse size={5} /> hazırlanıyor…
             </span>
           )}
+          {planner.state === "done" && <Badge tone="ok" className="ml-auto">HAZIR</Badge>}
         </div>
         {plan?.summary || planner.output ? (
           <div className="max-h-80 overflow-y-auto px-3 py-2"><Markdown text={plan?.summary || planner.output} /></div>
@@ -56,6 +58,7 @@ export function Plan() {
           <section className="material-card rounded-[var(--r-md)] border border-border-w p-3">
             <div className="mb-2 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
               <FileCode2 size={12} /> BAĞLAMA GİREN DOSYALAR
+              <Badge tone="neutral" className="ml-auto">{plan.files.length}</Badge>
             </div>
             {plan.files.length ? (
               <div className="flex flex-wrap gap-1.5">
@@ -65,8 +68,19 @@ export function Plan() {
           </section>
           {(plan.assumptions.length > 0 || plan.risks.length > 0) && (
             <section className="rounded-[var(--r-md)] border border-warn/30 bg-warn/5 p-3">
-              <div className="mb-2 flex items-center gap-1.5 text-warn" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}><ShieldAlert size={12} /> VARSAYIM / RİSK</div>
-              {[...plan.assumptions, ...plan.risks].map((text, i) => <p key={i} className="mt-1 text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.45 }}>• {text}</p>)}
+              <div className="mb-2 flex items-center gap-1.5 text-warn" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}><ShieldAlert size={12} /> KONTROL NOKTALARI</div>
+              {plan.assumptions.length > 0 && (
+                <div>
+                  <p className="text-muted" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>VARSAYIM</p>
+                  {plan.assumptions.map((text, i) => <p key={i} className="mt-1 text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.45 }}>• {text}</p>)}
+                </div>
+              )}
+              {plan.risks.length > 0 && (
+                <div className={plan.assumptions.length > 0 ? "mt-2" : ""}>
+                  <p className="text-warn" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>RİSK</p>
+                  {plan.risks.map((text, i) => <p key={i} className="mt-1 text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.45 }}>• {text}</p>)}
+                </div>
+              )}
             </section>
           )}
         </div>

@@ -14,6 +14,13 @@ const STAGE_META: Record<string, { label: string; Icon: typeof Code2 }> = {
   review: { label: "İnceleme", Icon: SearchCheck },
 };
 
+function stageStatus(info: StageInfo): { label: string; tone: "neutral" | "accent" | "ok" | "err" } {
+  if (info.state === "running") return { label: "ÇALIŞIYOR", tone: "accent" };
+  if (info.state === "done") return { label: "TAMAMLANDI", tone: "ok" };
+  if (info.state === "error") return { label: "HATA", tone: "err" };
+  return { label: "SIRADA", tone: "neutral" };
+}
+
 function fmtCost(v?: number) {
   if (v === undefined) return "";
   return v < 0.001 ? `$${v.toFixed(5)}` : `$${v.toFixed(4)}`;
@@ -23,6 +30,7 @@ function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
   const [open, setOpen] = useState(info.state === "running");
   const meta = STAGE_META[stage];
   const running = info.state === "running";
+  const status = stageStatus(info);
 
   return (
     <div
@@ -43,10 +51,11 @@ function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
         <span className="text-text" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>
           {meta.label}
         </span>
-        <span className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
+        <span className="min-w-0 truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
           {info.model ?? info.provider}
         </span>
         <span className="flex-1" />
+        <Badge tone={status.tone} className="shrink-0">{status.label}</Badge>
         {info.state === "done" && info.latency_s !== undefined && (
           <span className="shrink-0 text-faint" style={{ fontSize: "var(--t-caption)" }}>
             {info.latency_s.toFixed(1)}sn · {info.tokens}tok · {fmtCost(info.cost_usd)}
