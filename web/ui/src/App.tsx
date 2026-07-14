@@ -34,6 +34,13 @@ const Editor = lazy(() => import("@/components/editor/Editor").then((m) => ({ de
 const BottomPanel = lazy(() => import("@/components/bottompanel/BottomPanel").then((m) => ({ default: m.BottomPanel })));
 const smokeMode = new URLSearchParams(location.search).get("smoke");
 const scenario = new URLSearchParams(location.search).get("scenario");
+type VisualDirection = "kinetic" | "monograph" | "signal";
+const requestedVisualDirection = new URLSearchParams(location.search).get("visual");
+const visualDirection: VisualDirection | undefined =
+  import.meta.env.DEV &&
+  (requestedVisualDirection === "kinetic" || requestedVisualDirection === "monograph" || requestedVisualDirection === "signal")
+    ? requestedVisualDirection
+    : undefined;
 
 /** Beta-2 DEV tetiği: ?boom → AI paneli sınırında kasıtlı render hatası (smoke) */
 function Boom(): ReactNode {
@@ -58,6 +65,7 @@ function Workspace() {
   const setBottomHeight = useUi((s) => s.setBottomHeight);
   const toggleAiPanel = useUi((s) => s.toggleAiPanel);
   const hideAiPanel = useUi((s) => s.hideAiPanel);
+  const firstProposedDiff = useRun((s) => s.diffs[0]);
   const ease = [0.33, 1, 0.68, 1] as const;
   // splitter sürüklerken animasyon devre dışı — boyut anında izler
   const tr = { duration: 0, ease };
@@ -84,8 +92,16 @@ function Workspace() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // V3-1 yön önizlemesinde review sahnesi gerçek result fixture'ıyla doğrudan
+  // görünür. Bu yalnız DEV + ?visual=... için çalışır; normal kullanıcı akışı
+  // değişiklik satırına tıklamayı korur.
+  useEffect(() => {
+    if (!visualDirection || scenario !== "result" || !firstProposedDiff || hasDiff) return;
+    void useEditor.getState().openDiff(firstProposedDiff.path);
+  }, [firstProposedDiff?.path, hasDiff]);
+
   return (
-    <div className="relative flex min-h-0 flex-1">
+    <div className={"workspace-scene relative flex min-h-0 flex-1" + (hasDiff ? " workspace-review-scene" : "")}>
       <ActivityBar active={view} onSelect={setView} aiPanelVisible={aiPanelVisible} onAgent={toggleAiPanel} onSettings={() => setSettingsOpen(true)} />
       <AnimatePresence initial={false}>
         {sidebarVisible && (
@@ -256,7 +272,7 @@ export default function App() {
 
   if (smokeMode === "monaco") {
     return (
-      <div className={"window" + (maximized ? " maximized" : "")}>
+      <div className={"window" + (maximized ? " maximized" : "")} data-visual-direction={visualDirection}>
         <ResizeEdges maximized={maximized} />
         <Titlebar maximized={maximized} />
         <Suspense fallback={null}>
@@ -267,7 +283,7 @@ export default function App() {
   }
 
   return (
-    <div className={"window" + (maximized ? " maximized" : "")}>
+    <div className={"window" + (maximized ? " maximized" : "")} data-visual-direction={visualDirection}>
       <ResizeEdges maximized={maximized} />
       <Titlebar maximized={maximized} />
       <ErrorBoundary label="Çalışma alanı">
