@@ -73,8 +73,8 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
           dragSrc = null;
         }}
         className={
-          "group relative flex w-full items-center gap-1.5 rounded-[var(--r-xs)] py-[3px] pr-2 text-left outline-none transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent " +
-          (isActive ? "bg-surface-selected text-text" : "text-text2 hover:bg-surface-hover") +
+          "group relative flex w-full items-center gap-1.5 border-l-2 py-[3px] pr-2 text-left outline-none transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent " +
+          (isActive ? "border-accent bg-surface-selected/70 text-text" : "border-transparent text-text2 hover:bg-surface-hover/55") +
           (dropOver ? " outline outline-1 outline-accent" : "")
         }
         style={{ paddingLeft: depth * INDENT + 6 }}
@@ -87,10 +87,6 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
             style={{ left: i * INDENT + 12 }}
           />
         ))}
-        {/* aktif dosya accent şeridi */}
-        {isActive && (
-          <span className="absolute bottom-1 left-0 top-1 w-[2px] rounded-r bg-accent" />
-        )}
         <span className="flex size-4 shrink-0 items-center justify-center">
           {entry.isDir ? (
             isLoading ? (
@@ -181,7 +177,7 @@ export function Explorer() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
-        title={(name ?? "GEZGİN").toLocaleUpperCase("tr")}
+        title={name ?? "Gezgin"}
         className="group/head px-2.5"
         actions={
           <>

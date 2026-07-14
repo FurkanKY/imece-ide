@@ -62,7 +62,7 @@ function TabBar() {
             onAuxClick={(e) => { if (e.button === 1) close(t.rel); }} // orta tık → kapat
             className={
               "group relative flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-border-w px-3 outline-none transition-colors duration-100 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent " +
-              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-surface-hover hover:text-text2") +
+              (on ? "bg-panel text-text" : "bg-transparent text-muted hover:bg-surface-hover/55 hover:text-text2") +
               (dragRel === t.rel ? " opacity-50" : "")
             }
             style={{ fontSize: "var(--t-label)" }}

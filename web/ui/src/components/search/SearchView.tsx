@@ -7,7 +7,7 @@ import { useSearch } from "@/state/search";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
 import { SearchMatch } from "@/bridge";
-import { Badge, EmptyState, IconButton, PanelHeader } from "@/components/ui";
+import { EmptyState, IconButton, PanelHeader } from "@/components/ui";
 
 function OptionToggle({ on, label, Icon, onClick }: {
   on: boolean;
@@ -64,14 +64,14 @@ export function SearchView() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
-        title="ARA"
+        title="Ara"
         icon={Search}
-        actions={s.total > 0 ? <Badge tone="accent">{s.total}</Badge> : undefined}
+        actions={s.total > 0 ? <span className="text-accent" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>{s.total}</span> : undefined}
       />
 
       {/* sorgu satırı */}
       <div className="px-2.5 pb-2">
-        <div className="material-card flex items-center gap-1 rounded-[var(--r-sm)] border border-border-w px-2 py-1 transition-colors focus-within:border-accent">
+        <div className="flex items-center gap-1 border-b border-border-w px-1 py-1.5 transition-colors focus-within:border-accent">
           <Search size={12.5} className="shrink-0 text-faint" />
           <input
             ref={inputRef}
@@ -118,7 +118,7 @@ export function SearchView() {
                 <Icon size={13} strokeWidth={1.8} style={{ color }} className="shrink-0" />
                 <span className="min-w-0 truncate">{name}</span>
                 <span className="truncate text-faint" style={{ fontWeight: 400 }}>{path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</span>
-                <span className="ml-auto shrink-0 rounded-[var(--r-pill)] bg-card px-1.5 text-faint" style={{ fontSize: "10px" }}>
+                <span className="ml-auto shrink-0 text-faint" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>
                   {matches.length}
                 </span>
               </div>
@@ -126,7 +126,7 @@ export function SearchView() {
                 <button
                   key={i}
                   onClick={() => void openAt(m.path, m.line, m.col)}
-                  className="flex w-full items-baseline gap-2 rounded-[var(--r-xs)] py-[2.5px] pl-6 pr-2 text-left transition-colors hover:bg-card"
+                  className="flex w-full items-baseline gap-2 border-l-2 border-transparent py-[2.5px] pl-6 pr-2 text-left transition-colors hover:border-accent hover:bg-card/45"
                 >
                   <span className="shrink-0 text-faint" style={{ fontSize: "var(--t-caption)", fontFamily: "var(--font-mono)" }}>
                     {m.line}
