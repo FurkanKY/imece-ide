@@ -1,7 +1,7 @@
 /* SettingsDialog — arayüz tercihleri: accent (canlı), yoğunluk, Enter davranışı,
    animasyonlar. settings_panel.py'nin halefi; değişiklik anında uygulanır + kalıcı. */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X, Check, KeyRound } from "lucide-react";
 import { useUi } from "@/state/ui";
@@ -178,9 +178,23 @@ export function SettingsDialog() {
   const animate = (prefs?.animations ?? true) && !reduceMotion;
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (open) requestAnimationFrame(() => closeRef.current?.focus());
+  useLayoutEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => closeRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, setOpen]);
 
   if (!prefs) return null;
 

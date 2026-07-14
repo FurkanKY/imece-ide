@@ -1,7 +1,7 @@
 /* Palette — Ctrl+P dosya / Ctrl+K komut paleti (fuzzy overlay).
    ↑/↓ gezin, Enter çalıştır/aç, Esc kapat; eşleşen karakterler vurgulanır. */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Command as CommandIcon, FileSearch, CornerDownLeft } from "lucide-react";
 import { usePalette, Command } from "./paletteStore";
 import { fuzzyFilter, FuzzyHit } from "@/lib/fuzzy";
@@ -34,11 +34,12 @@ export function Palette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       setQuery("");
       setSel(0);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      const frame = requestAnimationFrame(() => inputRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
     }
   }, [open, mode]);
 
@@ -59,10 +60,10 @@ export function Palette() {
     }));
   }, [query, mode, files, commands]);
 
-  useEffect(() => setSel(0), [results.length, query]);
+  useLayoutEffect(() => setSel(0), [results.length, query]);
 
   // seçili öğe görünür kalsın
-  useEffect(() => {
+  useLayoutEffect(() => {
     listRef.current
       ?.querySelector(`[data-idx="${sel}"]`)
       ?.scrollIntoView({ block: "nearest" });
