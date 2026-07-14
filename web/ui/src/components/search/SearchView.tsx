@@ -7,7 +7,7 @@ import { useSearch } from "@/state/search";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
 import { SearchMatch } from "@/bridge";
-import { EmptyState, IconButton } from "@/components/ui";
+import { Badge, EmptyState, IconButton, PanelHeader } from "@/components/ui";
 
 function OptionToggle({ on, label, Icon, onClick }: {
   on: boolean;
@@ -63,16 +63,11 @@ export function SearchView() {
 
   return (
     <div className="flex h-full flex-col">
-      <div
-        className="material-panel flex h-8 shrink-0 items-center border-b border-border-w px-3 text-muted"
-        style={{
-          fontSize: "var(--t-overline)",
-          fontWeight: "var(--w-overline)",
-          letterSpacing: "var(--ls-overline)",
-        }}
-      >
-        ARA
-      </div>
+      <PanelHeader
+        title="ARA"
+        icon={Search}
+        actions={s.total > 0 ? <Badge tone="accent">{s.total}</Badge> : undefined}
+      />
 
       {/* sorgu satırı */}
       <div className="px-2.5 pb-2">
