@@ -10,6 +10,7 @@ import { Badge, Button, EmptyState } from "@/components/ui";
 export function Changes() {
   const diffs = useRun((s) => s.diffs);
   const verdict = useRun((s) => s.verdict);
+  const verdictNote = useRun((s) => s.verdictNote);
   const status = useRun((s) => s.status);
   const runStage = useRun((s) => s.runStage);
   const checkpointId = useRun((s) => s.checkpointId);
@@ -65,6 +66,19 @@ export function Changes() {
 
   return (
     <div className="flex h-full flex-col">
+      <div className="shrink-0 border-b border-border-w px-3 py-2">
+        <div className="flex items-start gap-2">
+          <Badge tone={verdict === "APPROVED" ? "ok" : "warn"}>
+            {verdict === "APPROVED" ? "İNCELEME ONAYI" : "İNCELEME NOTU"}
+          </Badge>
+          <div className="min-w-0 flex-1">
+            <p className="text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.35 }}>
+              {verdictNote || `${checkedCount}/${diffs.length} dosya seçili; uygulamadan önce son kontrolünüz alınır.`}
+            </p>
+            <p className="mt-0.5 text-faint" style={{ fontSize: "var(--t-caption)" }}>{checkedCount}/{diffs.length} dosya uygulamaya dahil</p>
+          </div>
+        </div>
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {diffs.map((d) => {
           const name = d.path.split("/").pop() ?? d.path;
@@ -110,11 +124,6 @@ export function Changes() {
         <div className="mb-2 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
           <ShieldCheck size={12} className="text-ok" /> Uygulamadan önce checkpoint oluşturulur.
         </div>
-        {verdict && (
-          <Badge tone={verdict === "APPROVED" ? "ok" : "warn"} className="mb-2">
-            {verdict === "APPROVED" ? "ONAYLANDI" : "DÜZELTME GEREK"}
-          </Badge>
-        )}
         <div className="flex gap-2">
           <Button
             variant="primary"

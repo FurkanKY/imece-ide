@@ -2,7 +2,7 @@
    composer + geçmiş çekmecesi. Öneri gelince Değişiklikler'e otomatik geçer. */
 
 import { useEffect, useState } from "react";
-import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2, PanelRightClose } from "lucide-react";
+import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2, PanelRightClose, ShieldCheck, RotateCcw, Play } from "lucide-react";
 import { IconButton, Badge } from "@/components/ui";
 import { useRun } from "@/state/run";
 import { Pipeline } from "./Pipeline";
@@ -25,6 +25,17 @@ const STAGE_META = {
   error: { label: "EYLEM GEREKİYOR", Icon: CircleAlert, tone: "text-err" },
 } as const;
 
+const DECISION_META = {
+  planning: { title: "Plan hazırlanıyor", description: "Planner görevin kapsamını ve risklerini çıkarıyor.", Icon: ClipboardList, tone: "text-accent", surface: "border-accent/25 bg-accentdim/35" },
+  working: { title: "Öneri üretiliyor", description: "Coder planı dosya değişikliklerine dönüştürüyor.", Icon: Activity, tone: "text-accent", surface: "border-accent/25 bg-accentdim/35" },
+  reviewing: { title: "Güvenlik incelemesi", description: "Reviewer değişikliklerin etkisini ve sonucu denetliyor.", Icon: FileDiff, tone: "text-warn", surface: "border-warn/25 bg-warn/5" },
+  ready: { title: "Sıradaki karar sizde", description: "Önerilen dosyaları inceleyin; uygun olanları uygulayın veya vazgeçin.", Icon: ShieldCheck, tone: "text-warn", surface: "border-warn/30 bg-warn/5" },
+  applied: { title: "Değişiklikler uygulandı", description: "Bu turun checkpoint'i hazır; gerekirse tek adımda geri alabilirsiniz.", Icon: CheckCircle2, tone: "text-ok", surface: "border-ok/25 bg-ok/5" },
+  restored: { title: "Checkpoint'e dönüldü", description: "Dosyalar güvenli önceki hâline geri yüklendi.", Icon: RotateCcw, tone: "text-muted", surface: "border-border-w bg-card/60" },
+  error: { title: "Eylem gerekiyor", description: "Bu tur tamamlanamadı. Görevi düzenleyip yeniden çalıştırabilirsiniz.", Icon: CircleAlert, tone: "text-err", surface: "border-err/30 bg-err/5" },
+  draft: { title: "Ekibiniz hazır", description: "Bir hedef verin; plan, öneri ve inceleme sırayla ilerler.", Icon: Play, tone: "text-muted", surface: "border-border-w bg-card/40" },
+} as const;
+
 export function AiPanel({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("plan");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -34,6 +45,8 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
   const totals = useRun((s) => s.totals);
   const meta = STAGE_META[runStage];
   const StageIcon = meta.Icon;
+  const decision = DECISION_META[runStage];
+  const DecisionIcon = decision.Icon;
 
   // öneri hazır olunca Değişiklikler sekmesine geç (desktop.py _focus_view deseni)
   useEffect(() => {
@@ -63,6 +76,16 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <Pipeline />
+
+      <div className="shrink-0 border-b border-border-w px-3 py-2">
+        <div className={"flex items-start gap-2 rounded-[var(--r-sm)] border px-2.5 py-2 " + decision.surface}>
+          <DecisionIcon size={14} className={"mt-0.5 shrink-0 " + decision.tone} strokeWidth={2} />
+          <div className="min-w-0">
+            <p className={decision.tone} style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>{decision.title}</p>
+            <p className="mt-0.5 text-muted" style={{ fontSize: "var(--t-caption)", lineHeight: 1.35 }}>{decision.description}</p>
+          </div>
+        </div>
+      </div>
 
       {/* sekmeler */}
       <div className="flex shrink-0 border-b border-border-w bg-panel/40 px-2 py-1">

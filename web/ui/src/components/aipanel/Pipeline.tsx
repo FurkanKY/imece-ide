@@ -8,19 +8,14 @@ import { useRun, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
 import { Badge, StatusDot } from "@/components/ui";
 
-const ROLE_META: Record<Role, { label: string; Icon: LucideIcon }> = {
-  planner: { label: "Planner", Icon: BrainCircuit },
-  coder: { label: "Coder", Icon: Code2 },
-  reviewer: { label: "Reviewer", Icon: SearchCheck },
+const ROLE_META: Record<Role, { label: string; intent: string; running: string; done: string; Icon: LucideIcon }> = {
+  planner: { label: "Planner", intent: "Kapsam", running: "Kapsamı çıkarıyor", done: "Plan hazır", Icon: BrainCircuit },
+  coder: { label: "Coder", intent: "Öneri", running: "Değişiklik üretiyor", done: "Öneri hazır", Icon: Code2 },
+  reviewer: { label: "Reviewer", intent: "İnceleme", running: "Riski denetliyor", done: "İnceleme bitti", Icon: SearchCheck },
 };
 
-function fmtCost(v?: number) {
-  if (v === undefined) return "";
-  return v < 0.001 ? `$${v.toFixed(5)}` : `$${v.toFixed(4)}`;
-}
-
 function StageNode({ info, routedTo }: { info: StageInfo; routedTo: string }) {
-  const { label, Icon } = ROLE_META[info.role];
+  const { label, intent, running: runningLabel, done: doneLabel, Icon } = ROLE_META[info.role];
   const running = info.state === "running";
   const done = info.state === "done";
   const error = info.state === "error";
@@ -63,22 +58,27 @@ function StageNode({ info, routedTo }: { info: StageInfo; routedTo: string }) {
           >
             {label}
           </span>
-          <span className="truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            {info.model ?? info.provider ?? routedTo}
+          <span className="text-faint" style={{ fontSize: "var(--t-caption)" }}>
+            {intent}
           </span>
         </div>
         {done && info.latency_s !== undefined && (
-          <div className="flex gap-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            <span>{info.latency_s.toFixed(1)} sn</span>
-            <span>· {info.tokens} tok</span>
-            <span>· {fmtCost(info.cost_usd)}</span>
+          <div className="flex min-w-0 items-center gap-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+            <span className="min-w-0 flex-1 truncate" title={info.model ?? info.provider ?? routedTo}>
+              <span className="text-ok">{doneLabel}</span> · {info.model ?? info.provider ?? routedTo}
+            </span>
+            <span className="shrink-0">{info.latency_s.toFixed(1)} sn · {info.tokens} tok</span>
           </div>
         )}
         {running && (
           <div className="flex items-center gap-1.5 text-accent" style={{ fontSize: "var(--t-caption)" }}>
-            <StatusDot tone="accent" pulse size={5} /> çalışıyor…
+            <StatusDot tone="accent" pulse size={5} /> {runningLabel}…
           </div>
         )}
+        {!running && !done && !error && (
+          <div className="truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>{info.provider || routedTo} · sırada</div>
+        )}
+        {error && <div className="text-err" style={{ fontSize: "var(--t-caption)" }}>Bu aşama tamamlanamadı</div>}
       </div>
     </div>
   );
@@ -102,7 +102,7 @@ export function Pipeline() {
         }}
       >
         <span>EKİP</span>
-        {status === "done" && <Badge tone="ok">TAMAMLANDI</Badge>}
+        {status === "done" && <Badge tone="ok">EKİP TAMAMLADI</Badge>}
         {status === "failed" && <Badge tone="err">HATA</Badge>}
         {status === "cancelled" && <Badge tone="warn">DURDURULDU</Badge>}
       </div>
