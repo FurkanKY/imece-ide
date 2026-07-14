@@ -17,23 +17,23 @@ type Tab = "plan" | "work" | "review";
 const STAGE_META = {
   draft: { label: "Hazır", Icon: ClipboardList, tone: "text-muted" },
   planning: { label: "Planlanıyor", Icon: ClipboardList, tone: "text-accent" },
-  working: { label: "Öneri üretiliyor", Icon: Activity, tone: "text-accent" },
+  working: { label: "Değişiklik hazırlanıyor", Icon: Activity, tone: "text-accent" },
   reviewing: { label: "İnceleniyor", Icon: FileDiff, tone: "text-warn" },
-  ready: { label: "Karar bekliyor", Icon: FileDiff, tone: "text-warn" },
+  ready: { label: "İnceleme hazır", Icon: FileDiff, tone: "text-warn" },
   applied: { label: "Uygulandı", Icon: CheckCircle2, tone: "text-ok" },
   restored: { label: "Geri alındı", Icon: CheckCircle2, tone: "text-muted" },
   error: { label: "Eylem gerekiyor", Icon: CircleAlert, tone: "text-err" },
 } as const;
 
 const DECISION_META = {
-  planning: { title: "Plan hazırlanıyor", description: "Planner görevin kapsamını ve risklerini çıkarıyor.", Icon: ClipboardList, tone: "text-accent", line: "border-l-accent" },
-  working: { title: "Öneri üretiliyor", description: "Coder planı dosya değişikliklerine dönüştürüyor.", Icon: Activity, tone: "text-accent", line: "border-l-accent" },
-  reviewing: { title: "Güvenlik incelemesi", description: "Reviewer değişikliklerin etkisini ve sonucu denetliyor.", Icon: FileDiff, tone: "text-warn", line: "border-l-warn" },
-  ready: { title: "Sıradaki karar sizde", description: "Önerilen dosyaları inceleyin; uygun olanları uygulayın veya vazgeçin.", Icon: ShieldCheck, tone: "text-warn", line: "border-l-warn" },
-  applied: { title: "Değişiklikler uygulandı", description: "Bu turun checkpoint'i hazır; gerekirse tek adımda geri alabilirsiniz.", Icon: CheckCircle2, tone: "text-ok", line: "border-l-ok" },
-  restored: { title: "Checkpoint'e dönüldü", description: "Dosyalar güvenli önceki hâline geri yüklendi.", Icon: RotateCcw, tone: "text-muted", line: "border-l-border-w2" },
-  error: { title: "Eylem gerekiyor", description: "Bu tur tamamlanamadı. Görevi düzenleyip yeniden çalıştırabilirsiniz.", Icon: CircleAlert, tone: "text-err", line: "border-l-err" },
-  draft: { title: "Ekibiniz hazır", description: "Bir hedef verin; plan, öneri ve inceleme sırayla ilerler.", Icon: Play, tone: "text-muted", line: "border-l-border-w2" },
+  planning: { title: "Plan hazırlanıyor", description: "Kapsam ve riskler çıkarılıyor.", Icon: ClipboardList, tone: "text-accent", line: "border-l-accent" },
+  working: { title: "Değişiklik hazırlanıyor", description: "Plan dosya değişikliklerine dönüştürülüyor.", Icon: Activity, tone: "text-accent", line: "border-l-accent" },
+  reviewing: { title: "İnceleme sürüyor", description: "Değişiklikler kontrol ediliyor.", Icon: FileDiff, tone: "text-warn", line: "border-l-warn" },
+  ready: { title: "İnceleme hazır", description: "Dosyaları uygula ya da vazgeç.", Icon: ShieldCheck, tone: "text-warn", line: "border-l-warn" },
+  applied: { title: "Uygulandı", description: "Geri almak için checkpoint hazır.", Icon: CheckCircle2, tone: "text-ok", line: "border-l-ok" },
+  restored: { title: "Geri alındı", description: "Dosyalar checkpoint durumuna döndü.", Icon: RotateCcw, tone: "text-muted", line: "border-l-border-w2" },
+  error: { title: "Koşu tamamlanmadı", description: "Görevi düzenleyip tekrar çalıştır.", Icon: CircleAlert, tone: "text-err", line: "border-l-err" },
+  draft: { title: "Başlamaya hazır", description: "Bir görev yaz.", Icon: Play, tone: "text-muted", line: "border-l-border-w2" },
 } as const;
 
 export function AiPanel({ onClose }: { onClose: () => void }) {

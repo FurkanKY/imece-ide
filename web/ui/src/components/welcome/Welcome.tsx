@@ -11,9 +11,9 @@ import { openCommandsPalette } from "@/lib/commands";
 const NO_RECENT: { path: string; name: string; lastOpened: string }[] = [];
 
 const FLOW = [
-  { Icon: Map, title: "Planla", text: "Görevi, bağlamı ve etkilenecek dosyaları netleştir." },
-  { Icon: Code2, title: "Üret", text: "Ekip öneriyi kontrollü bir değişiklik setine dönüştürür." },
-  { Icon: ShieldCheck, title: "İncele", text: "Diff'i görün, uygula veya geri dön; kontrol sizde kalır." },
+  { Icon: Map, title: "Planla", text: "Görevi ve etkilenen dosyaları belirle." },
+  { Icon: Code2, title: "Hazırla", text: "Değişikliği incelemeye hazırla." },
+  { Icon: ShieldCheck, title: "İncele", text: "Diff'i kontrol et. Uygula ya da geri al." },
 ];
 
 export function Welcome() {
@@ -29,13 +29,13 @@ export function Welcome() {
         <section className="min-w-0">
           <div className="mb-6 flex items-center gap-2 text-muted" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
             <Logo size={18} />
-            <span>Yerel çalışma alanı</span>
+            <span>Yerel proje</span>
           </div>
           <h1 className="max-w-[17ch] text-text" style={{ fontSize: "var(--t-hero)", fontWeight: "var(--w-display)", letterSpacing: "var(--ls-hero)", lineHeight: 1.08 }}>
-            Değişikliği görün. Kararı siz verin.
+            Projeyi açın. Ne değişeceğini görün.
           </h1>
           <p className="mt-4 max-w-[54ch] text-muted" style={{ fontSize: "var(--t-body)", lineHeight: 1.65 }}>
-            Planı, etkilenen dosyaları ve diff’i aynı çalışma akışında inceleyin. Multi-Agent IDE yerel projenizin denetimini sizde tutar.
+            Kapsamı, değişen dosyaları ve diff'i uygulamadan önce inceleyin.
           </p>
 
           <div className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-3">
@@ -89,10 +89,10 @@ export function Welcome() {
         <section className="hidden border-l border-border-w pl-7 lg:block">
           <div className="flex items-center gap-2 text-text2">
             <GitPullRequest size={15} className="text-accent" />
-            <p style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>Çalışma anlaşması</p>
+            <p style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>İş akışı</p>
           </div>
           <p className="mt-2 max-w-[30ch] text-faint" style={{ fontSize: "var(--t-caption)", lineHeight: 1.55 }}>
-            Öneri uygulanmadan önce kapsam ve diff görünür kalır.
+            Uygulamadan önce kapsamı ve diff'i görürsünüz.
           </p>
           <ol className="mt-6 divide-y divide-[var(--line)] border-y border-border-w">
             {FLOW.map(({ Icon, title, text }, i) => (

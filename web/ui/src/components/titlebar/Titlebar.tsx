@@ -64,6 +64,7 @@ function WinButton(props: {
 
 export function Titlebar({ maximized }: { maximized: boolean }) {
   const project = useWorkspace((s) => s.name);
+  const reviewing = useEditor((s) => s.diff !== null);
 
   const onDragStart = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -109,12 +110,12 @@ export function Titlebar({ maximized }: { maximized: boolean }) {
         data-no-drag
         onClick={() => openCommandsPalette()}
         className="pressable group flex w-[400px] max-w-[42vw] items-center gap-2 border-b border-border-w px-2 py-[4px] hover:border-accent hover:bg-card/45"
-        title="Komut paleti (Ctrl+K)"
+        title="Komut Merkezi (Ctrl+K)"
       >
         <Command size={13} strokeWidth={2.2} className="shrink-0 text-muted group-hover:text-accent" />
         <span className="min-w-0 flex-1 truncate text-left text-text2" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
-          Komut Merkezi
-          {project && <span className="ml-1.5 text-faint" style={{ fontWeight: "var(--w-body)" }}>· {project}</span>}
+          {reviewing ? "İnceleme" : "Komut Merkezi"}
+          {project && <span className="ml-1.5 text-faint" style={{ fontWeight: "var(--w-body)" }}>/ {project}</span>}
         </span>
         <Kbd className="shrink-0">Ctrl K</Kbd>
       </button>

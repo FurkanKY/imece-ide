@@ -70,11 +70,11 @@ export function Composer() {
     : [];
 
   const helper = running
-    ? "Ekip çalışıyor — gerekirse durdurun."
+    ? "Koşu sürüyor. Gerekirse durdurun."
     : reviewReady
-      ? "İnceleme hazır — dosyaları uygulayın veya vazgeçin."
+      ? "İnceleme hazır. Dosyaları uygulayın veya vazgeçin."
       : runStage === "error"
-        ? "Bu tur tamamlanamadı — görevi düzenleyin veya yeniden çalıştırın."
+        ? "Koşu tamamlanmadı. Görevi düzenleyip tekrar çalıştırın."
         : null;
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -102,7 +102,7 @@ export function Composer() {
       )}
       {!helper && missing.length > 0 && (
         <div className="mb-1.5 flex items-center gap-1.5 text-warn" style={{ fontSize: "var(--t-caption)" }}>
-          {missing.join(", ")} için anahtar/CLI eksik —{" "}
+          {missing.join(", ")} için anahtar veya CLI eksik. {" "}
           <button onClick={() => setSettingsOpen(true)} className="underline underline-offset-2 hover:text-text">
             Ayarlar'dan ekle
           </button>
@@ -114,7 +114,7 @@ export function Composer() {
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={onKey}
-          placeholder={locked ? "" : "Göreviniz… (ör. utils.py'deki tarih biçimini ISO 8601 yap)"}
+          placeholder={locked ? "" : "Görev yazın. Örnek: utils.py tarih biçimini ISO 8601 yap"}
           rows={2}
           spellCheck={false}
           readOnly={locked}

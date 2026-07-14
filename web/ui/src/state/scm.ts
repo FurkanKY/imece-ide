@@ -84,7 +84,7 @@ export const useScm = create<ScmState>((set, get) => ({
     const ok = await confirmDialog({
       title: "Değişikliği At",
       message: untracked
-        ? `"${change.path}" izlenmiyor — dosya SİLİNECEK. Emin misin?`
+        ? `"${change.path}" izlenmiyor. Dosya silinecek. Emin misin?`
         : `"${change.path}" üzerindeki değişiklikler geri alınacak. Emin misin?`,
       okLabel: untracked ? "Sil" : "Değişikliği At",
       danger: true,

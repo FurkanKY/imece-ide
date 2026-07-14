@@ -4,34 +4,34 @@
 
 :root {
   /* ---- Yüzey kademeleri: bg < activity/side < panel < card < card2 ---- */
-  --bg: #0a0b0d;
-  --activity: #0c0d10;
-  --side: #0e0f12;
-  --panel: #121318;
-  --panel2: #171922;
-  --editor: #1e1e1e;
-  --composer: #111319;
-  --card: #191c24;
-  --card2: #222631;
-  --field: #0b0c0f;
-  --status: #0a0b0d;
-  --line: #1b1d23;
+  --bg: #0d0f12;
+  --activity: #101216;
+  --side: #121419;
+  --panel: #16191e;
+  --panel2: #1b1f25;
+  --editor: #14171b;
+  --composer: #111419;
+  --card: #191d23;
+  --card2: #20252d;
+  --field: #0f1216;
+  --status: #0d0f12;
+  --line: #2b3038;
 
   /* ---- Kenarlar: ASTRYX/Linear tekniği — yarı saydam beyaz ---- */
-  --border: rgba(255, 255, 255, 0.1);
-  --border2: rgba(255, 255, 255, 0.16);
-  --hair: rgba(52, 56, 67, 0.25);
+  --border: rgb(228 232 239 / 9%);
+  --border2: rgb(228 232 239 / 16%);
+  --hair: rgb(185 194 207 / 14%);
 
   /* ---- Metin hiyerarşisi ---- */
-  --text: #f2f3f6;
-  --text2: #c6cad3;
-  --muted: #8b8f9b;
-  --faint: #565a63;
+  --text: #edf0f4;
+  --text2: #c5cbd4;
+  --muted: #8d96a3;
+  --faint: #5e6672;
 
   /* ---- Semantik ---- */
-  --green: #4bd48a;
-  --red: #ff6b74;
-  --amber: #e9b45a;
+  --green: #6bbf93;
+  --red: #d9858d;
+  --amber: #c7a36b;
   --info: var(--accent);
 
   /* ---- Etkileşim yüzeyleri (primitive katmanı — mevcut icon-btn/card desenini
@@ -53,11 +53,11 @@
   --sp-8: calc(40px * var(--density));
 
   /* ---- Radius ---- */
-  --r-xs: 6px;
-  --r-sm: 8px;
-  --r-md: 11px;
-  --r-lg: 14px;
-  --r-xl: 18px;
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
   --r-pill: 999px;
 
   /* ---- Tipografi (rol → boyut/ağırlık/letter-spacing) ---- */
@@ -83,23 +83,22 @@
   --ease: var(--ease-out);
 
   /* ---- Yükseklik (gerçek gölgeler — QSS'te imkânsızdı) ---- */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
-  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
-  --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.4), 0 18px 52px rgba(0, 0, 0, 0.5);
+  --shadow-1: none;
+  --shadow-2: none;
+  --shadow-3: none;
 
   /* ---- Derinlik dili (theme.py grad()/bevel'in CSS karşılığı) ----
      bevel: yüzeyin üst kenarında 1px'lik iç parıltı — "fiziksellik" hissi.
      Kullanım: box-shadow: var(--bevel), <dış gölge>; */
-  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --bevel-strong: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  --surface-grad: linear-gradient(to bottom, rgba(255, 255, 255, 0.025), transparent 28%);
-  --material: color-mix(in srgb, var(--panel) 88%, transparent);
-  --material-strong: color-mix(in srgb, var(--panel2) 92%, transparent);
+  --bevel: none;
+  --bevel-strong: none;
+  --surface-grad: none;
+  --material: var(--panel);
+  --material-strong: var(--panel2);
 
   /* accent parlaması (aktif/koşan öğeler) */
-  --glow-accent: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
-                 0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
-  --glow-accent-soft: 0 0 14px color-mix(in srgb, var(--accent) 12%, transparent);
+  --glow-accent: none;
+  --glow-accent-soft: none;
 
   /* ---- Pencere ---- */
   --titlebar-h: 36px; /* kompakt masaüstü IDE yoğunluğu (Phase 3) */
@@ -108,7 +107,7 @@
 
 /* ---- Accent varyantları (theme.py ACCENTS portu) ---- */
 :root, [data-accent="blue"] {
-  --accent: #6aa1ff; --accent2: #5891f6; --accentdim: #26344f; --on-accent: #06122b;
+  --accent: #8aa6c6; --accent2: #7899bb; --accentdim: #213040; --on-accent: #0b121a;
 }
 [data-accent="indigo"] {
   --accent: #8b8cf0; --accent2: #7a7be6; --accentdim: #2b2c4a; --on-accent: #0c0b26;

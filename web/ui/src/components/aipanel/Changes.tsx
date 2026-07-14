@@ -53,7 +53,7 @@ export function Changes() {
               aria-busy={checkpointBusy}
               onClick={() => void restoreCheckpoint()}
             >
-              Geri Al
+              Geri al
             </Button>
           ) : undefined
         }
@@ -72,7 +72,7 @@ export function Changes() {
           <div className="min-w-0 flex-1">
             <p className={verdict === "APPROVED" ? "text-ok" : "text-warn"} style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>{verdict === "APPROVED" ? "İnceleme onayı" : "İnceleme notu"}</p>
             <p className="text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.35 }}>
-              {verdictNote || `${checkedCount}/${diffs.length} dosya seçili; uygulamadan önce son kontrolünüz alınır.`}
+              {verdictNote || `${checkedCount}/${diffs.length} dosya seçili. Uygulamadan önce kontrol edin.`}
             </p>
             <p className="mt-0.5 text-faint" style={{ fontSize: "var(--t-caption)" }}>{checkedCount}/{diffs.length} dosya uygulamaya dahil</p>
           </div>
@@ -117,7 +117,7 @@ export function Changes() {
 
       <div className="border-t border-border-w bg-panel px-2.5 py-3">
         <div className="mb-2 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
-          <ShieldCheck size={12} className="text-ok" /> Uygulamadan önce checkpoint oluşturulur.
+          <ShieldCheck size={12} className="text-ok" /> Uygulamadan önce checkpoint alınır.
         </div>
         <div className="flex gap-2">
           <Button
@@ -130,7 +130,7 @@ export function Changes() {
             loading={checkpointBusy}
             aria-busy={checkpointBusy}
           >
-            {checkpointBusy ? "Uygulanıyor…" : `Uygula · checkpoint oluştur (${checkedCount})`}
+            {checkpointBusy ? "Uygulanıyor…" : `Uygula (${checkedCount})`}
           </Button>
           <Button
             variant="secondary"

@@ -30,7 +30,7 @@ function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void openDiff(change, staged); }
       }}
-      title={`${change.path} — ${st.label}`}
+      title={`${change.path}: ${st.label}`}
       className={
         "group flex cursor-pointer items-center gap-1.5 border-l-2 py-[3px] pl-2 pr-1 " +
         (active ? "border-accent bg-accentdim/60" : "border-transparent hover:bg-card/45")

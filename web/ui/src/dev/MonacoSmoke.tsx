@@ -43,14 +43,14 @@ export default function MonacoSmoke() {
         const markers = monaco.editor.getModelMarkers({});
         if (markers.length > 0) {
           clearInterval(check);
-          setStatus(`✓ Worker çalışıyor — ${markers.length} diagnostic üretildi`);
+          setStatus(`✓ Worker çalışıyor. ${markers.length} diagnostic üretildi`);
           document.documentElement.dataset.monacoReady = "1";
         }
       }, 250);
       setTimeout(() => {
         clearInterval(check);
         setStatus((s) =>
-          s.startsWith("✓") ? s : "⚠ Diagnostics gelmedi — worker fallback gerekebilir",
+          s.startsWith("✓") ? s : "⚠ Diagnostics gelmedi. Worker fallback gerekebilir",
         );
         document.documentElement.dataset.monacoReady = "1";
       }, 8000);
@@ -71,4 +71,3 @@ export default function MonacoSmoke() {
     </div>
   );
 }
-

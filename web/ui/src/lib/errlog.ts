@@ -34,6 +34,6 @@ export function installErrlog() {
 
   // Python tarafı yakalanmamış istisna — kullanıcı görmeli (sessiz ölüm yok)
   bridge.on("app.error", ({ message, logPath }) => {
-    toast.err(`Beklenmeyen hata: ${message} — ayrıntı: ${logPath}`);
+    toast.err(`Beklenmeyen hata: ${message}. Ayrıntı: ${logPath}`);
   });
 }

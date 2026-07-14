@@ -99,7 +99,7 @@ export function Chat() {
       <EmptyState
         icon={BrainCircuit}
         title="Ekip hazır"
-        description="Alttan bir görev yaz — Planner böler, Coder yazar, Reviewer denetler."
+        description="Bir görev yazın. Plan, değişiklik ve kontrol sırayla yürür."
         className="h-full"
       />
     );
@@ -108,7 +108,7 @@ export function Chat() {
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto p-3">
       <div className="flex items-center gap-1.5 px-1 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
-        <Activity size={12} /> ÇALIŞMA ZAMAN ÇİZELGESİ
+        <Activity size={12} /> ÇALIŞMA
       </div>
       {flow.map((item) => {
         if (item.kind === "task") {

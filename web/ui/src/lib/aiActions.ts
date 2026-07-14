@@ -110,7 +110,7 @@ export async function sendOutputErrorToTeam() {
   const ex = useExec.getState();
   const raw = stripAnsi(ex.raw).trim();
   if (!raw) {
-    toast.info("Aktarılacak çıktı yok — önce bir şey çalıştırın.");
+    toast.info("Aktarılacak çıktı yok. Önce bir şey çalıştırın.");
     return;
   }
   const tail = raw.length > RAW_TAIL ? "…\n" + raw.slice(-RAW_TAIL) : raw;
