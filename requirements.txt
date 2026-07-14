@@ -4,4 +4,4 @@ flask>=3.0
 PySide6>=6.11.1
 pywinpty>=3.0.5; sys_platform == "win32"
 basedpyright>=1.21
-debugpy>=1.8
+debugpy>=1.8.21
