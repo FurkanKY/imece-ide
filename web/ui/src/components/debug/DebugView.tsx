@@ -11,6 +11,7 @@ import type { DebugFrame, DebugScope, DebugVariable } from "@/bridge/protocol";
 import { useDebug } from "@/state/debug";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
+import { Button } from "@/components/ui";
 
 function Overline({ children }: { children: React.ReactNode }) {
   return (
@@ -180,13 +181,15 @@ export function DebugView() {
         </div>
       ) : (
         <div className="px-2.5 pb-1">
-          <button
+          <Button
             onClick={() => void dbg.start(activeRel)}
-            className="pressable flex w-full items-center justify-center gap-2 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2"
-            style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
+            variant="primary"
+            size="sm"
+            block
+            icon={Bug}
           >
-            <Bug size={14} strokeWidth={2} /> Debug Başlat (F5)
-          </button>
+            Debug Başlat (F5)
+          </Button>
           <p className="mt-1.5 px-1 text-faint" style={{ fontSize: "var(--t-caption)" }}>
             Aktif .py dosyası breakpoint'lerle koşar. Satır numarasının soluna
             tıklayarak (veya F9) breakpoint koy.
