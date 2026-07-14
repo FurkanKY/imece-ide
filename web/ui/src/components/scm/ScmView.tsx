@@ -11,7 +11,7 @@ import { ScmChange } from "@/bridge";
 import { useScm, SCM_STATUS } from "@/state/scm";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
-import { Badge, EmptyState, IconButton, PanelHeader } from "@/components/ui";
+import { Badge, Button, EmptyState, IconButton, PanelHeader } from "@/components/ui";
 
 function Row({ change, staged }: { change: ScmChange; staged: boolean }) {
   const { stage, unstage, discard, openDiff } = useScm();
@@ -178,15 +178,18 @@ export function ScmView() {
               className="selectable w-full resize-none rounded-[var(--r-sm)] border border-border-w bg-field px-2.5 py-1.5 text-text outline-none transition-colors placeholder:text-faint focus:border-accent"
               style={{ fontSize: "var(--t-body)" }}
             />
-            <button
+            <Button
               onClick={() => void s.commit()}
               disabled={!canCommit}
-              className="pressable mt-1 flex w-full items-center justify-center gap-1.5 rounded-[var(--r-sm)] bg-accent px-3 py-1.5 text-on-accent hover:bg-accent2 disabled:opacity-40"
-              style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}
+              loading={s.busy}
+              variant="primary"
+              size="sm"
+              block
+              className="mt-1"
+              icon={GitCommitHorizontal}
             >
-              <GitCommitHorizontal size={14} strokeWidth={2} />
               {s.busy ? "Commit ediliyor…" : `Commit (${s.staged.length})`}
-            </button>
+            </Button>
           </div>
 
           {/* değişiklik listeleri */}
