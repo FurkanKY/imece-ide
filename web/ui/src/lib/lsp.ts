@@ -8,9 +8,9 @@
    köprü İKİ yönde de burada çevrilir. */
 
 import type { editor, languages, IRange } from "monaco-editor";
+import type { initMonaco as InitMonaco } from "@/lib/monaco";
 import { create } from "zustand";
 import { bridge } from "@/bridge";
-import { initMonaco } from "@/lib/monaco";
 import { useWorkspace } from "@/state/workspace";
 
 type LspStatus = "off" | "starting" | "ready";
@@ -112,7 +112,7 @@ function markupToString(c: unknown): string {
   return o.value ?? "";
 }
 
-function registerProviders(monaco: ReturnType<typeof initMonaco>) {
+function registerProviders(monaco: ReturnType<typeof InitMonaco>) {
   const K = monaco.languages.CompletionItemKind;
   // LSP CompletionItemKind (1-tabanlı) → Monaco enum'u
   const KIND: Record<number, languages.CompletionItemKind> = {
@@ -230,7 +230,7 @@ function registerProviders(monaco: ReturnType<typeof initMonaco>) {
 interface LspDiagnostic { range: LspRange; message: string; severity?: number;
                           code?: string | number; source?: string }
 
-function applyDiagnostics(monaco: ReturnType<typeof initMonaco>,
+function applyDiagnostics(monaco: ReturnType<typeof InitMonaco>,
                           uri: string, diags: LspDiagnostic[]) {
   const rel = fromLspUri(uri);
   if (!rel) return;
@@ -249,9 +249,10 @@ function applyDiagnostics(monaco: ReturnType<typeof initMonaco>,
 
 // ---------------- kurulum ----------------
 
-export function installLsp() {
+export async function installLsp() {
   if (installed || !bridge.isNative) return; // mock'ta dil sunucusu yok
   installed = true;
+  const { initMonaco } = await import("@/lib/monaco");
   const monaco = initMonaco();
   registerProviders(monaco);
 

@@ -12,5 +12,24 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   worker: { format: "iife" },
   server: { port: 5173, strictPort: true },
-  build: { target: "chrome120", sourcemap: false },
+  build: {
+    target: "chrome120",
+    sourcemap: false,
+    // Ağır, isteğe bağlı IDE yüzeyleri kendi lazy-import sınırlarında kalır.
+    // Geri kalan bağımlılıklar da kararlı vendor paketlerine ayrılır; böylece
+    // küçük uygulama değişiklikleri Monaco/xterm önbelleğini geçersiz kılmaz.
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("monaco-editor")) return "monaco";
+          if (id.includes("@xterm")) return "xterm";
+          // motion ve UI paketleri React'e bağlı olduğundan ayrı vendor grupları
+          // birbirine import döngüsü oluşturabilir. Ağır editör/terminalden ayrı,
+          // tek ortak paket hem bu döngüyü hem de başlangıç cache'ini dengeler.
+          return "vendor";
+        },
+      },
+    },
+  },
 });

@@ -6,7 +6,6 @@ import { memo, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Copy, Check } from "lucide-react";
-import { initMonaco } from "@/lib/monaco";
 import { bridge } from "@/bridge";
 
 /* ```lang etiketi → monaco dil kimliği (langForPath uzantı bazlı; burada ad bazlı) */
@@ -22,10 +21,9 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 
   useEffect(() => {
     let alive = true;
-    const monaco = initMonaco();
     const id = LANG_ALIAS[lang] ?? lang ?? "plaintext";
-    monaco.editor
-      .colorize(code, id, { tabSize: 4 })
+    void import("@/lib/monaco")
+      .then(({ initMonaco }) => initMonaco().editor.colorize(code, id, { tabSize: 4 }))
       .then((h) => { if (alive) setHtml(h); })
       .catch(() => { if (alive) setHtml(null); });
     return () => { alive = false; };

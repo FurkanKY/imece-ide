@@ -4,7 +4,8 @@
 import { useEffect, useRef } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { Columns2, Rows3 } from "lucide-react";
-import { initMonaco, langForPath } from "@/lib/monaco";
+import { initMonaco } from "@/lib/monaco";
+import { langForPath } from "@/lib/languages";
 import { useEditor } from "@/state/editor";
 import { useUi } from "@/state/ui";
 

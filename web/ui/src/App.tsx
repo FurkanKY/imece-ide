@@ -14,7 +14,6 @@ import { Explorer } from "@/components/explorer/Explorer";
 import { SearchView } from "@/components/search/SearchView";
 import { ScmView } from "@/components/scm/ScmView";
 import { DebugView } from "@/components/debug/DebugView";
-import { Editor } from "@/components/editor/Editor";
 import { StatusBar } from "@/components/statusbar/StatusBar";
 import { Welcome } from "@/components/welcome/Welcome";
 import { Palette } from "@/components/palette/Palette";
@@ -22,13 +21,17 @@ import { ToastHost } from "@/components/toasts/ToastHost";
 import { DialogHost } from "@/components/dialogs/DialogHost";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { AiPanel } from "@/components/aipanel/AiPanel";
-import { BottomPanel } from "@/components/bottompanel/BottomPanel";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditor } from "@/state/editor";
 import { useUi, PANEL_LIMITS, NARROW_BP } from "@/state/ui";
 import { useRun } from "@/state/run";
 
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
+// Monaco ve xterm ilk ekran için gerekli değil. Bu yüzeyleri kullanıcı bir dosya
+// açtığında / alt paneli istediğinde yüklemek, ilk WebEngine render'ını hafif tutar.
+// Bileşenlerin mount/cleanup yaşam döngüleri kendi modüllerinde aynen korunur.
+const Editor = lazy(() => import("@/components/editor/Editor").then((m) => ({ default: m.Editor })));
+const BottomPanel = lazy(() => import("@/components/bottompanel/BottomPanel").then((m) => ({ default: m.BottomPanel })));
 const smokeMode = new URLSearchParams(location.search).get("smoke");
 const scenario = new URLSearchParams(location.search).get("scenario");
 
@@ -121,7 +124,9 @@ function Workspace() {
       {/* orta kolon: editör ↕ terminal */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {hasTabs || hasDiff ? (
-          <Editor />
+          <Suspense fallback={<div className="min-h-0 flex-1 bg-panel" aria-label="Editör yükleniyor" />}>
+            <Editor />
+          </Suspense>
         ) : (
           <div className="flex min-h-0 flex-1 items-center justify-center bg-panel">
             <p className="text-faint" style={{ fontSize: "var(--t-body)" }}>
@@ -151,7 +156,9 @@ function Workspace() {
               className="shrink-0 overflow-hidden"
             >
               <div style={{ height: bottomHeight }}>
-                <BottomPanel />
+                <Suspense fallback={<div className="h-full bg-field" aria-label="Alt panel yükleniyor" />}>
+                  <BottomPanel />
+                </Suspense>
               </div>
             </motion.div>
           )}
@@ -208,8 +215,6 @@ export default function App() {
       installSessionPersistence();
       const { installScm } = await import("@/state/scm");
       installScm();
-      const { installLsp } = await import("@/lib/lsp");
-      installLsp(); // P7: Python dil sunucusu (native'de; mock'ta no-op)
       const { useExec } = await import("@/state/exec");
       useExec.getState().install(); // P8.1: exec.output/exited abonelikleri
       const { useDebug } = await import("@/state/debug");
