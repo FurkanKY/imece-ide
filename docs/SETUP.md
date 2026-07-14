@@ -15,6 +15,9 @@
 pip install -r requirements.txt
 ```
 
+Test ve katkı ortamında bunun yerine `pip install -r requirements-dev.txt`
+kullanın; bu dosya uygulama bağımlılıklarına ek olarak `pytest` içerir.
+
 İçerik: `requests`, `python-dotenv`, `flask` (web arayüzü), `PySide6 ≥ 6.11.1`
 (masaüstü; Python 3.14 gerekliliği), `pywinpty` (entegre terminal, ConPTY),
 `basedpyright` (Python IntelliSense — Node gömülü gelir, ek kurulum istemez).
