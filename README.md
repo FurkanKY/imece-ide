@@ -31,6 +31,8 @@ python orchestrator.py "..." --run  # terminal (sıfırdan tek dosya üret + ça
 ### Windows paketiyle başlamak
 
 `dist/MultiAgentIDE/MultiAgentIDE.exe` dosyasını çalıştırın. Python ve Node gerekmez.
+Kaynak kodda yapılan UI değişikliklerini görmek için Windows'ta yeniden paketleme
+gereklidir; ayrıntı için [açık beta sürüm rehberine](docs/RELEASE.md) bakın.
 İlk açılışta **Klasör Aç** ile yerel projenizi seçin; Ayarlar'dan DeepSeek/Gemini
 anahtarlarını girin ve Claude kullanacaksanız Claude Code CLI'ı ayrıca kurun. Kullanıcı
 verileri `%LOCALAPPDATA%/MultiAgentIDE` altında tutulur.
