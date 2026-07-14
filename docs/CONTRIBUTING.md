@@ -29,7 +29,7 @@ Amaç: kod ile doküman arasındaki farkın hiçbir zaman birikmemesi.
 | Yeni arayüz özelliği / kullanım biçimi | `docs/USAGE.md` |
 | Yeni optimizasyon tekniği veya durumu | `docs/OPTIMIZATIONS.md` |
 | Kurulum, bağımlılık, ortam tuzağı | `docs/SETUP.md` + `requirements.txt` |
-| Web-shell faz ilerlemesi | `docs/HANDOFF.md` + `.claude/plans/web-shell-ui.md` |
+| Faz ilerlemesi / yayın durumu | `docs/ROADMAP.md` + `docs/CHANGELOG.md` |
 | Yol haritası ilerlemesi / faz durumu | `docs/ROADMAP.md` |
 | **Her değişiklik (istisnasız)** | `docs/CHANGELOG.md` |
 

@@ -20,4 +20,13 @@ web/ui/dist/
 
 # Claude Code yerel IDE ayarları (makineye özgü mutlak yollar içerir)
 .claude/
+.agents/
+skills-lock.json
+
+# Yayınlanmayan yerel çalışma/devir kayıtları
+docs/agent-handoff/
+docs/HANDOFF.md
+docs/CONTINUE-ON-ANOTHER-PC.md
+ui-audit.out.log
+ui-audit.err.log
 web/ui/*.tsbuildinfo
