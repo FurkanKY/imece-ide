@@ -124,7 +124,7 @@ def test_dap_full_flow(debuggee):
 
     # 1) initialize → attach
     seq = cli.send("initialize", {
-        "clientID": "magent-test", "adapterID": "debugpy",
+        "clientID": "imece-test", "adapterID": "debugpy",
         "pathFormat": "path", "linesStartAt1": True, "columnsStartAt1": True,
         "supportsVariableType": True,
     })

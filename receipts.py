@@ -1,6 +1,6 @@
 """Proje içi değişiklik makbuzları.
 
-Makbuzlar .magent/receipts altında kalır; history.json yalnız hızlı indeks görevi
+Makbuzlar .imece/receipts altında kalır; history.json yalnız hızlı indeks görevi
 görür. Böylece ayrıntılı diff/kanıt saklanırken eski geçmiş biçimi okunabilir kalır.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 class ReceiptStore:
     def __init__(self, project_root: str):
-        self.dir = Path(project_root) / ".magent" / "receipts"
+        self.dir = Path(project_root) / ".imece" / "receipts"
 
     def _path(self, receipt_id: str) -> Path:
         if not receipt_id or any(c not in "0123456789abcdef-" for c in receipt_id):
@@ -56,14 +56,14 @@ class ReceiptStore:
         target_dir = Path(directory).expanduser()
         if not target_dir.is_dir():
             raise ValueError("Dışa aktarma klasörü bulunamadı.")
-        target = target_dir / f"multi-agent-receipt-{receipt_id}.md"
+        target = target_dir / f"imece-receipt-{receipt_id}.md"
         plan = data.get("plan") or {}
         review = data.get("review") or {}
         metrics = data.get("metrics") or {}
         scope = [f"- `{path}`" for path in plan.get("files", [])] or ["- Dosya seçilmedi."]
         applied = [f"- `{path}`" for path in data.get("applied", [])] or ["- Değişiklik uygulanmadı."]
         lines = [
-            "# Multi-Agent IDE değişiklik makbuzu", "",
+            "# Imece IDE değişiklik makbuzu", "",
             f"- Kimlik: `{receipt_id}`", f"- Durum: **{data.get('status', 'unknown')}**",
             f"- Görev: {data.get('task', '')}", f"- Karar: {review.get('verdict', 'UNKNOWN')}",
             f"- Maliyet: ${float(metrics.get('cost_usd', 0)):.5f} · {metrics.get('tokens', 0)} token · {metrics.get('latency_s', 0)} sn", "",

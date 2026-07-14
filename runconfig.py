@@ -4,7 +4,7 @@ Eski ROADMAP Faz 2 tasarımının portu (web-shell/P8.1). Motor kuralına uygun:
 yeni bağımsız modül, mevcut motor dosyalarına dokunmaz.
 
 Öncelik sırası (proje komutu):
-  1. .magent/run.json  {"project": "<komut>"}  — kullanıcı ne yazdıysa o
+  1. .imece/run.json  {"project": "<komut>"}  — kullanıcı ne yazdıysa o
   2. package.json  scripts.dev → `npm run dev`, scripts.start → `npm start`
   3. Cargo.toml → `cargo run` · go.mod → `go run .`
   4. main.py → `python main.py` · app.py → `python app.py`
@@ -22,7 +22,7 @@ FILE_CMDS = {
     ".mjs": 'node "{file}"',
 }
 
-_RUN_JSON = ".magent/run.json"
+_RUN_JSON = ".imece/run.json"
 
 
 def file_command(rel: str) -> str | None:

@@ -14,7 +14,7 @@ from project import Project
 
 class CheckpointStore:
     def __init__(self, root: str):
-        self.dir = os.path.join(root, ".magent", "checkpoints")
+        self.dir = os.path.join(root, ".imece", "checkpoints")
 
     def _path(self, checkpoint_id: str) -> str:
         if not checkpoint_id or any(c not in "0123456789abcdef-" for c in checkpoint_id):
@@ -126,7 +126,7 @@ class CheckpointStore:
     def _write_atomic(full: str, raw: bytes) -> None:
         parent = os.path.dirname(full)
         os.makedirs(parent, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=".magent-restore-", suffix=".tmp", dir=parent)
+        fd, tmp = tempfile.mkstemp(prefix=".imece-restore-", suffix=".tmp", dir=parent)
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(raw)

@@ -22,7 +22,7 @@ export function DiffView({ path, original, modified }: {
     const monaco = initMonaco();
     if (!hostRef.current) return;
     const ed = monaco.editor.createDiffEditor(hostRef.current, {
-      theme: "magent-dark",
+      theme: "imece-dark",
       automaticLayout: true,
       readOnly: true,
       renderSideBySide: useUi.getState().diffSideBySide, // varsayılan inline (Cursor deseni)

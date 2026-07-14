@@ -2,7 +2,7 @@
    Not: CSS text-transform KULLANMA (İ/i sorunu) — büyük harf burada, string'de. */
 
 export const S = {
-  appName: "Multi-Agent IDE",
+  appName: "Imece IDE",
   window: {
     minimize: "Simge durumuna küçült",
     maximize: "Ekranı kapla",
@@ -10,7 +10,7 @@ export const S = {
     close: "Kapat",
   },
   welcome: {
-    title: "Multi-Agent IDE",
+    title: "Imece IDE",
     subtitle: "Claude, DeepSeek ve Gemini ile çalışır.",
     openFolder: "Klasör Aç",
     hintShortcuts: "Ctrl+K komutlar · Ctrl+P dosyalar · Ctrl+` terminal",

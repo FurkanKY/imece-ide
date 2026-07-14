@@ -31,7 +31,7 @@ class ShellWindow(QMainWindow):
         self._web_ready = False       # JS köprüsü canlı mı (kapatma koruması için)
         self._close_confirmed = False
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self.setWindowTitle("Multi-Agent IDE")
+        self.setWindowTitle("Imece IDE")
         self.setMinimumSize(720, 480)
 
         # ---- webview ----
@@ -187,7 +187,7 @@ class ShellWindow(QMainWindow):
     def _open_devtools(self):
         if self._devtools is None:
             self._devtools = QWebEngineView()
-            self._devtools.setWindowTitle("DevTools — Multi-Agent IDE")
+            self._devtools.setWindowTitle("DevTools — Imece IDE")
             self._devtools.resize(1100, 700)
             self.view.page().setDevToolsPage(self._devtools.page())
         self._devtools.show()

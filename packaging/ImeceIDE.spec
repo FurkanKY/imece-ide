@@ -22,6 +22,8 @@ node_exe = Path(nodejs_wheel.__file__).parent / "node.exe"
 datas = [
     (str(UI_DIST), "web/ui/dist"),
     (str(node_exe), "nodejs_wheel"),
+    (str(ROOT / "LICENSE"), "."),
+    (str(ROOT / "THIRD-PARTY-NOTICES.md"), "."),
     *bp_datas,
     *dp_datas,
     *wp_datas,
@@ -59,7 +61,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="MultiAgentIDE",
+    name="ImeceIDE",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -75,5 +77,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="MultiAgentIDE",
+    name="ImeceIDE",
 )

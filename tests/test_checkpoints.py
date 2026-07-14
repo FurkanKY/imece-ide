@@ -71,7 +71,7 @@ def test_list_skips_a_single_malformed_checkpoint(tmp_path):
     proj = Project(str(tmp_path))
     store = CheckpointStore(str(tmp_path))
     valid = store.create(proj, ["a.py"])
-    (tmp_path / ".magent" / "checkpoints" / "broken.json").write_text(
+    (tmp_path / ".imece" / "checkpoints" / "broken.json").write_text(
         "{broken", encoding="utf-8",
     )
     assert [x["id"] for x in store.list()] == [valid["id"]]

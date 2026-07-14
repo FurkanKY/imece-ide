@@ -186,7 +186,7 @@ function buildCommands(): Command[] {
         },
       },
       {
-        id: "run-config", label: "Çalıştırma Komutunu Değiştir…", hint: ".magent/run.json",
+        id: "run-config", label: "Çalıştırma Komutunu Değiştir…", hint: ".imece/run.json",
         Icon: SlidersHorizontal,
         run: async () => {
           const { promptDialog } = await import("@/components/dialogs/dialogs");

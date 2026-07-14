@@ -99,7 +99,7 @@ export function initMonaco() {
   const red = cssToken("--red", "#ff6b74");
   const amber = cssToken("--amber", "#e9b45a");
 
-  monaco.editor.defineTheme("magent-dark", {
+  monaco.editor.defineTheme("imece-dark", {
     base: "vs-dark",
     inherit: true,
     // rules[].foreground '#' istemez (colors map'i ister)
@@ -142,7 +142,7 @@ export function initMonaco() {
     },
   });
   // global tema: editörler + colorize (sohbet kod blokları) aynı paleti kullanır
-  monaco.editor.setTheme("magent-dark");
+  monaco.editor.setTheme("imece-dark");
 
   // İmleç kayması düzeltmesi: @font-face JetBrains Mono yüklenmeden Monaco karakter
   // genişliği ölçerse imleç metnin içine kayar → fontlar hazır olunca yeniden ölç.

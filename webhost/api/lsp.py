@@ -12,7 +12,7 @@ Akış (bkz. docs/IDE-PLUS-PLAN.md P7.2):
   lsp.notify  → tek yön (didOpen/didChange/didClose/didSave)
   lsp.status  → durum çubuğu göstergesi için
   olay lsp.event {method, params} → sunucudan itilenler (publishDiagnostics,
-                $/magentReady, $/magentExited)
+                $/imeceReady, $/imeceExited)
 
 Sunucudan GELEN isteklere (workspace/configuration vb.) burada asgari yanıt
 verilir — yanıtsız bırakmak LS'i kilitleyebilir.
@@ -125,7 +125,7 @@ def _on_exited() -> None:
     _ls["pending"].clear()
     bridge = _ls["bridge"]
     if bridge is not None:
-        bridge.emit_event("lsp.event", {"method": "$/magentExited", "params": None})
+        bridge.emit_event("lsp.event", {"method": "$/imeceExited", "params": None})
 
 
 # ---------------- yaşam döngüsü ----------------
@@ -155,7 +155,7 @@ def _stop_current() -> None:
 
 def _spawn(root: str, bridge) -> None:
     if is_frozen():
-        command = [sys.executable, "--magent-lsp", "--stdio"]
+        command = [sys.executable, "--imece-lsp", "--stdio"]
     else:
         exe = shutil.which(SERVER_EXE)
         command = [exe, "--stdio"] if exe else []
@@ -179,7 +179,7 @@ def _spawn(root: str, bridge) -> None:
     def _on_initialized(_msg: dict) -> None:
         _notify("initialized", {})
         _ls["ready"] = True
-        bridge.emit_event("lsp.event", {"method": "$/magentReady", "params": None})
+        bridge.emit_event("lsp.event", {"method": "$/imeceReady", "params": None})
 
     _request("initialize", {
         "processId": os.getpid(),

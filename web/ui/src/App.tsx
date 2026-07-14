@@ -238,7 +238,7 @@ export default function App() {
       if (z !== 1) void bridge.call("window.setZoom", { factor: z });
       if (import.meta.env.DEV) {
         // --dev E2E kancası: CDP'den store'lara erişim (üretim build'ine girmez)
-        (window as unknown as Record<string, unknown>).__magent = {
+        (window as unknown as Record<string, unknown>).__imece = {
           openProject,
           editor: () => useEditor.getState(),
           run: () => useRun.getState(),
