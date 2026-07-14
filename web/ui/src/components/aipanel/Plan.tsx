@@ -16,8 +16,8 @@ export function Plan() {
     return (
       <EmptyState
         icon={ClipboardList}
-        title="Önce hedefi belirleyin"
-        description="Ekip, görevinizi planlayıp değişiklikleri incelemeniz için hazırlar."
+        title="Bir görev yazın"
+        description="Plan ve değişiklikler burada görünür."
         className="h-full"
       />
     );
@@ -35,7 +35,7 @@ export function Plan() {
 
       <section className="mt-4 border-l-2 border-l-accent pl-3">
         <div className="flex items-center gap-2 text-muted" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>
-          <FileSearch size={12} /> Planner planı
+          <FileSearch size={12} /> Plan
           {planner.state === "running" && (
             <span className="ml-auto flex items-center gap-1.5 text-accent" style={{ fontSize: "var(--t-caption)", letterSpacing: 0 }}>
               <StatusDot tone="accent" pulse size={5} /> hazırlanıyor…
@@ -48,7 +48,7 @@ export function Plan() {
         ) : (
           <div className="flex items-start gap-2 pt-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>
             <Lightbulb size={13} className="mt-0.5 shrink-0" />
-            <span>{runStage === "planning" ? "Planner proje bağlamını inceliyor." : "Plan, run başladığında burada görünür."}</span>
+            <span>{runStage === "planning" ? "Proje bağlamı inceleniyor." : "Plan, koşu başlayınca burada görünür."}</span>
           </div>
         )}
       </section>
@@ -64,11 +64,11 @@ export function Plan() {
               <div className="divide-y divide-[var(--line)] border-y border-[var(--line)]">
                 {plan.files.map((file) => <p key={file} className="py-1.5 text-text2" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>{file}</p>)}
               </div>
-            ) : <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>Planner dosya seçmedi.</p>}
+            ) : <p className="text-faint" style={{ fontSize: "var(--t-caption)" }}>Dosya seçilmedi.</p>}
           </section>
           {(plan.assumptions.length > 0 || plan.risks.length > 0) && (
             <section className="border-l-2 border-l-warn pl-3">
-              <div className="mb-2 flex items-center gap-1.5 text-warn" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}><ShieldAlert size={12} /> Kontrol noktaları</div>
+              <div className="mb-2 flex items-center gap-1.5 text-warn" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}><ShieldAlert size={12} /> Notlar</div>
               {plan.assumptions.length > 0 && (
                 <div>
                   <p className="text-muted" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>Varsayım</p>

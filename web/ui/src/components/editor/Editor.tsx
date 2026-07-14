@@ -79,7 +79,7 @@ function TabBar() {
                 "group/close flex size-4 shrink-0 items-center justify-center rounded outline-none hover:bg-card2 focus-visible:ring-1 focus-visible:ring-accent " +
                 (t.dirty || on ? "" : "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100")
               }
-              aria-label={t.dirty ? "Kaydedilmemiş değişiklik var — sekmeyi kapat" : "Sekmeyi kapat"}
+              aria-label={t.dirty ? "Kaydedilmemiş değişiklik var. Sekmeyi kapat" : "Sekmeyi kapat"}
               title="Kapat"
             >
               {t.dirty ? (

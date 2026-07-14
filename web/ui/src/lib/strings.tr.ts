@@ -11,7 +11,7 @@ export const S = {
   },
   welcome: {
     title: "Multi-Agent IDE",
-    subtitle: "Claude · DeepSeek · Gemini — bir yazılım ekibi gibi.",
+    subtitle: "Claude, DeepSeek ve Gemini ile çalışır.",
     openFolder: "Klasör Aç",
     hintShortcuts: "Ctrl+K komutlar · Ctrl+P dosyalar · Ctrl+` terminal",
   },

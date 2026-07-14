@@ -6,9 +6,9 @@ import { useRun, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
 
 const ROLE_META: Record<Role, { label: string; intent: string; running: string; done: string; Icon: LucideIcon }> = {
-  planner: { label: "Planner", intent: "Kapsam", running: "Kapsamı çıkarıyor", done: "Plan hazır", Icon: BrainCircuit },
-  coder: { label: "Coder", intent: "Öneri", running: "Değişiklik üretiyor", done: "Öneri hazır", Icon: Code2 },
-  reviewer: { label: "Reviewer", intent: "İnceleme", running: "Riski denetliyor", done: "İnceleme bitti", Icon: SearchCheck },
+  planner: { label: "Planner", intent: "Kapsam", running: "Planı çıkarıyor", done: "Plan hazır", Icon: BrainCircuit },
+  coder: { label: "Coder", intent: "Değişiklik", running: "Değişiklik hazırlıyor", done: "Değişiklik hazır", Icon: Code2 },
+  reviewer: { label: "Reviewer", intent: "Kontrol", running: "Kontrol ediyor", done: "Kontrol tamam", Icon: SearchCheck },
 };
 
 function StageRow({ index, info, routedTo }: { index: number; info: StageInfo; routedTo: string }) {
@@ -41,13 +41,13 @@ export function Pipeline() {
   const stages = useRun((s) => s.stages);
   const routing = useRun((s) => s.routing);
   const status = useRun((s) => s.status);
-  const summary = status === "done" ? "İnceleme tamamlandı" : status === "failed" ? "Akış durdu" : status === "cancelled" ? "Akış durduruldu" : "Kanıt zinciri";
+  const summary = status === "done" ? "İnceleme tamam" : status === "failed" ? "Koşu durdu" : status === "cancelled" ? "Koşu durduruldu" : "Durum";
   const roles: Role[] = ["planner", "coder", "reviewer"];
 
   return (
     <section className="border-b border-border-w px-3 py-3">
       <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-text2" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>Ekip akışı</span>
+        <span className="text-text2" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>Akış</span>
         <span className="text-faint" style={{ fontSize: "var(--t-caption)" }}>{summary}</span>
       </div>
       {roles.map((role, i) => <StageRow key={role} index={i + 1} info={stages[role]} routedTo={routing[role]} />)}

@@ -108,7 +108,7 @@ function KeyRow({ name, label, placeholder }: { name: "deepseek" | "gemini"; lab
         type="password"
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        placeholder={status?.ok ? `kayıtlı (${status.masked}) — değiştirmek için yaz` : placeholder}
+        placeholder={status?.ok ? `kayıtlı (${status.masked}). Değiştirmek için yaz` : placeholder}
         aria-label={`${label} API anahtarı`}
         autoComplete="off"
         spellCheck={false}
@@ -157,7 +157,7 @@ function ApiKeysSection() {
           <StatusDot tone={claude?.ok ? "ok" : "err"} /> Claude
         </span>
         <span className="min-w-0 flex-1 truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          {claude?.ok ? `Claude Code CLI hazır (${claude.detail})` : "Claude Code CLI PATH'te bulunamadı — kurulum: claude.com/claude-code"}
+          {claude?.ok ? `Claude Code CLI hazır (${claude.detail})` : "Claude Code CLI PATH'te bulunamadı. Kurulum: claude.com/claude-code"}
         </span>
       </div>
       <KeyRow name="deepseek" label="DeepSeek" placeholder="sk-…  (platform.deepseek.com)" />

@@ -36,7 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
       <EmptyState
         icon={AlertTriangle}
         title={`${this.props.label} bir hatayla karşılaştı`}
-        description={`${this.state.error.message} — kaydedilmemiş işiniz güvende; bu bölgeyi yeniden deneyebilirsiniz.`}
+        description={`${this.state.error.message}. Kaydedilmemiş işiniz güvende. Bu bölgeyi yeniden deneyebilirsiniz.`}
         className="h-full"
         action={
           <div className="flex gap-2">
