@@ -12,11 +12,11 @@ node_modules/
 web/ui/dist/
 
 # Proje başına çalıştırma yapılandırması (Faz 2)
-.magent.json
+.imece.json
 
 # Görsel öz-doğrulama çıktıları
 .uishots/
-.magent/
+.imece/
 
 # Claude Code yerel IDE ayarları (makineye özgü mutlak yollar içerir)
 .claude/
@@ -35,7 +35,6 @@ docs/AGENTIC-PLAN.md
 docs/AI-NATIVE-DESIGN.md
 docs/AI-NATIVE-UI-PLAN.md
 docs/BETA-PLAN.md
-docs/CHANGELOG.md
 docs/DESIGN.md
 docs/IDE-PLUS-PLAN.md
 docs/MODELS.md
