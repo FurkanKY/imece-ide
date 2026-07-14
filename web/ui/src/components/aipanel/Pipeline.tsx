@@ -2,11 +2,12 @@
    Bu uygulamayı Cursor'dan ayıran şey ekibin GÖRÜNÜR olması: kim çalışıyor,
    hangi modelle, kaça, ne kadar sürede — an be an. */
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { BrainCircuit, Code2, SearchCheck, Check, X, type LucideIcon } from "lucide-react";
 import { useRun, StageInfo } from "@/state/run";
 import { Role } from "@/bridge";
 import { Badge, StatusDot } from "@/components/ui";
+import { useSettings } from "@/state/settings";
 
 const ROLE_META: Record<Role, { label: string; intent: string; running: string; done: string; Icon: LucideIcon }> = {
   planner: { label: "Planner", intent: "Kapsam", running: "Kapsamı çıkarıyor", done: "Plan hazır", Icon: BrainCircuit },
@@ -19,12 +20,15 @@ function StageNode({ info, routedTo }: { info: StageInfo; routedTo: string }) {
   const running = info.state === "running";
   const done = info.state === "done";
   const error = info.state === "error";
+  const reduceMotion = useReducedMotion();
+  const animationsEnabled = useSettings((s) => s.prefs?.animations ?? true);
+  const pulse = animationsEnabled && !reduceMotion;
 
   return (
     <div className="flex items-center gap-2.5 py-1">
       {/* durum düğümü */}
       <div className="relative flex size-7 shrink-0 items-center justify-center">
-        {running && (
+        {running && pulse && (
           <motion.span
             className="absolute inset-0 rounded-full bg-accent/25"
             animate={{ transform: ["scale(1)", "scale(1.45)", "scale(1)"], opacity: [0.7, 0.15, 0.7] }}
