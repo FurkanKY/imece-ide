@@ -1,7 +1,7 @@
 /* Welcome — projesiz başlangıç yüzeyi. Ürünün vaadini ve AI karar akışını
    ilk bakışta anlatır; dosya açma eylemi ana odak olarak kalır. */
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { FolderOpen, ArrowRight, Bot, Code2, GitPullRequest, Map, ShieldCheck } from "lucide-react";
 import { useWorkspace } from "@/state/workspace";
 import { useSettings } from "@/state/settings";
@@ -20,6 +20,9 @@ export function Welcome() {
   const pickAndOpen = useWorkspace((s) => s.pickAndOpen);
   const openProject = useWorkspace((s) => s.openProject);
   const recent = useSettings((s) => s.prefs?.recentProjects ?? NO_RECENT);
+  const animationsEnabled = useSettings((s) => s.prefs?.animations ?? true);
+  const reduceMotion = useReducedMotion();
+  const animate = animationsEnabled && !reduceMotion;
 
   return (
     <main
@@ -30,7 +33,7 @@ export function Welcome() {
       <motion.div
         initial={{ opacity: 0, transform: "translateY(10px)" }}
         animate={{ opacity: 1, transform: "translateY(0)" }}
-        transition={{ duration: 0.26, ease: [0.23, 1, 0.32, 1] }}
+        transition={{ duration: animate ? 0.26 : 0, ease: [0.23, 1, 0.32, 1] }}
         className="welcome-layout relative grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.82fr)]"
       >
         <section className="min-w-0">
@@ -81,7 +84,7 @@ export function Welcome() {
                     key={p.path}
                     initial={{ opacity: 0, transform: "translateY(6px)" }}
                     animate={{ opacity: 1, transform: "translateY(0)" }}
-                    transition={{ delay: 0.08 + i * 0.05, duration: 0.25 }}
+                    transition={{ delay: animate ? 0.08 + i * 0.05 : 0, duration: animate ? 0.25 : 0 }}
                     onClick={() => void openProject(p.path)}
                     className="material-card pressable group flex items-center gap-2.5 rounded-[var(--r-md)] border border-border-w px-3 py-2 text-left hover:border-border-w2 hover:bg-card2"
                     style={{ boxShadow: "var(--bevel)" }}

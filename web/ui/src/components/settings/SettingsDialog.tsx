@@ -2,7 +2,7 @@
    animasyonlar. settings_panel.py'nin halefi; değişiklik anında uygulanır + kalıcı. */
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X, Check, KeyRound } from "lucide-react";
 import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
@@ -174,6 +174,8 @@ export function SettingsDialog() {
   const setOpen = useUi((s) => s.setSettingsOpen);
   const prefs = useSettings((s) => s.prefs);
   const update = useSettings((s) => s.update);
+  const reduceMotion = useReducedMotion();
+  const animate = (prefs?.animations ?? true) && !reduceMotion;
 
   if (!prefs) return null;
 
@@ -184,7 +186,7 @@ export function SettingsDialog() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: animate ? 0.15 : 0 }}
           className="fixed inset-0 z-[150] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
@@ -195,7 +197,7 @@ export function SettingsDialog() {
             initial={{ opacity: 0, transform: "translateY(10px) scale(0.98)" }}
             animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
             exit={{ opacity: 0, transform: "translateY(6px) scale(0.98)" }}
-            transition={{ duration: 0.18, ease: [0.33, 1, 0.68, 1] }}
+            transition={{ duration: animate ? 0.18 : 0, ease: [0.33, 1, 0.68, 1] }}
             className="material-panel flex max-h-full w-[min(460px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[var(--r-lg)] border border-border-w"
             style={{ boxShadow: "var(--bevel-strong), var(--shadow-3)" }}
             role="dialog"
