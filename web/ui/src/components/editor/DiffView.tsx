@@ -3,7 +3,7 @@
 
 import { useEffect, useRef } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
-import { Columns2, Rows3 } from "lucide-react";
+import { ArrowLeftRight, Columns2, Rows3, X } from "lucide-react";
 import { initMonaco } from "@/lib/monaco";
 import { langForPath } from "@/lib/languages";
 import { useEditor } from "@/state/editor";
@@ -69,22 +69,22 @@ export function DiffTab({ path }: { path: string }) {
       className="flex items-center gap-1.5 border-r border-border-w bg-panel px-3 text-text"
       style={{ fontSize: "var(--t-label)" }}
     >
-      <span className="text-accent" style={{ fontWeight: 700 }}>⇄</span>
-      <span className="max-w-[200px] truncate">Diff: {path.split("/").pop()}</span>
+      <ArrowLeftRight size={13} strokeWidth="var(--icon-stroke)" className="shrink-0 text-accent" />
+      <span className="max-w-[200px] truncate">İnceleme: {path.split("/").pop()}</span>
       <button
         onClick={toggle}
         aria-label={sideBySide ? "Inline görünüme geç" : "Yan-yana görünüme geç"}
         title={sideBySide ? "Inline görünüm" : "Yan-yana görünüm"}
         className="flex size-4 items-center justify-center rounded text-muted hover:bg-card2 hover:text-text"
       >
-        {sideBySide ? <Rows3 size={12} /> : <Columns2 size={12} />}
+        {sideBySide ? <Rows3 size={12} strokeWidth="var(--icon-stroke)" /> : <Columns2 size={12} strokeWidth="var(--icon-stroke)" />}
       </button>
       <button
         onClick={closeDiff}
         aria-label="Diff'i kapat"
         className="flex size-4 items-center justify-center rounded hover:bg-card2"
       >
-        ×
+        <X size={12} strokeWidth="var(--icon-stroke)" />
       </button>
     </div>
   );

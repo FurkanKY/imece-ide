@@ -95,7 +95,7 @@ function Workspace() {
             animate={{ width: sidebarWidth }}
             exit={{ width: 0 }}
             transition={tr}
-            className="shrink-0 overflow-hidden bg-side"
+            className="workspace-sidebar shrink-0 overflow-hidden bg-side"
           >
             <div className="h-full" style={{ width: sidebarWidth }}>
               {view === "explorer" ? (

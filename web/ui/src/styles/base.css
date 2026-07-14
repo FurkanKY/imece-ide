@@ -103,6 +103,14 @@ button svg {
   background: var(--decision-surface);
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent) 42%, transparent);
 }
+/* İnceleme, 1024 px sınıfında merkez diff'i ana çalışma nesnesi tutar. Gezinme
+   kaybolmaz; yalnız genişliği sakin biçimde geri çekilir. 900 px altında mevcut
+   drawer davranışı devreye girer. */
+@media (min-width: 901px) and (max-width: 1150px) {
+  .workspace-review-scene .workspace-sidebar {
+    max-width: 210px;
+  }
+}
 .selectable, input, textarea {
   user-select: text;
   cursor: auto;

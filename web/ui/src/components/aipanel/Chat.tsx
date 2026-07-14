@@ -15,10 +15,10 @@ const STAGE_META: Record<string, { label: string; Icon: typeof Code2 }> = {
 };
 
 function stageStatus(info: StageInfo): { label: string; tone: "neutral" | "accent" | "ok" | "err" } {
-  if (info.state === "running") return { label: "ÇALIŞIYOR", tone: "accent" };
-  if (info.state === "done") return { label: "TAMAMLANDI", tone: "ok" };
-  if (info.state === "error") return { label: "HATA", tone: "err" };
-  return { label: "SIRADA", tone: "neutral" };
+  if (info.state === "running") return { label: "Çalışıyor", tone: "accent" };
+  if (info.state === "done") return { label: "Tamamlandı", tone: "ok" };
+  if (info.state === "error") return { label: "Hata", tone: "err" };
+  return { label: "Sırada", tone: "neutral" };
 }
 
 function fmtCost(v?: number) {
@@ -108,7 +108,7 @@ export function Chat() {
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto p-3">
       <div className="flex items-center gap-1.5 px-1 text-muted" style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
-        <Activity size={12} /> ÇALIŞMA
+        <Activity size={12} /> Çalışma
       </div>
       {flow.map((item) => {
         if (item.kind === "task") {
@@ -145,7 +145,7 @@ export function Chat() {
       {verdict && (
         <span title={verdictNote} className="self-start">
           <Badge tone={verdict === "APPROVED" ? "ok" : "warn"} className="px-2.5 py-1">
-            İNCELEME: {verdict === "APPROVED" ? "ONAYLANDI" : verdict === "NEEDS_FIX" ? "DÜZELTME GEREK" : verdict}
+            {verdict === "APPROVED" ? "İnceleme onaylandı" : verdict === "NEEDS_FIX" ? "İnceleme düzeltme istiyor" : `İnceleme: ${verdict}`}
           </Badge>
         </span>
       )}
