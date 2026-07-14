@@ -17,6 +17,15 @@
   --status: #0d0f12;
   --line: #2b3038;
 
+  /* Sahne rolleri: çalışma görünümünün düz dili ile review anındaki
+     kanıt/karar ilişkisini ayırır. Bileşenler yüzey tonu seçmek yerine
+     bu anlamları kullanır. */
+  --canvas: var(--bg);
+  --work-surface: var(--editor);
+  --review-focus: var(--accent);
+  --evidence-margin: color-mix(in srgb, var(--accent) 34%, transparent);
+  --decision-surface: color-mix(in srgb, var(--side) 97%, var(--accent) 3%);
+
   /* ---- Kenarlar: ASTRYX/Linear tekniği — yarı saydam beyaz ---- */
   --border: rgb(228 232 239 / 9%);
   --border2: rgb(228 232 239 / 16%);
@@ -55,13 +64,13 @@
   /* ---- Radius ---- */
   --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 9px;
-  --r-lg: 12px;
-  --r-xl: 16px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
   --r-pill: 999px;
 
   /* ---- Tipografi (rol → boyut/ağırlık/letter-spacing) ---- */
-  --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Consolas", monospace;
   --t-hero: 30px;    --ls-hero: -0.035em;
   --t-display: 20px; --w-display: 800; --ls-display: 0;
@@ -71,6 +80,7 @@
   --t-caption: 11px; --w-caption: 500; --ls-caption: 0;
   --t-overline: 10px; --w-overline: 800; --ls-overline: 0.14em;
   --t-mono: 11.5px;  --w-mono: 500;
+  --icon-stroke: 1.7;
 
   /* ---- Hareket ---- */
   --dur-press: 120ms;
@@ -103,6 +113,16 @@
   /* ---- Pencere ---- */
   --titlebar-h: 36px; /* kompakt masaüstü IDE yoğunluğu (Phase 3) */
   --window-radius: 8px; /* maximize'da 0'a düşer (.maximized) */
+
+  /* Katman sözleşmesi: içerik < yapışkan araçlar < overlay < dialog < toast. */
+  --z-content: 0;
+  --z-sticky: 20;
+  --z-menu: 120;
+  --z-overlay: 140;
+  --z-dialog: 150;
+  --z-select: 160;
+  --z-tooltip: 170;
+  --z-toast: 200;
 }
 
 /* ---- Accent varyantları (theme.py ACCENTS portu) ---- */
@@ -110,19 +130,19 @@
   --accent: #8aa6c6; --accent2: #7899bb; --accentdim: #213040; --on-accent: #0b121a;
 }
 [data-accent="indigo"] {
-  --accent: #8b8cf0; --accent2: #7a7be6; --accentdim: #2b2c4a; --on-accent: #0c0b26;
+  --accent: #9898c4; --accent2: #8585b5; --accentdim: #292a40; --on-accent: #10111d;
 }
 [data-accent="violet"] {
-  --accent: #b07cf0; --accent2: #9d68e6; --accentdim: #33244d; --on-accent: #180a2b;
+  --accent: #b095c2; --accent2: #9f83b0; --accentdim: #362a3e; --on-accent: #17101a;
 }
 [data-accent="green"] {
-  --accent: #4bd48a; --accent2: #3cc47b; --accentdim: #193a2a; --on-accent: #04180e;
+  --accent: #6bbf93; --accent2: #59ab82; --accentdim: #203b30; --on-accent: #08150e;
 }
 [data-accent="amber"] {
-  --accent: #e9b45a; --accent2: #e0a740; --accentdim: #3a2e18; --on-accent: #241703;
+  --accent: #c7a36b; --accent2: #b79058; --accentdim: #3b301d; --on-accent: #191309;
 }
 [data-accent="rose"] {
-  --accent: #ff7a8a; --accent2: #f0637a; --accentdim: #3d2028; --on-accent: #2b0a12;
+  --accent: #cf8b96; --accent2: #bc7784; --accentdim: #3d262d; --on-accent: #1c0f13;
 }
 
 [data-density="compact"] {
@@ -154,6 +174,11 @@
   --color-err: var(--red);
   --color-warn: var(--amber);
   --color-info: var(--info);
+  --color-canvas: var(--canvas);
+  --color-work-surface: var(--work-surface);
+  --color-review-focus: var(--review-focus);
+  --color-evidence-margin: var(--evidence-margin);
+  --color-decision-surface: var(--decision-surface);
   --color-surface-hover: var(--surface-hover);
   --color-surface-active: var(--surface-active);
   --color-surface-selected: var(--surface-selected);

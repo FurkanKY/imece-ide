@@ -111,7 +111,7 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
         </span>
         {dirChanged && (
           <span
-            className="ml-auto mr-1 size-[5px] shrink-0 rounded-full"
+            className="ml-auto mr-1 h-3 w-[3px] shrink-0 rounded-[1px]"
             style={{ background: "var(--amber)", opacity: 0.8 }}
             title="Bu klasörde git değişikliği var"
           />
@@ -146,7 +146,7 @@ function Row({ entry, depth, deco }: { entry: DirEntry; depth: number; deco: Dec
         <div style={{ paddingLeft: (depth + 1) * INDENT + 6 }}>
           <EmptyState
             title="Bu klasör boş"
-            description="Burada henüz dosya veya klasör yok."
+            description="Henüz içerik yok."
             action={
               <Button size="sm" variant="secondary" icon={FilePlus2} onClick={() => void newFile(entry.rel)}>
                 Yeni Dosya
@@ -208,7 +208,7 @@ export function Explorer() {
             <EmptyState
               icon={FolderOpen}
               title="Klasör yükleniyor"
-              description="Dosya ağacı hazırlanıyor."
+              description="Dosyalar yükleniyor."
               action={<span role="status" aria-label="Klasör yükleniyor"><Spinner size={16} /></span>}
             />
           ) : rootError ? (
@@ -226,7 +226,7 @@ export function Explorer() {
             <EmptyState
               icon={FolderOpen}
               title="Bu klasör boş"
-              description="Yeni bir dosya oluşturabilir veya sağ tıklayarak klasör ekleyebilirsin."
+              description="Yeni dosya veya klasör ekleyin."
               action={
                 <Button size="sm" variant="secondary" icon={FilePlus2} onClick={() => void newFile("")}>
                   Yeni Dosya

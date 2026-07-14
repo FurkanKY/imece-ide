@@ -19,7 +19,7 @@ export function ToastHost() {
   const animate = animationsEnabled && !reduceMotion;
 
   return (
-    <div className="pointer-events-none fixed bottom-9 right-4 z-[200] flex w-[340px] flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-9 right-4 z-[var(--z-toast)] flex w-[340px] flex-col gap-2">
       <AnimatePresence>
         {toasts.map((t) => {
           const { Icon, cls } = ICONS[t.kind];

@@ -19,8 +19,9 @@ pip install -r requirements.txt
 (masaüstü; Python 3.14 gerekliliği), `pywinpty` (entegre terminal, ConPTY),
 `basedpyright` (Python IntelliSense — Node gömülü gelir, ek kurulum istemez).
 
-**Gömülü fontlar:** arayüz Inter (UI) + JetBrains Mono (kod) fontlarını
-`web/ui/public/fonts/` altından yükler (SIL OFL; depoya dahil) — ek kurulum gerekmez.
+**Yazı tipi:** arayüz Windows'ta `Segoe UI Variable` / `Segoe UI` sistem zincirini,
+kod ve sayısal veri için gömülü JetBrains Mono'yu kullanır. Ek kurulum gerekmez.
+Eski `Inter.ttf` repo uyumluluğu için durur fakat arayüz tarafından yüklenmez.
 
 ## 2b. Masaüstü arayüzü (`shell.py`)
 

@@ -57,7 +57,7 @@ export function ExplorerMenu({
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content
-          className="material-panel z-[120] min-w-[210px] rounded-[var(--r-md)] border border-border-w p-1"
+          className="material-panel z-[var(--z-menu)] min-w-[210px] rounded-[var(--r-md)] border border-border-w p-1"
           style={{ boxShadow: "var(--bevel-strong), var(--shadow-2)" }}
         >
           <Item Icon={FilePlus2} label="Yeni Dosya" onSelect={() => void ws.newFile(dirTarget)} />

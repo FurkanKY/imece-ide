@@ -1,13 +1,9 @@
 @import "tailwindcss";
 @import "./tokens.css";
 
-/* ---- Gömülü fontlar (assets/fonts kopyası → public/fonts) ---- */
-@font-face {
-  font-family: "Inter";
-  src: url("/fonts/Inter.ttf") format("truetype-variations");
-  font-weight: 100 900;
-  font-display: block;
-}
+/* ---- Gömülü fontlar ----
+   UI, Windows'ta Segoe UI Variable ile işletim sisteminin doğal metriklerini
+   kullanır. JetBrains Mono yalnız kod ve ölçü verisi için paketlenir. */
 @font-face {
   font-family: "JetBrains Mono";
   src: url("/fonts/JetBrainsMono.ttf") format("truetype-variations");
@@ -28,12 +24,16 @@ body {
   font-weight: var(--w-body);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: "cv01" on, "ss03" on, "zero" on; /* Inter — Linear reçetesi */
+  font-kerning: normal;
   user-select: none; /* masaüstü hissi: metin seçimi yalnız içerik alanlarında */
   cursor: default;
 }
 button {
   font: inherit;
+}
+button svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .pressable {
   transition: transform var(--dur-press) var(--ease-out),
@@ -93,14 +93,14 @@ button {
   background: var(--panel);
 }
 .workspace-review-scene .review-diff-canvas {
-  border-top: 2px solid var(--accent);
+  border-top: 2px solid var(--review-focus);
   box-shadow: inset 0 -1px 0 var(--border);
 }
 .workspace-review-scene .workspace-ai-splitter {
-  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: var(--evidence-margin);
 }
 .workspace-review-scene .workspace-ai-panel {
-  background: color-mix(in srgb, var(--side) 97%, var(--accent) 3%);
+  background: var(--decision-surface);
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent) 42%, transparent);
 }
 .selectable, input, textarea {
@@ -136,7 +136,7 @@ button {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text) 14%, transparent);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-xs);
   border: 2px solid transparent;
   background-clip: padding-box;
 }

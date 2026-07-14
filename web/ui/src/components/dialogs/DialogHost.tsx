@@ -62,7 +62,7 @@ export function DialogHost() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: animate ? 0.12 : 0 }}
-        className="fixed inset-0 z-[150] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
+        className="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center overflow-y-auto bg-black/50 p-4"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) cancel();
         }}
