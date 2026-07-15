@@ -9,6 +9,7 @@ hangi modeli kullanacağını dışarıdan (arayüzden) seçebiliyoruz. Bu, #4
 """
 
 from adapters import PROVIDERS, LLMResponse
+import providers as _providers  # noqa: F401 — import yan etkisi: kataloğu PROVIDERS'a yansıtır
 
 # Her rolün talimatı (system prompt). Modeli sabit DEĞİL — çalışırken atanır.
 ROLE_PROMPTS = {

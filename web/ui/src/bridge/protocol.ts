@@ -119,16 +119,33 @@ export interface Api {
   "exec.approveCommand": { params: { rel?: string | null; command?: string }; result: {} };
   "exec.setCommand": { params: { command: string }; result: {} };
 
-  // ---- keys (beta onboarding — API anahtarları) ----
-  /** anahtarlar UI'a dönmez; yalnız ok + maske. claude = CLI varlık kontrolü */
+  // ---- keys (API anahtarları — sağlayıcı kataloğundan) ----
+  /** anahtarlar UI'a dönmez; yalnız ok + maske. kind=cli → PATH varlık kontrolü */
   "keys.status": {
     params: {};
-    result: {
-      providers: Record<string, { ok: boolean; masked?: string; detail?: string }>;
-      envPath: string;
-    };
+    result: { providers: Record<string, ProviderInfo>; envPath: string };
   };
-  "keys.set": { params: { deepseek?: string; gemini?: string }; result: {} };
+  /** { sağlayıcıId: anahtar } — yalnız katalogda anahtar isteyen id'ler kabul edilir */
+  "keys.set": { params: Record<string, string>; result: {} };
+  /** ucuz canlı doğrulama (GET /models); key verilirse kaydetmeden dener.
+      code: "" | "auth" | "network" | "http" */
+  "keys.test": {
+    params: { provider: string; key?: string };
+    result: { ok: boolean; code: string; detail: string };
+  };
+
+  // ---- providers (sağlayıcı kataloğu — v0.4) ----
+  "providers.list": {
+    params: {};
+    result: { providers: ProviderInfo[]; defaultRouting: Routing };
+  };
+  "providers.setModel": { params: { provider: string; model: string }; result: {} };
+  /** özel OpenAI-uyumlu uç; id katalogla çakışamaz */
+  "providers.addCustom": {
+    params: { id: string; label: string; baseUrl: string; model: string };
+    result: { provider: ProviderInfo };
+  };
+  "providers.removeCustom": { params: { provider: string }; result: {} };
 
   // ---- lsp (P7 — Python dil sunucusu, basedpyright) ----
   "lsp.start": { params: {}; result: { running: boolean; ready: boolean } };
@@ -224,6 +241,25 @@ export interface SearchMatch {
 
 export type Role = "planner" | "coder" | "reviewer";
 export type Routing = Record<Role, string>;
+
+/** sağlayıcı kataloğu girdisi (keys.status + providers.list ortak şekli).
+    Anahtar değeri hiçbir alanda taşınmaz. */
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  kind: "openai" | "cli";
+  custom: boolean;
+  ok: boolean;
+  docsUrl: string;
+  /** kind=cli: bulunan yol veya "bulunamadı" açıklaması */
+  detail?: string;
+  /** kind=openai */
+  model?: string;
+  models?: string[];
+  keyHint?: string;
+  keyless?: boolean;
+  masked?: string;
+}
 
 export interface HistoryItem {
   ts: number;

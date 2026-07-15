@@ -27,10 +27,12 @@ cd web/ui && npm ci && npm run build && cd ../..
 python shell.py
 ```
 
-DeepSeek/Gemini anahtarınızı yerel `.env` dosyasına ekleyin; Claude için
-[Claude Code CLI](https://claude.com/claude-code) ayrıca kurulu olmalıdır.
-Bir proje klasörü açın, görevi yazın, önerilen diff'i inceleyin, ardından
-Uygula veya Vazgeç seçin.
+Ayarlar → Model sağlayıcıları'ndan bir sağlayıcı seçip API anahtarını
+yapıştırın — katalog DeepSeek, Gemini, OpenAI, Mistral, Groq, xAI, Qwen,
+Moonshot, OpenRouter, Ollama ve özel OpenAI-uyumlu uçları kapsar.
+[Claude Code](https://claude.com/claude-code) gibi ajan CLI'ları anahtar
+istemez; kuruluysa otomatik algılanır. Sonra bir proje klasörü açın, görevi
+yazın, önerilen diff'i inceleyin, ardından Uygula veya Vazgeç seçin.
 
 Telemetri yoktur; anahtarlar makinenizde kalır ve her AI koşusu yerel
 değişiklik makbuzu üretir. Windows paketi PyInstaller ile derlenebilir

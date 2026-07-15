@@ -54,9 +54,24 @@ a mock bridge) plus `python shell.py --dev` (the real bridge inside the
 embedded window). Visual verification: `node tools/webshot.mjs` →
 `.uishots/*.png`.
 
-## 4. API keys (source development)
+## 4. Providers and API keys
 
-Copy `.env.example` to `.env` and fill it in:
+The recommended flow is in-app: **Settings → Model providers → Add provider →
+paste your key → "Test & save"**. The catalog ships with DeepSeek, Gemini,
+OpenAI, Mistral, Groq, xAI, Qwen, Moonshot, OpenRouter and Ollama, plus a
+"Custom (OpenAI-compatible)" entry for any other endpoint that speaks
+`POST {base_url}/chat/completions` (self-hosted included). Agent CLIs
+(Claude Code, Gemini CLI, Codex CLI, Qwen Code) need no key — install them,
+log in with their own account flow, and the Settings list shows whether each
+one was found on `PATH`.
+
+Keys are stored per provider: in source mode they are written to the local
+git-ignored `.env`; in the packaged Windows app they go to a DPAPI-encrypted
+store bound to your Windows account (legacy plain-text `.env` keys are
+migrated and cleared on the first Settings status check).
+
+Editing `.env` by hand also works — each catalog provider reads a fixed pair
+of variables:
 
 ```ini
 DEEPSEEK_API_KEY=sk-...
@@ -68,14 +83,15 @@ GEMINI_MODEL=gemini-2.5-flash       # any model your account can use
 CLAUDE_CLI=claude                   # no key for Claude — just the CLI name
 ```
 
+The same pattern applies to the rest of the catalog (`OPENAI_API_KEY`,
+`MISTRAL_API_KEY`, `GROQ_API_KEY`, `XAI_API_KEY`, `DASHSCOPE_API_KEY`,
+`MOONSHOT_API_KEY`, `OPENROUTER_API_KEY`; Ollama needs no key). A model
+picked in Settings overrides the `*_MODEL` variable.
+
 > Model names must be real names your provider accepts. Check your provider's
 > current documentation for available models and quota limits.
 
-`.env` is git-ignored — never commit or share it. This flow is for source
-development only. In the packaged Windows app, enter keys in Settings instead:
-Windows DPAPI stores them encrypted for the current user account, and any
-legacy plain-text `.env` keys are migrated and cleared on the first Settings
-status check.
+`.env` is git-ignored — never commit or share it.
 
 ## 5. Verify
 

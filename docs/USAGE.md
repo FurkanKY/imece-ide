@@ -123,6 +123,17 @@ programs all work. Opens at the project root, UTF-8.
 Gear icon or `Ctrl+K` → "Settings": accent color (applied live), density,
 Enter behavior, animations. Motion respects the OS reduced-motion preference.
 
+**Model providers** live in the same dialog. The list shows every provider
+you have configured, with a status dot, a model picker and a key field —
+"Test & save" validates the key with a cheap live request before storing it.
+**Add provider** opens the catalog (DeepSeek, Gemini, OpenAI, Mistral, Groq,
+xAI, Qwen, Moonshot, OpenRouter, Ollama); pick one, paste its key, done.
+Agent CLIs (Claude Code, Gemini CLI, Codex CLI, Qwen Code) show whether they
+were found on `PATH` instead of a key field. The last catalog entry,
+"Custom (OpenAI-compatible)", accepts any endpoint that speaks
+`/chat/completions` — id, display name, base URL and model. Once a provider
+is ready it appears in the Planner/Coder/Reviewer dropdowns.
+
 ---
 
 ## Web interface — generate from scratch
@@ -151,7 +162,9 @@ is saved to `output/result.py`, and totals (time/tokens/cost) are shown.
 
 ## Changing roles and models
 
-- From the UI: the Planner/Coder/Reviewer dropdowns.
+- From the UI: the Planner/Coder/Reviewer dropdowns (fed by the provider
+  catalog — any provider with a valid key or detected CLI is selectable).
+- Per-provider model: Settings → Model providers → model picker.
 - Permanently in code: `DEFAULT_ROUTING` in `agents.py`.
 - To change a role's instructions: `ROLE_PROMPTS` in `agents.py`.
 

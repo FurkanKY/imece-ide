@@ -13,7 +13,7 @@ The system is made of three layers:
 │                 → generators that yield events                   │
 ├──────────────────────────────────────────────────────────────────┤
 │  AGENTS         agents.py (roles + routing)                      │
-│  ADAPTERS       adapters.py (claude / deepseek / gemini)         │
+│  ADAPTERS       adapters.py + providers.py (catalog/registry)    │
 │  TOOLS          project.py (list/read/diff/apply files)          │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -25,15 +25,12 @@ unchanged under every interface.
 
 ---
 
-## Layer 1 — Adapters (`adapters.py`)
+## Layer 1 — Adapters (`adapters.py` + `providers.py`)
 
-The three models speak different protocols (Claude is a CLI, DeepSeek/Gemini
-are web APIs). The adapters reduce all of them to **one shared signature**:
+Every provider is reduced to **one shared signature**:
 
 ```python
-call_claude(system_prompt, user_prompt)   -> LLMResponse
-call_deepseek(system_prompt, user_prompt) -> LLMResponse
-call_gemini(system_prompt, user_prompt)   -> LLMResponse
+fn(system_prompt, user_prompt) -> LLMResponse
 ```
 
 `LLMResponse` carries not just the text but **observability** data:
@@ -50,16 +47,27 @@ class LLMResponse:
     cost_usd: float
 ```
 
-- **Claude:** `claude -p <prompt> --output-format json` runs as a subprocess;
-  `result`, `total_cost_usd` and `usage.input/output_tokens` are read from the
-  JSON. Uses a Claude subscription — no API key.
-- **DeepSeek:** OpenAI-compatible `POST /chat/completions`. Cost is estimated
-  from the `PRICING` table.
-- **Gemini:** `POST .../models/{model}:generateContent`. Tokens come from
-  `usageMetadata`.
+There are two adapter families:
 
-`PROVIDERS = {"claude": ..., "deepseek": ..., "gemini": ...}` provides access
-by name.
+- **OpenAI-compatible APIs** — a single generic function,
+  `call_openai_compat(...)`, drives every hosted or local provider that
+  speaks `POST {base_url}/chat/completions` (DeepSeek, Gemini via Google's
+  OpenAI-compatible endpoint, OpenAI, Mistral, Groq, xAI, Qwen, Moonshot,
+  OpenRouter, Ollama, user-defined custom endpoints). What differs per
+  provider is only configuration: base URL, model, key env var, price table.
+- **Agent CLIs** — thin subprocess wrappers following the Claude Code
+  pattern (headless prompt in, JSON out): `call_claude`, `call_gemini_cli`,
+  `call_codex_cli`, `call_qwen_code`. Claude reads `result`,
+  `total_cost_usd` and `usage.*` from the CLI's JSON; the others parse their
+  own JSON shapes tolerantly. CLIs use their own login — no API key.
+
+**`providers.py` is the catalog + registry.** `CATALOG` holds the built-in
+provider definitions as data; user choices (model per provider, custom
+OpenAI-compatible endpoints) live in `providers.json` under the app data
+directory. `refresh()` projects the catalog into `adapters.PROVIDERS`
+(`{"claude": fn, "deepseek": fn, ...}`), which stays the backward-compatible
+lookup used by the agents layer. Adding a hosted provider is therefore a
+catalog entry, not a new adapter.
 
 ## Layer 2 — Agents (`agents.py`)
 
@@ -156,7 +164,7 @@ web/ui/  (React 19 + TS + Vite + Tailwind v4)      webhost/  (PySide6 host)
 handlers register with `@handler("domain.method")`; long jobs run on QThreads
 and resolve via signals. Domains: `window · app · settings · project · fs ·
 session · run · terminal · history · search · scm · lsp · exec · debug ·
-checkpoint · keys`. `api/scm.py` wraps git CLI subprocesses for
+checkpoint · keys · providers`. `api/scm.py` wraps git CLI subprocesses for
 status/diff/stage/unstage/discard/commit (UTF-8, `stdin=DEVNULL`); line diffs
 open in the center Monaco diff.
 

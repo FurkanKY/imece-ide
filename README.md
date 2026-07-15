@@ -18,8 +18,10 @@ checkpoints with undo, and a persistent change receipt for every AI run.
 
 1. Open a local project folder and describe a task.
 2. The Planner scopes the change, the Coder writes it, the Reviewer checks it —
-   each role can run on a different provider (Claude, DeepSeek or Gemini), with
-   per-step latency, token and cost metrics.
+   each role can run on a different provider from the built-in catalog
+   (DeepSeek, Gemini, OpenAI, Mistral, Groq, xAI, Qwen, Moonshot, OpenRouter,
+   Ollama, any custom OpenAI-compatible endpoint, or an agent CLI such as
+   Claude Code), with per-step latency, token and cost metrics.
 3. You inspect the proposed diff file by file, then **Apply** or **Reject**.
    Applying takes a checkpoint first, so one click undoes it.
 4. Every run leaves a change receipt: task, plan, diff, verdict, cost, and
@@ -38,11 +40,13 @@ cd web/ui && npm ci && npm run build && cd ../..
 python shell.py
 ```
 
-Add a DeepSeek and/or Gemini API key to a local `.env` file (see
-[SETUP.md](docs/SETUP.md)); using Claude requires a separately installed
-[Claude Code CLI](https://claude.com/claude-code). Then open a project
-folder, describe a task, inspect the suggested diff, and choose Apply or
-Reject.
+Pick a provider in Settings → Model providers and paste its API key (the
+catalog covers DeepSeek, Gemini, OpenAI, Mistral, Groq, xAI, Qwen, Moonshot,
+OpenRouter, Ollama and custom OpenAI-compatible endpoints; see
+[SETUP.md](docs/SETUP.md)). Agent CLIs such as
+[Claude Code](https://claude.com/claude-code) need no key — install them and
+they are detected automatically. Then open a project folder, describe a task,
+inspect the suggested diff, and choose Apply or Reject.
 
 > **Language note:** the application UI is currently Turkish. An English UI is
 > planned; all documentation is in English.

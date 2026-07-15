@@ -3,13 +3,14 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { X, Check, KeyRound } from "lucide-react";
+import { X, Check, KeyRound, Plus, Trash2, Terminal } from "lucide-react";
 import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
 import { useKeys } from "@/state/keys";
-import { Prefs } from "@/bridge";
+import { Prefs, ProviderInfo } from "@/bridge";
 import { Logo } from "@/components/brand/Logo";
 import { Button, StatusDot } from "@/components/ui";
+import { Select } from "@/components/ui/Select";
 import { toast } from "@/components/toasts/toasts";
 
 const ACCENTS: { id: Prefs["accent"]; color: string }[] = [
@@ -93,77 +94,244 @@ function Segmented<T extends string>({ value, options, onChange }: {
   );
 }
 
-/** beta onboarding: anahtar durumu + kayıt. Anahtar geri OKUNMAZ — yalnız maske. */
-function KeyRow({ name, label, placeholder }: { name: "deepseek" | "gemini"; label: string; placeholder: string }) {
-  const status = useKeys((s) => s.providers[name]);
+/** Kataloğun varsayılan olarak listede duran üyeleri (klasik üçlü). */
+const DEFAULT_VISIBLE = new Set(["claude", "deepseek", "gemini"]);
+
+/** API sağlayıcısı kartı: durum + model seçimi + anahtar girişi (test ederek kaydet).
+    Anahtar geri OKUNMAZ — yalnız maske. */
+function ApiProviderCard({ p }: { p: ProviderInfo }) {
   const save = useKeys((s) => s.save);
+  const test = useKeys((s) => s.test);
+  const setModel = useKeys((s) => s.setModel);
+  const removeCustom = useKeys((s) => s.removeCustom);
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const saveKey = async () => {
+    const key = val.trim();
+    setBusy(true);
+    try {
+      const t = await test(p.id, key);
+      if (!t.ok && t.code === "auth") {
+        toast.err(`${p.label}: ${t.detail}`);
+        return;
+      }
+      await save({ [p.id]: key });
+      setVal("");
+      if (t.ok) toast.ok(`${p.label} anahtarı doğrulandı ve kaydedildi.`);
+      else toast.info(`${p.label} anahtarı kaydedildi; uç noktaya şu an erişilemedi.`);
+    } catch (e) {
+      toast.err(e instanceof Error ? e.message : "Anahtar kaydedilemedi.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2 py-1.5">
-      <span className="flex w-24 shrink-0 items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)" }}>
-        <StatusDot tone={status?.ok ? "ok" : "warn"} /> {label}
-      </span>
-      <input
-        type="password"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        placeholder={status?.ok ? `kayıtlı (${status.masked}). Değiştirmek için yaz` : placeholder}
-        aria-label={`${label} API anahtarı`}
-        autoComplete="off"
-        spellCheck={false}
-        className="selectable min-w-0 flex-1 rounded-[var(--r-sm)] border border-border-w2 bg-field px-2.5 py-1.5 text-text outline-none placeholder:text-faint focus:border-accent"
-        style={{ fontSize: "var(--t-caption)", fontFamily: "var(--font-mono)" }}
-      />
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={busy}
-        disabled={!val.trim()}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await save({ [name]: val.trim() });
-            setVal("");
-            toast.ok(`${label} anahtarı kaydedildi.`);
-          } catch (e) {
-            toast.err(e instanceof Error ? e.message : "Anahtar kaydedilemedi.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        Kaydet
-      </Button>
+    <div className="py-1.5">
+      <div className="flex items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)" }}>
+          <StatusDot tone={p.ok ? "ok" : "warn"} />
+          <span className="truncate">{p.label}</span>
+        </span>
+        {p.models && p.models.length > 1 && p.model && (
+          <div className="w-44 shrink-0">
+            <Select
+              value={p.model}
+              options={p.models}
+              onChange={(m) => {
+                void setModel(p.id, m).then(
+                  () => toast.ok(`${p.label} modeli: ${m}`),
+                  () => toast.err("Model kaydedilemedi."),
+                );
+              }}
+              ariaLabel={`${p.label} modeli`}
+            />
+          </div>
+        )}
+        {p.custom && (
+          <button
+            aria-label={`${p.label} sağlayıcısını kaldır`}
+            title="Kaldır"
+            className="icon-btn size-6 shrink-0 text-muted hover:text-err"
+            onClick={() => {
+              void removeCustom(p.id).then(
+                () => toast.ok(`${p.label} kaldırıldı.`),
+                () => toast.err("Sağlayıcı kaldırılamadı."),
+              );
+            }}
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+      {p.keyless ? (
+        <div className="mt-1 pl-4 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+          {p.ok ? "Yerel sunucu çalışıyor — anahtar gerekmez." : "Yerel sunucuya erişilemiyor (varsayılan: 127.0.0.1:11434)."}
+        </div>
+      ) : (
+        <div className="mt-1 flex items-center gap-2 pl-4">
+          <input
+            type="password"
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            placeholder={p.ok ? `kayıtlı (${p.masked}). Değiştirmek için yaz` : p.keyHint || "API anahtarı"}
+            aria-label={`${p.label} API anahtarı`}
+            autoComplete="off"
+            spellCheck={false}
+            className="selectable min-w-0 flex-1 rounded-[var(--r-sm)] border border-border-w2 bg-field px-2.5 py-1.5 text-text outline-none placeholder:text-faint focus:border-accent"
+            style={{ fontSize: "var(--t-caption)", fontFamily: "var(--font-mono)" }}
+          />
+          <Button size="sm" variant="secondary" loading={busy} disabled={!val.trim()} onClick={() => void saveKey()}>
+            Test et ve kaydet
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-function ApiKeysSection() {
-  const claude = useKeys((s) => s.providers.claude);
+/** Ajan CLI'sı satırı: PATH tespiti — anahtar yerine kurulum durumu. */
+function CliProviderRow({ p }: { p: ProviderInfo }) {
+  return (
+    <div className="flex items-center gap-2 py-1.5">
+      <span className="flex w-32 shrink-0 items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)" }}>
+        <StatusDot tone={p.ok ? "ok" : "warn"} />
+        <Terminal size={11} className="shrink-0 text-muted" />
+        <span className="truncate">{p.label}</span>
+      </span>
+      <span className="min-w-0 flex-1 truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
+        {p.ok ? `hazır (${p.detail})` : `${p.detail} — ${p.docsUrl.replace("https://", "")}`}
+      </span>
+    </div>
+  );
+}
+
+/** Özel OpenAI-uyumlu uç formu. */
+function CustomProviderForm({ onDone }: { onDone: () => void }) {
+  const addCustom = useKeys((s) => s.addCustom);
+  const [form, setForm] = useState({ id: "", label: "", baseUrl: "", model: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const ready = form.id.trim() && form.label.trim() && form.baseUrl.trim().startsWith("http") && form.model.trim();
+  const fields: { k: keyof typeof form; ph: string }[] = [
+    { k: "id", ph: "kısa id (ör. sirket-llm)" },
+    { k: "label", ph: "görünen ad" },
+    { k: "baseUrl", ph: "base URL (ör. https://llm.example.com/v1)" },
+    { k: "model", ph: "model adı" },
+  ];
+  return (
+    <div className="mt-1 flex flex-col gap-1.5 rounded-[var(--r-md)] border border-border-w bg-field/40 p-2">
+      {fields.map(({ k, ph }) => (
+        <input
+          key={k}
+          value={form[k]}
+          onChange={set(k)}
+          placeholder={ph}
+          aria-label={ph}
+          autoComplete="off"
+          spellCheck={false}
+          className="selectable rounded-[var(--r-sm)] border border-border-w2 bg-field px-2.5 py-1.5 text-text outline-none placeholder:text-faint focus:border-accent"
+          style={{ fontSize: "var(--t-caption)", fontFamily: "var(--font-mono)" }}
+        />
+      ))}
+      <div className="flex justify-end gap-1.5">
+        <Button size="sm" variant="ghost" onClick={onDone}>Vazgeç</Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={busy}
+          disabled={!ready}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await addCustom({ id: form.id.trim(), label: form.label.trim(), baseUrl: form.baseUrl.trim(), model: form.model.trim() });
+              toast.ok(`${form.label.trim()} eklendi. Şimdi anahtarını girin.`);
+              onDone();
+            } catch (e) {
+              toast.err(e instanceof Error ? e.message : "Sağlayıcı eklenemedi.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Ekle
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProvidersSection() {
+  const providers = useKeys((s) => s.providers);
   const load = useKeys((s) => s.load);
   const loaded = useKeys((s) => s.loaded);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  // katalogdan bu oturumda eklenenler anahtar girilene kadar listede kalsın
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!loaded) void load();
   }, [loaded, load]);
+
+  const all = Object.values(providers);
+  const visible = all.filter((p) => p.ok || p.masked || p.custom || DEFAULT_VISIBLE.has(p.id) || pinned.has(p.id));
+  const addable = all.filter((p) => !visible.includes(p));
+
   return (
     <div className="py-2.5">
-      <div className="mb-1 flex items-center gap-1.5 text-muted"
-           style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
-        <KeyRound size={11} /> API anahtarları
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-muted"
+             style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
+          <KeyRound size={11} /> Model sağlayıcıları
+        </div>
+        <button
+          onClick={() => { setPickerOpen((v) => !v); setCustomOpen(false); }}
+          className="pressable flex items-center gap-1 rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-1 text-text2 hover:border-border-w2"
+          style={{ fontSize: "var(--t-caption)" }}
+        >
+          <Plus size={11} /> Sağlayıcı ekle
+        </button>
       </div>
-      <div className="flex items-center gap-2 py-1.5">
-        <span className="flex w-24 shrink-0 items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)" }}>
-          <StatusDot tone={claude?.ok ? "ok" : "err"} /> Claude
-        </span>
-        <span className="min-w-0 flex-1 truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
-          {claude?.ok ? `Claude Code CLI hazır (${claude.detail})` : "Claude Code CLI PATH'te bulunamadı. Kurulum: claude.com/claude-code"}
-        </span>
-      </div>
-      <KeyRow name="deepseek" label="DeepSeek" placeholder="sk-…  (platform.deepseek.com)" />
-      <KeyRow name="gemini" label="Gemini" placeholder="AIza…  (aistudio.google.com/apikey)" />
+
+      {pickerOpen && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5 rounded-[var(--r-md)] border border-border-w bg-field/40 p-2">
+          {addable.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                setPinned((s) => new Set(s).add(p.id));
+                setPickerOpen(false);
+              }}
+              className="pressable flex items-center gap-1.5 rounded-[var(--r-pill)] border border-border-w bg-field px-2.5 py-1 text-text2 hover:border-accent hover:text-text"
+              style={{ fontSize: "var(--t-caption)" }}
+            >
+              {p.kind === "cli" && <Terminal size={10} className="text-muted" />}
+              {p.label}
+            </button>
+          ))}
+          <button
+            onClick={() => { setCustomOpen(true); setPickerOpen(false); }}
+            className="pressable flex items-center gap-1.5 rounded-[var(--r-pill)] border border-dashed border-border-w2 bg-transparent px-2.5 py-1 text-muted hover:border-accent hover:text-text"
+            style={{ fontSize: "var(--t-caption)" }}
+          >
+            <Plus size={10} /> Özel (OpenAI-uyumlu)…
+          </button>
+        </div>
+      )}
+      {customOpen && <CustomProviderForm onDone={() => setCustomOpen(false)} />}
+
+      {visible.filter((p) => p.kind === "openai").map((p) => (
+        <ApiProviderCard key={p.id} p={p} />
+      ))}
+      {visible.filter((p) => p.kind === "cli").map((p) => (
+        <CliProviderRow key={p.id} p={p} />
+      ))}
+
       <p className="mt-1 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-        Paketli Windows sürümünde anahtarlar Windows hesabınıza bağlı şifreli depoda tutulur; hiçbir yere gönderilmez ve arayüze geri okunmaz.
+        Anahtarlar makinenizde kalır: kaynak modda yerel .env, paketli Windows sürümünde
+        Windows hesabınıza bağlı şifreli depo. Hiçbir yere gönderilmez ve arayüze geri okunmaz.
       </p>
     </div>
   );
@@ -288,7 +456,7 @@ export function SettingsDialog() {
                 />
               </Row>
 
-              <ApiKeysSection />
+              <ProvidersSection />
             </div>
           </motion.div>
         </motion.div>

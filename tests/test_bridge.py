@@ -100,6 +100,56 @@ def test_run_providers(bridge):
     assert r["result"]["defaultRouting"]["coder"] == "deepseek"
 
 
+def test_providers_list_contract(bridge, tmp_path, monkeypatch):
+    import providers
+    import webhost.api.providers  # noqa: F401 — handler kaydı
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    r = rpc(bridge, "providers.list")
+    assert r["ok"]
+    by_id = {p["id"]: p for p in r["result"]["providers"]}
+    assert by_id["deepseek"]["kind"] == "openai"
+    assert by_id["claude"]["kind"] == "cli"
+    assert "model" in by_id["gemini"] and "models" in by_id["gemini"]
+    assert r["result"]["defaultRouting"]["planner"] == "claude"
+
+
+def test_providers_custom_roundtrip(bridge, tmp_path, monkeypatch):
+    import providers
+    import webhost.api.providers  # noqa: F401
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    r = rpc(bridge, "providers.addCustom", {
+        "id": "sirket", "label": "Şirket LLM",
+        "baseUrl": "https://llm.example.com/v1", "model": "ic-model",
+    })
+    assert r["ok"] and r["result"]["provider"]["custom"] is True
+    r = rpc(bridge, "providers.addCustom", {"id": "sirket", "label": "x",
+                                            "baseUrl": "https://a", "model": "m"})
+    assert r["ok"] is False and r["error"]["code"] == "invalid"
+    r = rpc(bridge, "providers.setModel", {"provider": "sirket", "model": "yeni-model"})
+    assert r["ok"]
+    r = rpc(bridge, "providers.removeCustom", {"provider": "sirket"})
+    assert r["ok"]
+    r = rpc(bridge, "providers.removeCustom", {"provider": "sirket"})
+    assert r["ok"] is False and r["error"]["code"] == "unknown_provider"
+    providers.refresh()
+
+
+def test_keys_status_covers_catalog(bridge, tmp_path, monkeypatch):
+    import providers
+    import webhost.api.keys  # noqa: F401 — handler kaydı
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-uzun-test-anahtari")  # gitleaks:allow
+    r = rpc(bridge, "keys.status")
+    assert r["ok"]
+    provs = r["result"]["providers"]
+    assert provs["deepseek"]["ok"] is True
+    assert provs["deepseek"]["masked"].endswith(provs["deepseek"]["masked"][-4:])
+    assert "sk-uzun" not in json.dumps(provs)  # anahtar asla köprüden dönmez
+    assert provs["claude"]["kind"] == "cli"
+    r = rpc(bridge, "keys.test", {"provider": "boyle-biri-yok"})
+    assert r["ok"] is False and r["error"]["code"] == "unknown_provider"
+
+
 def test_run_and_history_require_project(bridge):
     import webhost.api.run      # noqa: F401
     import webhost.api.history  # noqa: F401

@@ -49,6 +49,11 @@ def prefs_path() -> Path:
     return app_data_dir() / "prefs.json"
 
 
+def providers_config_path() -> Path:
+    """Kullanıcının sağlayıcı seçimleri (model tercihi + özel uçlar)."""
+    return app_data_dir() / "providers.json"
+
+
 def log_path() -> Path:
     return app_data_dir() / "logs" / "app.log"
 

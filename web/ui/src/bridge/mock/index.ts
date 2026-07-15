@@ -1,7 +1,7 @@
 /* mock — düz tarayıcıda geliştirme + görsel doğrulama için sahte host.
    Senaryo seçimi: ?scenario=empty|project|running|result|error (P2'de fixtures/run.ts genişler). */
 
-import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ScmChange } from "../protocol";
+import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ProviderInfo, ScmChange } from "../protocol";
 import * as vfs from "./vfs";
 import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
 
@@ -52,6 +52,46 @@ export class MockBridge implements Bridge {
 
   get scenario(): string {
     return new URLSearchParams(location.search).get("scenario") ?? "empty";
+  }
+
+  private mockKeys(): Record<string, string> {
+    try {
+      return JSON.parse(localStorage.getItem("imece.mock.keys") ?? "{}");
+    } catch {
+      return {};
+    }
+  }
+
+  /** sahte sağlayıcı kataloğu — gerçek providers.py kataloğunun küçük aynası */
+  private mockProviders(): ProviderInfo[] {
+    const keys = this.mockKeys();
+    const models = JSON.parse(localStorage.getItem("imece.mock.models") ?? "{}");
+    const api = (id: string, label: string, model: string, list: string[], hint: string): ProviderInfo => ({
+      id, label, kind: "openai", custom: false, ok: !!keys[id],
+      docsUrl: "https://example.com", model: models[id] ?? model, models: list,
+      keyHint: hint, keyless: false,
+      masked: keys[id] ? "•••• " + keys[id].slice(-4) : "",
+    });
+    const out: ProviderInfo[] = [
+      { id: "claude", label: "Claude Code", kind: "cli", custom: false, ok: true, docsUrl: "https://claude.com/claude-code", detail: "C:\\mock\\claude.exe" },
+      api("deepseek", "DeepSeek", "deepseek-chat", ["deepseek-chat", "deepseek-reasoner"], "sk-…"),
+      api("gemini", "Gemini", "gemini-2.5-flash", ["gemini-2.5-flash", "gemini-3.1-pro-preview"], "AIza…"),
+      api("openai", "OpenAI", "gpt-5.1", ["gpt-5.1", "gpt-5.1-mini"], "sk-…"),
+      api("mistral", "Mistral", "mistral-large-latest", ["mistral-large-latest"], "…"),
+      api("openrouter", "OpenRouter", "openrouter/auto", ["openrouter/auto"], "sk-or-…"),
+      { id: "ollama", label: "Ollama (yerel)", kind: "openai", custom: false, ok: false, docsUrl: "https://ollama.com", model: "qwen2.5-coder", models: ["qwen2.5-coder"], keyHint: "", keyless: true, masked: "" },
+      { id: "gemini-cli", label: "Gemini CLI", kind: "cli", custom: false, ok: false, docsUrl: "https://github.com/google-gemini/gemini-cli", detail: "'gemini' PATH'te bulunamadı" },
+      { id: "codex-cli", label: "Codex CLI", kind: "cli", custom: false, ok: false, docsUrl: "https://github.com/openai/codex", detail: "'codex' PATH'te bulunamadı" },
+    ];
+    const custom = JSON.parse(localStorage.getItem("imece.mock.custom") ?? "[]");
+    for (const c of custom) {
+      out.push({
+        id: c.id, label: c.label, kind: "openai", custom: true, ok: !!keys[c.id],
+        docsUrl: "", model: models[c.id] ?? c.model, models: [c.model],
+        keyHint: "", keyless: false, masked: keys[c.id] ? "•••• " + keys[c.id].slice(-4) : "",
+      });
+    }
+    return out;
   }
 
   private emit<C extends keyof Events>(channel: C, payload: Events[C]) {
@@ -175,23 +215,50 @@ export class MockBridge implements Bridge {
         console.warn("[app.log:" + p.level + "]", p.message, p.stack ?? "");
         return { logPath: "C:/mock/app.log" } as R;
       }
-      // ---- keys (beta onboarding): sahte anahtar durumu ----
+      // ---- keys + providers (sağlayıcı kataloğu): sahte durum ----
       case "keys.status": {
-        const dk = localStorage.getItem("imece.mock.dk") ?? "";
-        const gk = localStorage.getItem("imece.mock.gk") ?? "";
-        return {
-          providers: {
-            claude: { ok: true, detail: "C:\\mock\\claude.exe" },
-            deepseek: { ok: !!dk, masked: dk ? "•••• " + dk.slice(-4) : "" },
-            gemini: { ok: !!gk, masked: gk ? "•••• " + gk.slice(-4) : "" },
-          },
-          envPath: "C:/mock/.env",
-        } as R;
+        const providers: Record<string, unknown> = {};
+        for (const p of this.mockProviders()) providers[p.id] = p;
+        return { providers, envPath: "C:/mock/.env" } as R;
       }
       case "keys.set": {
-        const p = params as { deepseek?: string; gemini?: string };
-        if (p.deepseek) localStorage.setItem("imece.mock.dk", p.deepseek);
-        if (p.gemini) localStorage.setItem("imece.mock.gk", p.gemini);
+        const saved = this.mockKeys();
+        for (const [id, key] of Object.entries(params as Record<string, string>)) {
+          if (key) saved[id] = key;
+        }
+        localStorage.setItem("imece.mock.keys", JSON.stringify(saved));
+        return {} as R;
+      }
+      case "keys.test": {
+        const p = params as { provider: string; key?: string };
+        const ok = !!(p.key ?? this.mockKeys()[p.provider]);
+        return { ok, code: ok ? "" : "auth", detail: ok ? "" : "Anahtar reddedildi (401/403)." } as R;
+      }
+      case "providers.list":
+        return {
+          providers: this.mockProviders(),
+          defaultRouting: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
+        } as R;
+      case "providers.setModel": {
+        const p = params as { provider: string; model: string };
+        const models = JSON.parse(localStorage.getItem("imece.mock.models") ?? "{}");
+        models[p.provider] = p.model;
+        localStorage.setItem("imece.mock.models", JSON.stringify(models));
+        return {} as R;
+      }
+      case "providers.addCustom": {
+        const p = params as { id: string; label: string; baseUrl: string; model: string };
+        const custom = JSON.parse(localStorage.getItem("imece.mock.custom") ?? "[]");
+        custom.push({ id: p.id, label: p.label, model: p.model });
+        localStorage.setItem("imece.mock.custom", JSON.stringify(custom));
+        const added = this.mockProviders().find((x) => x.id === p.id);
+        return { provider: added } as R;
+      }
+      case "providers.removeCustom": {
+        const p = params as { provider: string };
+        const custom = JSON.parse(localStorage.getItem("imece.mock.custom") ?? "[]")
+          .filter((c: { id: string }) => c.id !== p.provider);
+        localStorage.setItem("imece.mock.custom", JSON.stringify(custom));
         return {} as R;
       }
       case "receipt.get": {
@@ -283,11 +350,13 @@ export class MockBridge implements Bridge {
         this.prefs = params as Prefs;
         localStorage.setItem("imece.prefs", JSON.stringify(this.prefs));
         return {} as R;
-      case "run.providers":
+      case "run.providers": {
+        const ready = this.mockProviders().filter((p) => p.ok).map((p) => p.id);
         return {
-          providers: ["claude", "deepseek", "gemini"],
+          providers: [...new Set(["claude", "deepseek", "gemini", ...ready])],
           defaultRouting: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
         } as R;
+      }
       case "run.start": {
         this.runCancelled = false;
         void this.streamRun();

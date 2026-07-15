@@ -3,6 +3,18 @@
 This file records public, user-visible releases. Development notes and internal
 planning records are intentionally not part of the published repository.
 
+## Unreleased
+
+- **Provider catalog:** the fixed Claude/DeepSeek/Gemini trio is replaced by a
+  catalog-driven registry. Settings → Model providers now offers "pick a
+  provider → paste a key → test & save" for DeepSeek, Gemini, OpenAI, Mistral,
+  Groq, xAI, Qwen, Moonshot, OpenRouter and Ollama, plus custom
+  OpenAI-compatible endpoints (self-hosted included) — all served by one
+  generic adapter. Gemini now uses Google's OpenAI-compatible endpoint.
+- **Agent CLIs:** alongside Claude Code, the Gemini CLI, Codex CLI and Qwen
+  Code are detected on `PATH` and can be assigned to any role.
+- Per-provider model selection from Settings; key validation before saving.
+
 ## v0.3.0-beta.1
 
 - First public beta of Imece IDE, released as source only. The Windows

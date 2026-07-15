@@ -14,8 +14,8 @@ from receipts import ReceiptStore
 from checkpoints import CheckpointStore
 from project import Project
 from project_runner import run_project_task
+import providers as provider_registry
 from agents import DEFAULT_ROUTING
-from adapters import PROVIDERS
 from webhost import state
 from webhost.bridge import handler, BridgeError
 
@@ -57,7 +57,11 @@ def _require_project() -> Project:
 
 @handler("run.providers")
 def _providers(params, ctx):
-    return {"providers": list(PROVIDERS.keys()), "defaultRouting": dict(DEFAULT_ROUTING)}
+    # Rol menüsü: kullanıma hazır sağlayıcılar + varsayılan atamalar (anahtar
+    # eksikse bile listede kalır; Composer eksik-anahtar uyarısını gösterir).
+    ready = [e["id"] for e in provider_registry.catalog() if provider_registry.is_ready(e)]
+    ids = list(dict.fromkeys([*DEFAULT_ROUTING.values(), *ready]))
+    return {"providers": ids, "defaultRouting": dict(DEFAULT_ROUTING)}
 
 
 @handler("run.start")
