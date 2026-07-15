@@ -1,6 +1,6 @@
 # Imece IDE
 
-> Windows açık beta · `v0.3.0-beta.1` · [English](README.md)
+> Açık beta · `v0.3.0-beta.1` · kaynak sürüm, Windows öncelikli · [English](README.md)
 
 **Imece**, seçtiğin modellerle çalışan bir AI ekibinin — Planner, Coder ve
 Reviewer — bir değişiklik üzerinde birlikte çalıştığı ve sonucu tek bir dosyaya
@@ -16,18 +16,26 @@ checkpoint'ler ve her AI koşusu için kalıcı değişiklik makbuzu.
 
 ## Hızlı başlangıç
 
-1. Son [GitHub Release](../../releases) sayfasından `ImeceIDE-windows.zip`
-   indirin.
-2. `SHA256SUMS.txt` ile hash doğrulayın, zip'i çıkarın ve `ImeceIDE.exe`
-   çalıştırın.
-3. Yerel bir klasör açın; Ayarlar'dan DeepSeek/Gemini anahtarınızı ekleyin.
-   Claude için [Claude Code CLI](https://claude.com/claude-code) ayrıca kurulu
-   olmalıdır.
-4. Görevi yazın, önerilen diff'i inceleyin, ardından Uygula veya Vazgeç seçin.
+Imece IDE şimdilik yalnız **kaynak kod** olarak dağıtılıyor; hazır bir
+`.exe` paketi henüz yayınlanmıyor. Masaüstü kabuk Windows 10/11 hedefler;
+Python 3.14 ve Node ≥ 20 gerekir (ayrıntı: [SETUP](docs/SETUP.md)).
 
-Bu sürüm yalnız Windows içindir ve paket imzasızdır; SmartScreen uyarısı
-görülebilir. Telemetri yoktur. Paketli sürümde anahtarlar Windows DPAPI ile
-korunur; her AI koşusu yerel değişiklik makbuzu üretir.
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+cd web/ui && npm ci && npm run build && cd ../..
+python shell.py
+```
+
+DeepSeek/Gemini anahtarınızı yerel `.env` dosyasına ekleyin; Claude için
+[Claude Code CLI](https://claude.com/claude-code) ayrıca kurulu olmalıdır.
+Bir proje klasörü açın, görevi yazın, önerilen diff'i inceleyin, ardından
+Uygula veya Vazgeç seçin.
+
+Telemetri yoktur; anahtarlar makinenizde kalır ve her AI koşusu yerel
+değişiklik makbuzu üretir. Windows paketi PyInstaller ile derlenebilir
+(`packaging/build.ps1`), ancak resmî binary yayını beta olgunlaşana kadar
+ertelendi.
 
 Kurulum ve kullanım ayrıntıları (İngilizce): [SETUP](docs/SETUP.md),
 [USAGE](docs/USAGE.md), [RELEASE](docs/RELEASE.md), ayrıca

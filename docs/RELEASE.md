@@ -2,10 +2,14 @@
 
 ## Current release
 
-**v0.3.0-beta.1** — Windows `onedir` distribution, published as
-`ImeceIDE-windows.zip` + `SHA256SUMS.txt` on GitHub Releases.
+**v0.3.0-beta.1** — source-only release; installation is described in the
+[README](../README.md). The Windows `onedir` packaging pipeline
+(`packaging/build.ps1` + the **Build Windows beta release** workflow) is
+implemented and CI-verified, but publishing prebuilt binaries is postponed
+until the beta stabilizes. The rest of this guide applies when binary
+releases resume.
 
-## Quick start for end users
+## Quick start for end users (packaged app)
 
 1. Run `ImeceIDE.exe` from the extracted package.
 2. Choose **Open Folder** on the welcome screen and select a project.
@@ -47,7 +51,9 @@ and logs live under `%LOCALAPPDATA%/ImeceIDE`.
 - The Git surface covers local status, stage/unstage, discard, diff and
   commit; remote push/pull/branch operations are not included.
 - The package is unsigned; release notes must explain the SmartScreen warning
-  and checksum verification. Authenticode signing is a stable-release gate.
+  and checksum verification. Unsigned PyInstaller executables are also prone
+  to antivirus false positives (Defender can quarantine the EXE mid-run).
+  Authenticode signing is a stable-release gate.
 
 ## Developer verification
 

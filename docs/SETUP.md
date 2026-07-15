@@ -1,8 +1,8 @@
 # Setup
 
-This guide covers running Imece IDE from source. To use the packaged Windows
-app instead, see the [README](../README.md) — no Python or Node is required
-there.
+This guide covers running Imece IDE from source, which is currently the only
+supported way to use it — prebuilt binaries are not published yet (see
+[RELEASE.md](RELEASE.md)).
 
 ## 1. Prerequisites
 
