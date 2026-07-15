@@ -1,6 +1,6 @@
 # Imece IDE
 
-> Public beta · `v0.3.0-beta.1` · source release, Windows-first · [Türkçe](README.tr.md)
+> Public beta · `v0.4.0-beta.1` · source release, Windows-first · [Türkçe](README.tr.md)
 
 **Imece** is a local-first desktop coding workspace where a team of AI agents —
 a Planner, a Coder and a Reviewer, each backed by the model you choose —

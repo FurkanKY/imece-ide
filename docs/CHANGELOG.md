@@ -3,7 +3,7 @@
 This file records public, user-visible releases. Development notes and internal
 planning records are intentionally not part of the published repository.
 
-## Unreleased
+## v0.4.0-beta.1
 
 - **Provider catalog:** the fixed Claude/DeepSeek/Gemini trio is replaced by a
   catalog-driven registry. Settings → Model providers now offers "pick a

@@ -2,7 +2,7 @@
 
 ## Current release
 
-**v0.3.0-beta.1** — source-only release; installation is described in the
+**v0.4.0-beta.1** — source-only release; installation is described in the
 [README](../README.md). The Windows `onedir` packaging pipeline
 (`packaging/build.ps1` + the **Build Windows beta release** workflow) is
 implemented and CI-verified, but publishing prebuilt binaries is postponed

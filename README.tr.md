@@ -1,6 +1,6 @@
 # Imece IDE
 
-> Açık beta · `v0.3.0-beta.1` · kaynak sürüm, Windows öncelikli · [English](README.md)
+> Açık beta · `v0.4.0-beta.1` · kaynak sürüm, Windows öncelikli · [English](README.md)
 
 **Imece**, seçtiğin modellerle çalışan bir AI ekibinin — Planner, Coder ve
 Reviewer — bir değişiklik üzerinde birlikte çalıştığı ve sonucu tek bir dosyaya
