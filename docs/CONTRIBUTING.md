@@ -52,10 +52,12 @@ the same PR — otherwise it isn't done:
   Add a missing semantic token instead.
 - **Motion:** every new animation must respect the OS reduced-motion
   preference and the in-app `animations` setting.
-- **Engine compatibility:** `adapters.py`, `agents.py`, `runner.py`,
-  `project_runner.py` and `project.py` may only be extended
+- **Engine compatibility:** `adapters.py`, `providers.py`, `agents.py`,
+  `runner.py`, `project_runner.py` and `project.py` may only be extended
   backward-compatibly (new parameters need defaults; smoke-test
-  `orchestrator.py` and `app.py` after touching them).
+  `orchestrator.py` and `app.py` after touching them). `adapters.PROVIDERS`
+  and the `LLMResponse` shape are stable contracts; new hosted providers are
+  catalog entries in `providers.py`, not new adapter functions.
 - **Subprocesses:** always `encoding="utf-8", errors="replace"`, plus
   `PYTHONUTF8=1` where output is decoded (see SETUP.md, "Windows development
   notes").
