@@ -1,9 +1,13 @@
 """
 history.py
 ----------
-Faz E — proje başına oturum/iterasyon geçmişi. Her ajan koşusu (görev → sonuç →
-maliyet) proje-içi `.imece/history.json`'a kaydedilir; AI panelindeki geçmiş
-drawer'ı bunları listeler, tıklanınca görev geri yüklenir.
+LEGACY UYUMLULUK DEPOSU (2G'den itibaren). Proje-içi `.imece/history.json`
+2F'ye kadar yazma-tarafı kaynağıydı; artık kanonik run runtime (bkz.
+run_runtime.readmodels) yeni koşular için tek yetkili kaynaktır ve BU
+DOSYAYA ARTIK YAZMAZ. Bu modül yalnızca ÖNCEKİ (kanonik-öncesi) girdileri
+okumak/geçmişle birleştirmek için burada tutulur (bkz.
+run_runtime.readmodels.merge_canonical_and_legacy_history) — silinmez,
+göçü (migration) yıkıcı biçimde YAPMAZ.
 """
 
 import os

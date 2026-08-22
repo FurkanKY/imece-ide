@@ -668,6 +668,55 @@ def test_list_runs_orders_newest_first_and_filters_by_task(store):
     assert [r.run_id for r in runs_for_a] == [run_a2.run_id, run_a1.run_id]
 
 
+def test_list_runs_filters_by_project_root_and_stays_newest_first(store):
+    """İki farklı proje kökü altında görevler/koşular varsa, project_root
+    filtresi yalnızca o projeye ait koşuları (JOIN tasks üzerinden), en
+    yeniden en eskiye sıralı döndürmelidir — diğer projenin koşuları asla
+    sızmamalıdır."""
+    task_a1 = store.create_task(project_root="/tmp/project-a", prompt="a1")
+    task_a2 = store.create_task(project_root="/tmp/project-a", prompt="a2")
+    task_b = store.create_task(project_root="/tmp/project-b", prompt="b")
+
+    run_a1 = store.create_run(task_id=task_a1.task_id, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    run_a2 = store.create_run(task_id=task_a2.task_id, created_at=datetime(2026, 1, 3, tzinfo=timezone.utc))
+    run_b = store.create_run(task_id=task_b.task_id, created_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
+
+    runs_for_a = store.list_runs(project_root="/tmp/project-a")
+    assert [r.run_id for r in runs_for_a] == [run_a2.run_id, run_a1.run_id]  # newest-first
+    assert run_b.run_id not in {r.run_id for r in runs_for_a}
+
+    runs_for_b = store.list_runs(project_root="/tmp/project-b")
+    assert [r.run_id for r in runs_for_b] == [run_b.run_id]
+    assert run_a1.run_id not in {r.run_id for r in runs_for_b}
+    assert run_a2.run_id not in {r.run_id for r in runs_for_b}
+
+
+def test_list_runs_project_root_respects_limit(store):
+    task = store.create_task(project_root="/tmp/project-a", prompt="p")
+    for i in range(5):
+        store.create_run(task_id=task.task_id, created_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc))
+
+    runs = store.list_runs(project_root="/tmp/project-a", limit=2)
+    assert len(runs) == 2
+
+
+def test_list_runs_task_id_behavior_unchanged_alongside_project_root_support(store):
+    """task_id filtresi (project_root VERİLMEDİĞİNDE) hâlâ eskisi gibi çalışır — regresyon yok."""
+    task_a = store.create_task(project_root="/tmp/a", prompt="a")
+    task_b = store.create_task(project_root="/tmp/a", prompt="b")  # AYNI proje kökü, farklı görev
+    run_a = store.create_run(task_id=task_a.task_id)
+    store.create_run(task_id=task_b.task_id)
+
+    runs_for_task_a = store.list_runs(task_id=task_a.task_id)
+    assert [r.run_id for r in runs_for_task_a] == [run_a.run_id]
+
+
+def test_list_runs_rejects_ambiguous_task_id_and_project_root_combination(store):
+    task = store.create_task(project_root="/tmp/a", prompt="p")
+    with pytest.raises(RunStoreError):
+        store.list_runs(task_id=task.task_id, project_root="/tmp/a")
+
+
 def test_active_runs_returns_only_non_terminal_statuses(store):
     task = store.create_task(project_root="/tmp", prompt="p")
     running = store.create_run(task_id=task.task_id)

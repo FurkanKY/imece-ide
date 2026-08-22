@@ -496,10 +496,34 @@ class RunStore:
             raise RunStoreError(f"Event satırı bozuk (run_id={run_id}): {exc}") from exc
         return EventPage(events=events, has_more=has_more)
 
-    def list_runs(self, *, task_id: str | None = None, limit: int = 50) -> list[RunRecord]:
+    def list_runs(
+        self,
+        *,
+        task_id: str | None = None,
+        project_root: str | None = None,
+        limit: int = 50,
+    ) -> list[RunRecord]:
+        """Koşuları en yeniden en eskiye sıralı döndürür.
+
+        `task_id` ve `project_root` BİRLİKTE verilemez (belirsiz filtre
+        kombinasyonu) — bu tipli bir RunStoreError ile reddedilir; çağıran
+        hangi filtreyi kastettiğini AÇIKÇA seçmelidir. `project_root`,
+        tasks.project_root üzerinden bir JOIN ile filtreler; yeni bir tablo/
+        indeks/şema migrasyonu GEREKMEZ.
+        """
+        if task_id is not None and project_root is not None:
+            raise RunStoreError(
+                "list_runs: task_id ve project_root birlikte belirtilemez (belirsiz filtre)."
+            )
         try:
             with self._session() as conn:
-                if task_id is not None:
+                if project_root is not None:
+                    rows = conn.execute(
+                        "SELECT r.* FROM runs r JOIN tasks t ON t.task_id = r.task_id "
+                        "WHERE t.project_root = ? ORDER BY r.created_at DESC LIMIT ?",
+                        (project_root, limit),
+                    ).fetchall()
+                elif task_id is not None:
                     rows = conn.execute(
                         "SELECT * FROM runs WHERE task_id = ? ORDER BY created_at DESC LIMIT ?",
                         (task_id, limit),

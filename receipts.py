@@ -1,7 +1,11 @@
-"""Proje içi değişiklik makbuzları.
+"""Proje içi değişiklik makbuzları — LEGACY UYUMLULUK DEPOSU (2G'den itibaren).
 
-Makbuzlar .imece/receipts altında kalır; history.json yalnız hızlı indeks görevi
-görür. Böylece ayrıntılı diff/kanıt saklanırken eski geçmiş biçimi okunabilir kalır.
+Makbuzlar .imece/receipts altında kalır. 2F'ye kadar yazma-tarafı kaynağıydı;
+artık kanonik run runtime (bkz. run_runtime.readmodels.build_receipt) yeni
+koşular için tek yetkili kaynaktır ve BU DOSYALARA ARTIK YAZMAZ. Bu modül
+yalnızca "run_" ÖN EKİ TAŞIMAYAN (kanonik-öncesi) makbuz kimliklerini okumak/
+dışa aktarmak için burada tutulur (bkz. webhost/api/history.py'deki kimlik
+yönlendirmesi) — silinmez, göçü (migration) yıkıcı biçimde YAPMAZ.
 """
 from __future__ import annotations
 

@@ -4,7 +4,7 @@ desktop.py Worker(QThread) deseninin portu: `project_runner.run_project_task`
 generator'ının olayları DEĞİŞMEDEN `run.event` kanalına forward edilir
 (stage/info/output/metric/diff/verdict/proposal). Proposal içerikleri sunucu
 tarafında tutulur → applyProposals yalnız yol listesi alır (içerik köprüden
-geri taşınmaz). Proposal gelince geçmişe kaydedilir (desktop.py davranışı).
+geri taşınmaz).
 
 2F (kanonik run runtime entegrasyonu): project_runner hâlâ DEĞİŞMEDEN, ham
 legacy dict event'ler üretiyor. Her legacy event, arayüze iletilmeden ÖNCE
@@ -21,21 +21,27 @@ finish_normal()/finish_cancelled() başarısız olursa "failed" olarak raporlan�
 (bkz. on_worker_finished/on_worker_cancelled). Böylece UI, SQLite hâlâ RUNNING
 derken asla "başarılı" bir bildirim almaz.
 
-BİLİNEN GEÇİCİ SINIRLAMALAR (2F): tek seferde yalnızca bir aktif legacy
-worker; süreç sahipliği/kira/heartbeat YOK; başlangıçta otomatik kurtarma
-YOK (recover_running_runs açık bir primitif olarak kalır); Apply/Reject
-bekleyen bir proposal, süreç yeniden başlatıldıktan sonra bellek-içi
-`_active` durumundan yeniden kurulamaz (yalnızca SQLite'taki kanonik
-WAITING_USER durumu kalıcıdır); ReceiptStore/HistoryStore hâlâ ikincil,
-en-iyi-çaba uyumluluk yazımlarıdır (2G bunları değiştirecek); checkpoint
-restore bu dilimde kanonikleştirilmedi (bkz. webhost/api/checkpoint.py,
-DEĞİŞTİRİLMEDİ).
+2G (kanonik read model göçü): Bu modül ARTIK ReceiptStore/HistoryStore'a
+YAZMAZ — makbuz (receipt) ve geçmiş (history), run_runtime.readmodels
+aracılığıyla kanonik run_events'ten TALEP ÜZERİNE (on-demand) yeniden inşa
+edilir (bkz. webhost/api/history.py). on_event'in tek işi artık: kanonik
+kalıcılık (canonical-before-UI sıralaması KORUNARAK), bellek-içi proposal
+durumunu güncellemek ve orijinal legacy event'i arayüze iletmektir —
+plan/diff/metric/verdict toplama ARTIK BURADA YAPILMAZ. Legacy .imece/
+history.json ve .imece/receipts/*.json dosyaları SALT-OKUNUR kanonik-öncesi
+uyumluluk verisi olarak kalır (silinmez).
+
+BİLİNEN GEÇİCİ SINIRLAMALAR: tek seferde yalnızca bir aktif legacy worker;
+süreç sahipliği/kira/heartbeat YOK; başlangıçta otomatik kurtarma YOK
+(recover_running_runs açık bir primitif olarak kalır); Apply/Reject bekleyen
+bir proposal, süreç yeniden başlatıldıktan sonra bellek-içi `_active`
+durumundan yeniden kurulamaz (yalnızca SQLite'taki kanonik WAITING_USER
+durumu kalıcıdır); checkpoint restore bu dilimde kanonikleştirilmedi (bkz.
+webhost/api/checkpoint.py, DEĞİŞTİRİLMEDİ).
 """
 
 from PySide6.QtCore import QThread, Signal
 
-from history import HistoryStore
-from receipts import ReceiptStore
 from checkpoints import CheckpointStore
 from project import Project
 from project_runner import run_project_task
@@ -47,8 +53,7 @@ from webhost import state
 from webhost.bridge import handler, BridgeError
 
 _active: dict = {
-    "worker": None, "coordinator": None, "run_id": None,
-    "proposals": [], "task": "", "receipt": None, "receipt_id": None,
+    "worker": None, "coordinator": None, "run_id": None, "proposals": [],
 }
 
 
@@ -184,15 +189,8 @@ def _start(params, ctx):
     run_id = coordinator.run_id
 
     _active["proposals"] = []
-    _active["task"] = task
-    _active["receipt_id"] = None
     _active["coordinator"] = coordinator
     _active["run_id"] = run_id
-    _active["receipt"] = {
-        "task": task, "routing": dict(coordinator.routing), "plan": None, "proposals": [],
-        "review": {"verdict": "UNKNOWN", "note": ""},
-        "metrics": {"latency_s": 0.0, "tokens": 0, "cost_usd": 0.0},
-    }
 
     try:
         bridge = ctx._bridge  # ana thread'e sinyalle taşınır (queued connection)
@@ -225,18 +223,8 @@ def _start(params, ctx):
                 return
 
             # BURAYA yalnızca kanonik kalıcılık BAŞARILI olduysa ulaşılır.
-            receipt = _active["receipt"]
-            if ev.get("type") == "plan":
-                receipt["plan"] = {"summary": ev.get("summary", ""), "files": ev.get("files", [])}
-            elif ev.get("type") == "diff":
-                receipt["proposals"].append({"path": ev.get("path", ""), "is_new": bool(ev.get("is_new")), "diff": ev.get("diff", "")})
-            elif ev.get("type") == "metric":
-                metric = receipt["metrics"]
-                metric["latency_s"] = round(metric["latency_s"] + float(ev.get("latency_s", 0)), 2)
-                metric["tokens"] += int(ev.get("tokens", 0))
-                metric["cost_usd"] = round(metric["cost_usd"] + float(ev.get("cost_usd", 0)), 5)
-            elif ev.get("type") == "verdict":
-                receipt["review"] = {"verdict": ev.get("verdict", "UNKNOWN"), "note": ev.get("note", "")}
+            # Makbuz/geçmiş toplama ARTIK BURADA YAPILMAZ — bkz.
+            # run_runtime.readmodels (talep üzerine yeniden inşa edilir).
             if ev.get("type") == "proposal":
                 _active["proposals"] = ev.get("proposals", [])
             bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
@@ -245,20 +233,10 @@ def _start(params, ctx):
             if ended["flag"]:
                 return
             ended["flag"] = True
-            receipt = dict(_active["receipt"] or {})
-            receipt["status"] = "failed" if status == "failed" else "cancelled" if status == "cancelled" else "proposed" if _active["proposals"] else "completed"
-            if error:
-                receipt["error"] = error
-            try:
-                stored = ReceiptStore(proj.root).create(receipt)
-                _active["receipt_id"] = stored["id"]
-                metric = stored["metrics"]
-                HistoryStore(proj.root).add(task, stored["review"].get("verdict", "UNKNOWN"), metric["tokens"], metric["cost_usd"], [p.get("path", "") for p in stored["proposals"]], stored["id"], stored["status"])
-            except OSError:
-                # Makbuz diske yazılamasa bile koşu sonucu ve kullanıcı kararı kaybolmaz
-                # (kanonik Run zaten SQLite'a COMMIT olmuştur — ya da hiç olmamıştır;
-                # o karar bu satırdan ÖNCE, aşağıdaki status parametresiyle verilmiştir).
-                _active["receipt_id"] = None
+            # ReceiptStore/HistoryStore YAZIMI YOK: kanonik Run zaten SQLite'a
+            # COMMIT olmuştur (ya da hiç olmamıştır — o karar bu satırdan ÖNCE,
+            # aşağıdaki status parametresiyle belirlenmiştir). run.finished
+            # yalnızca mevcut host/UI yaşam döngüsünü sonlandırıp bildirir.
             payload = {"runId": run_id, "status": status}
             if error:
                 payload["error"] = error
@@ -410,17 +388,10 @@ def _apply(params, ctx):
 
     # Kanonik onay BAŞARILI: checkpoint Undo için SAKLANIR, mantıksal öneri
     # kararı durumu (bu milestonda kısmi çoklu-karar desteklenmediğinden)
-    # TAMAMEN temizlenir.
+    # TAMAMEN temizlenir. ReceiptStore YAZIMI YOK — receipt.get artık bu
+    # Run'ı kanonik run_events'ten (proposal.applied) doğrudan okur.
     _active["proposals"] = []
     ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
-    if _active.get("receipt_id"):
-        try:
-            ReceiptStore(proj.root).update(
-                _active["receipt_id"],
-                {"status": "applied", "applied": applied, "checkpointId": checkpoint["id"]},
-            )
-        except (OSError, ValueError):
-            pass  # en iyi çaba uyumluluk yazımı; kanonik onay zaten kalıcı
     return {
         "applied": applied,
         "errors": [],
@@ -430,7 +401,7 @@ def _apply(params, ctx):
 
 @handler("run.rejectProposals")
 def _reject(params, ctx):
-    proj = _require_project()
+    _require_project()
     active_proposals = _active.get("proposals") or []
     if not active_proposals:
         return {}
@@ -447,14 +418,9 @@ def _reject(params, ctx):
     except Exception as e:
         raise BridgeError("canonical_reject_failed", f"Kanonik ret kalıcılığı başarısız oldu: {e}")
 
+    # ReceiptStore YAZIMI YOK — receipt.get artık bu Run'ı kanonik
+    # run_events'ten (proposal.rejected) doğrudan okur.
     _active["proposals"] = []
-    if _active.get("receipt_id"):
-        try:
-            ReceiptStore(proj.root).update(
-                _active["receipt_id"], {"status": "rejected", "rejected": rejected_paths},
-            )
-        except (OSError, ValueError):
-            pass  # en iyi çaba uyumluluk yazımı; kanonik ret zaten kalıcı
     return {}
 
 

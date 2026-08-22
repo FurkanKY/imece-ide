@@ -29,6 +29,17 @@ from run_runtime.errors import (
 from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent, RunEventType, build_event
 from run_runtime.models import RunPhase, RunRecord, RunStatus, TaskRecord
 from run_runtime.projector import project_run
+from run_runtime.readmodels import (
+    HISTORY_MAX_ITEMS,
+    RunReadService,
+    RunReadSnapshot,
+    build_history_item,
+    build_receipt,
+    canonical_status_string,
+    load_full_event_history,
+    merge_canonical_and_legacy_history,
+    render_receipt_markdown,
+)
 from run_runtime.recovery import RecoveryReport, recover_running_runs
 from run_runtime.service import DurableEventTail, RunRuntime
 from run_runtime.store import EventPage, RunStore
@@ -62,4 +73,13 @@ __all__ = [
     "DurableEventTail",
     "RecoveryReport",
     "recover_running_runs",
+    "HISTORY_MAX_ITEMS",
+    "RunReadService",
+    "RunReadSnapshot",
+    "build_history_item",
+    "build_receipt",
+    "canonical_status_string",
+    "load_full_event_history",
+    "merge_canonical_and_legacy_history",
+    "render_receipt_markdown",
 ]
