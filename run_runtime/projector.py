@@ -95,6 +95,14 @@ def _on_waiting_user(current: RunRecord, event: RunEvent) -> RunRecord:
     return dataclasses.replace(current, status=RunStatus.WAITING_USER, phase=RunPhase.READY)
 
 
+def _on_resumed(current: RunRecord, event: RunEvent) -> RunRecord:
+    if current.status is not RunStatus.WAITING_USER:
+        raise RunProjectionError(
+            f"run.resumed yalnızca WAITING_USER durumunda geçerli (status={current.status})"
+        )
+    return dataclasses.replace(current, status=RunStatus.RUNNING, phase=RunPhase.EXECUTING)
+
+
 def _on_completed(current: RunRecord, event: RunEvent) -> RunRecord:
     return dataclasses.replace(
         current,
@@ -164,7 +172,8 @@ def _on_usage_recorded(current: RunRecord, event: RunEvent) -> RunRecord:
     total_tokens = _non_negative_int(
         payload.get("total_tokens", prompt_tokens + completion_tokens), "total_tokens"
     )
-    cost_usd = _non_negative_number(payload.get("cost_usd", 0), "cost_usd")
+    raw_cost = payload.get("cost_usd", 0)
+    cost_usd = 0.0 if raw_cost is None else _non_negative_number(raw_cost, "cost_usd")
     latency_s = _non_negative_number(payload.get("latency_s", 0), "latency_s")
     return dataclasses.replace(
         current,
@@ -181,6 +190,7 @@ _HANDLERS: dict[str, _Handler] = {
     RunEventType.RUN_STARTED: _on_run_started,
     RunEventType.RUN_PHASE_CHANGED: _on_phase_changed,
     RunEventType.RUN_WAITING_USER: _on_waiting_user,
+    RunEventType.RUN_RESUMED: _on_resumed,
     RunEventType.RUN_COMPLETED: _on_completed,
     RunEventType.RUN_FAILED: _on_failed,
     RunEventType.RUN_CANCELLED: _on_cancelled,

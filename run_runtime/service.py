@@ -25,7 +25,7 @@ from typing import Any
 
 from run_runtime.bus import EventBus, EventNotice, EventSubscription
 from run_runtime.errors import EventStreamClosedError, EventValidationError
-from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent
+from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent, RunEventSpec
 from run_runtime.models import RunRecord, TaskRecord
 from run_runtime.store import DEFAULT_EVENT_PAGE_LIMIT, EventPage, RunStore
 
@@ -86,6 +86,22 @@ class RunRuntime:
         return self._store.events(run_id, after_seq=after_seq, limit=limit)
 
     # ---------------- kanonik yazma yolu ----------------
+
+    def record_many(
+        self,
+        *,
+        run_id: str,
+        specs: tuple[RunEventSpec, ...] | list[RunEventSpec],
+        expected_last_event_seq: int | None = None,
+    ) -> tuple[tuple[RunEvent, ...], RunRecord]:
+        """Atomically append a batch, then publish one coalesced latest-seq notice."""
+        events, run = self._store.append_events(
+            run_id=run_id,
+            specs=specs,
+            expected_last_event_seq=expected_last_event_seq,
+        )
+        self._bus.publish(EventNotice(run_id=run_id, latest_seq=events[-1].seq))
+        return events, run
 
     def record(
         self,

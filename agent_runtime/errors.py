@@ -39,3 +39,7 @@ class AgentApprovalError(AgentRuntimeError):
 
 class AgentLimitError(AgentRuntimeError):
     """A session-local model/tool/error limit was exceeded."""
+
+
+class AgentRecordingError(AgentRuntimeError):
+    """A required canonical lifecycle event could not be recorded."""

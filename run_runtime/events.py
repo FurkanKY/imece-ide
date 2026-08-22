@@ -35,6 +35,20 @@ class RunEventType(StrEnum):
     RUN_FAILED = "run.failed"
     RUN_CANCELLED = "run.cancelled"
     RUN_INTERRUPTED = "run.interrupted"
+    RUN_RESUMED = "run.resumed"
+
+    TURN_STARTED = "turn.started"
+    TURN_COMPLETED = "turn.completed"
+    MODEL_STARTED = "model.started"
+    MODEL_COMPLETED = "model.completed"
+    MODEL_FAILED = "model.failed"
+    TOOL_REQUESTED = "tool.requested"
+    TOOL_STARTED = "tool.started"
+    TOOL_COMPLETED = "tool.completed"
+    TOOL_FAILED = "tool.failed"
+    TOOL_INTERRUPTED = "tool.interrupted"
+    PERMISSION_REQUESTED = "permission.requested"
+    PERMISSION_RESOLVED = "permission.resolved"
 
     EXECUTION_STARTED = "execution.started"
     EXECUTION_OUTPUT = "execution.output"
@@ -55,6 +69,32 @@ class RunEventType(StrEnum):
     CHECKPOINT_CREATED = "checkpoint.created"
     CHECKPOINT_RESTORED = "checkpoint.restored"
 
+@dataclass(frozen=True, slots=True)
+class RunEventSpec:
+    """A validated event request used by atomic batch append operations."""
+
+    type: str
+    payload: dict[str, Any]
+    schema_version: int = CURRENT_SCHEMA_VERSION
+    execution_id: str | None = None
+    turn_id: str | None = None
+    item_id: str | None = None
+    causation_id: str | None = None
+    correlation_id: str | None = None
+    source: str = "system"
+    created_at: datetime | None = None
+    event_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.type, str) or not self.type:
+            raise EventValidationError("RunEventSpec.type boş olmayan bir string olmalı.")
+        if not isinstance(self.source, str) or not self.source:
+            raise EventValidationError("RunEventSpec.source boş olmayan bir string olmalı.")
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int):
+            raise EventValidationError("RunEventSpec.schema_version integer olmalı.")
+        if self.schema_version < 1:
+            raise EventValidationError("RunEventSpec.schema_version >= 1 olmalı.")
+        object.__setattr__(self, "payload", validate_event_payload(self.payload))
 
 @dataclass(frozen=True, slots=True)
 class RunEvent:

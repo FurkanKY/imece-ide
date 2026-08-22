@@ -26,8 +26,9 @@ from run_runtime.errors import (
     RunStoreError,
     TaskNotFoundError,
 )
-from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent, RunEventType, build_event
+from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent, RunEventSpec, RunEventType, build_event
 from run_runtime.models import RunPhase, RunRecord, RunStatus, TaskRecord
+from run_runtime.native_agent import CanonicalAgentEventSink
 from run_runtime.projector import project_run
 from run_runtime.readmodels import (
     HISTORY_MAX_ITEMS,
@@ -56,6 +57,7 @@ __all__ = [
     "RunStoreError",
     "RunProjectionError",
     "RunEvent",
+    "RunEventSpec",
     "RunEventType",
     "CURRENT_SCHEMA_VERSION",
     "build_event",
@@ -70,6 +72,7 @@ __all__ = [
     "EventNotice",
     "EventSubscription",
     "RunRuntime",
+    "CanonicalAgentEventSink",
     "DurableEventTail",
     "RecoveryReport",
     "recover_running_runs",

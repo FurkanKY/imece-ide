@@ -22,7 +22,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 from run_runtime import schema
 from run_runtime.errors import (
@@ -33,7 +33,13 @@ from run_runtime.errors import (
     RunStoreError,
     TaskNotFoundError,
 )
-from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent, build_event, validate_event_payload
+from run_runtime.events import (
+    CURRENT_SCHEMA_VERSION,
+    RunEvent,
+    RunEventSpec,
+    build_event,
+    validate_event_payload,
+)
 from run_runtime.jsonutil import canonical_dict_copy, canonical_json_dumps
 from run_runtime.models import RunPhase, RunRecord, RunStatus, TaskRecord, new_run_id, new_task_id, utcnow
 from run_runtime.projector import project_run
@@ -467,6 +473,87 @@ class RunStore:
             raise RunStoreError(f"Event eklenemedi: {exc}") from exc
         assert event is not None and updated is not None  # yalnızca başarı yolunda buraya gelinir
         return event, updated
+
+    def append_events(
+        self,
+        *,
+        run_id: str,
+        specs: Sequence[RunEventSpec],
+        expected_last_event_seq: int | None = None,
+    ) -> tuple[tuple[RunEvent, ...], RunRecord]:
+        """Append a non-empty event batch atomically with one projection update transaction."""
+        specs = tuple(specs)
+        if not specs:
+            raise EventValidationError("Event batch boş olamaz.")
+        if any(not isinstance(spec, RunEventSpec) for spec in specs):
+            raise EventValidationError("Event batch yalnızca RunEventSpec içermeli.")
+        if expected_last_event_seq is not None:
+            if isinstance(expected_last_event_seq, bool) or not isinstance(expected_last_event_seq, int):
+                raise EventValidationError("expected_last_event_seq integer olmalı.")
+            if expected_last_event_seq < 0:
+                raise EventValidationError("expected_last_event_seq >= 0 olmalı.")
+
+        events: list[RunEvent] = []
+        updated: RunRecord | None = None
+        try:
+            with self._session() as conn, _transaction(conn, immediate=True):
+                row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+                if row is None:
+                    raise RunNotFoundError(run_id)
+                try:
+                    current = _run_from_row(row)
+                except _ROW_DECODE_ERRORS as exc:
+                    raise RunStoreError(f"Koşu satırı bozuk (run_id={run_id}): {exc}") from exc
+                if (
+                    expected_last_event_seq is not None
+                    and current.last_event_seq != expected_last_event_seq
+                ):
+                    raise EventSequenceError(
+                        f"Bayat expected_last_event_seq (run_id={run_id}): "
+                        f"beklenen={expected_last_event_seq}, gerçek={current.last_event_seq}"
+                    )
+
+                for spec in specs:
+                    event = build_event(
+                        run_id=run_id,
+                        seq=current.last_event_seq + 1,
+                        type=spec.type,
+                        payload=spec.payload,
+                        schema_version=spec.schema_version,
+                        execution_id=spec.execution_id,
+                        turn_id=spec.turn_id,
+                        item_id=spec.item_id,
+                        causation_id=spec.causation_id,
+                        correlation_id=spec.correlation_id,
+                        source=spec.source,
+                        created_at=spec.created_at,
+                        event_id=spec.event_id,
+                    )
+                    projected = project_run(current, event)
+                    current = dataclasses.replace(projected, last_event_seq=event.seq)
+                    try:
+                        conn.execute(
+                            "INSERT INTO run_events (event_id, run_id, seq, type, schema_version, "
+                            "created_at, execution_id, turn_id, item_id, causation_id, correlation_id, "
+                            "source, payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                event.event_id, event.run_id, event.seq, event.type, event.schema_version,
+                                _iso(event.created_at), event.execution_id, event.turn_id, event.item_id,
+                                event.causation_id, event.correlation_id, event.source,
+                                _dumps(event.payload),
+                            ),
+                        )
+                    except sqlite3.IntegrityError as exc:
+                        raise EventConflictError(
+                            f"Event batch içinde çakışma (run_id={run_id} seq={event.seq}): {exc}"
+                        ) from exc
+                    _update_run(conn, current)
+                    events.append(event)
+                updated = current
+        except sqlite3.Error as exc:
+            raise RunStoreError(f"Event batch eklenemedi: {exc}") from exc
+        assert updated is not None
+        return tuple(events), updated
 
     def events(
         self, run_id: str, *, after_seq: int = 0, limit: int = DEFAULT_EVENT_PAGE_LIMIT
