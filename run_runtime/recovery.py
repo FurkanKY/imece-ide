@@ -86,11 +86,13 @@ def recover_running_runs(runtime: RunRuntime) -> RecoveryReport:
         try:
             started_items = {}
             terminal_items = set()
+            history = []
             after_seq = 0
             while True:
                 page = runtime.events(candidate.run_id, after_seq=after_seq, limit=200)
                 for event in page.events:
                     after_seq = event.seq
+                    history.append(event)
                     if event.type == RunEventType.TOOL_STARTED and event.item_id:
                         started_items[event.item_id] = event
                     elif event.type in {
@@ -121,6 +123,81 @@ def recover_running_runs(runtime: RunRuntime) -> RecoveryReport:
                         source=RECOVERY_SOURCE,
                     )
                 )
+            verification_starts = [
+                event for event in history
+                if event.type == RunEventType.VERIFICATION_STARTED
+                and isinstance(event.payload.get("verification_id"), str)
+            ]
+            for index, started in enumerate(verification_starts):
+                verification_id = started.payload["verification_id"]
+                next_start_seq = None
+                for later in verification_starts[index + 1:]:
+                    if later.payload["verification_id"] == verification_id:
+                        next_start_seq = later.seq
+                        break
+
+                def in_attempt(event, *, after: int) -> bool:
+                    return (
+                        event.seq > after
+                        and (next_start_seq is None or event.seq < next_start_seq)
+                        and event.payload.get("verification_id") == verification_id
+                    )
+
+                check_starts = [
+                    event for event in history
+                    if event.type == RunEventType.VERIFICATION_CHECK_STARTED
+                    and event.item_id
+                    and in_attempt(event, after=started.seq)
+                ]
+                for check_started in check_starts:
+                    has_terminal = any(
+                        event.item_id == check_started.item_id
+                        and event.type in {
+                            RunEventType.VERIFICATION_CHECK_COMPLETED,
+                            RunEventType.VERIFICATION_CHECK_FAILED,
+                            RunEventType.VERIFICATION_CHECK_INTERRUPTED,
+                        }
+                        and in_attempt(event, after=check_started.seq)
+                        for event in history
+                    )
+                    if has_terminal:
+                        continue
+                    specs.append(
+                        RunEventSpec(
+                            type=RunEventType.VERIFICATION_CHECK_INTERRUPTED,
+                            payload={
+                                "verification_id": verification_id,
+                                "check_id": check_started.payload.get("check_id"),
+                                "reason": RECOVERY_INTERRUPT_REASON,
+                                "outcome_unknown": True,
+                            },
+                            turn_id=check_started.turn_id,
+                            item_id=check_started.item_id,
+                            correlation_id=check_started.correlation_id,
+                            source=RECOVERY_SOURCE,
+                        )
+                    )
+
+                has_verification_terminal = any(
+                    event.type in {
+                        RunEventType.VERIFICATION_COMPLETED,
+                        RunEventType.VERIFICATION_INTERRUPTED,
+                    }
+                    and in_attempt(event, after=started.seq)
+                    for event in history
+                )
+                if not has_verification_terminal:
+                    specs.append(
+                        RunEventSpec(
+                            type=RunEventType.VERIFICATION_INTERRUPTED,
+                            payload={
+                                "verification_id": verification_id,
+                                "reason": RECOVERY_INTERRUPT_REASON,
+                            },
+                            correlation_id=started.correlation_id or verification_id,
+                            source=RECOVERY_SOURCE,
+                        )
+                    )
             if not specs:
                 # Preserve the established single-event recovery seam when no
                 # unfinished tool exists; this also keeps existing store-level

@@ -66,6 +66,14 @@ class RunEventType(StrEnum):
 
     REVIEW_COMPLETED = "review.completed"
 
+    VERIFICATION_STARTED = "verification.started"
+    VERIFICATION_CHECK_STARTED = "verification.check_started"
+    VERIFICATION_CHECK_COMPLETED = "verification.check_completed"
+    VERIFICATION_CHECK_FAILED = "verification.check_failed"
+    VERIFICATION_CHECK_INTERRUPTED = "verification.check_interrupted"
+    VERIFICATION_COMPLETED = "verification.completed"
+    VERIFICATION_INTERRUPTED = "verification.interrupted"
+
     CHECKPOINT_CREATED = "checkpoint.created"
     CHECKPOINT_RESTORED = "checkpoint.restored"
 

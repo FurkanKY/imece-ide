@@ -180,6 +180,66 @@ def _draft_change_summary(events: tuple[RunEvent, ...]) -> list[dict[str, Any]]:
     return [by_path[p] for p in order]
 
 
+def _verification_receipt(events: tuple[RunEvent, ...]) -> dict[str, str]:
+    """Derive the latest verification attempt strictly from event sequence."""
+    starts = [event for event in events if event.type == RunEventType.VERIFICATION_STARTED]
+    if not starts:
+        return dict(_VERIFICATION_NOT_RUN)
+    latest = starts[-1]
+    verification_id = latest.payload.get("verification_id")
+    if not isinstance(verification_id, str):
+        return {"status": "running", "detail": "Verification is running."}
+    attempt = [
+        event for event in events
+        if event.seq >= latest.seq and event.payload.get("verification_id") == verification_id
+    ]
+    terminals = [
+        event for event in attempt
+        if event.type in {
+            RunEventType.VERIFICATION_COMPLETED,
+            RunEventType.VERIFICATION_INTERRUPTED,
+        }
+    ]
+    terminal = terminals[-1] if terminals else None
+    if terminal is None:
+        return {"status": "running", "detail": "Verification is running."}
+    if terminal.type == RunEventType.VERIFICATION_INTERRUPTED:
+        return {"status": "interrupted", "detail": "Verification was interrupted."}
+
+    status = terminal.payload.get("status", "error")
+    if not isinstance(status, str) or status not in {"pass", "fail", "timeout", "error"}:
+        return {
+            "status": "error",
+            "detail": "Verification completed with an invalid status.",
+        }
+    counts = terminal.payload.get("counts", {})
+    if not isinstance(counts, dict):
+        counts = {}
+    def count(key: str) -> int:
+        value = counts.get(key, 0)
+        return value if type(value) is int and value >= 0 else 0
+
+    passed = count("pass")
+    failed = count("fail")
+    timed_out = count("timeout")
+    errors = count("error")
+    total = count("total")
+    if status == "pass":
+        detail = f"{passed}/{total} checks passed."
+    else:
+        parts = []
+        if passed:
+            parts.append(f"{passed} passed")
+        if failed:
+            parts.append(f"{failed} failed")
+        if timed_out:
+            parts.append(f"{timed_out} timed out")
+        if errors:
+            parts.append(f"{errors} errors")
+        detail = ", ".join(parts) + "." if parts else "Verification completed."
+    return {"status": status, "detail": detail}
+
+
 def build_receipt(snapshot: RunReadSnapshot) -> dict[str, Any]:
     """Mevcut frontend Receipt sözlük şeklini (receipts.py ile AYNI) kanonik
     veriden inşa eder. SAF'tır — hiçbir I/O yapmaz, hiçbir event'i MUTASYONA
@@ -250,7 +310,7 @@ def build_receipt(snapshot: RunReadSnapshot) -> dict[str, Any]:
         "applied": applied,
         "rejected": rejected,
         "checkpointId": checkpoint_id,
-        "verification": dict(_VERIFICATION_NOT_RUN),
+        "verification": _verification_receipt(events),
     }
     if run.error_message:
         receipt["error"] = run.error_message
