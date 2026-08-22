@@ -26,12 +26,36 @@ from pathlib import Path
 from workspace.errors import WorkspaceBoundaryError
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:")
+_ENV_PATH_RE = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*(?:/|$)")
 
 
 def _looks_absolute(raw: str) -> bool:
     """POSIX ('/...'), Windows sürücü ('C:\\...') ve UNC ('\\\\server\\...') yollarını yakalar."""
     normalized = raw.replace("\\", "/")
     return normalized.startswith("/") or bool(_WINDOWS_DRIVE_RE.match(normalized))
+
+
+def normalize_workspace_relative_path(raw: str, *, allow_root: bool = False) -> str:
+    """Normalize a workspace-relative path without resolving traversal away."""
+    if not isinstance(raw, str):
+        raise WorkspaceBoundaryError("Workspace yolu string olmalı.")
+    if "\x00" in raw:
+        raise WorkspaceBoundaryError("Workspace yolu NUL karakteri içeremez.")
+    normalized = raw.replace("\\", "/")
+    if _looks_absolute(normalized):
+        raise WorkspaceBoundaryError(f"Mutlak workspace yolu kabul edilmiyor: {raw!r}")
+    if normalized.startswith("~/") or normalized == "~" or _ENV_PATH_RE.match(normalized):
+        raise WorkspaceBoundaryError(f"Workspace yolu genişletilemez: {raw!r}")
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+    if any(part == ".." for part in parts):
+        raise WorkspaceBoundaryError(f"'..' workspace yolunda kullanılamaz: {raw!r}")
+    if any(part.casefold() == ".git" for part in parts):
+        raise WorkspaceBoundaryError(f".git workspace yolu kabul edilmiyor: {raw!r}")
+    if not parts:
+        if allow_root and normalized in (".", "./"):
+            return "."
+        raise WorkspaceBoundaryError("Boş workspace yolu kabul edilmiyor.")
+    return "/".join(parts)
 
 
 def _reject_symlink_components(

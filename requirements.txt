@@ -7,3 +7,4 @@ basedpyright>=1.21
 debugpy>=1.8
 jsonschema>=4.23
 openai>=3.0,<4
+psutil>=7.2,<8

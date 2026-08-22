@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -14,7 +13,8 @@ from tool_runtime.models import (
     ToolObservation,
 )
 from tool_runtime.registry import ToolRegistry, ToolSpec
-from workspace.errors import WorkspaceError
+from workspace.base import normalize_workspace_relative_path
+from workspace.errors import WorkspaceBoundaryError, WorkspaceError
 
 READ_DEFAULT_LINES = 300
 READ_MAX_LINES = 500
@@ -34,8 +34,6 @@ MAX_WRITE_CHARS = 1_000_000
 _EXCLUDED_DIRS = frozenset({
     ".git", ".imece", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
 })
-_DRIVE_RE = re.compile(r"^[A-Za-z]:")
-_ENV_RE = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*(?:/|$)")
 
 
 class _BinaryContentError(Exception):
@@ -44,23 +42,10 @@ class _BinaryContentError(Exception):
 
 def normalize_tool_path(raw: str, *, allow_root: bool = False) -> str:
     """Normalize a workspace-relative path without resolving traversal away."""
-    if not isinstance(raw, str):
-        raise ToolInputValidationError("Tool yolu string olmalı.")
-    if "\x00" in raw:
-        raise ToolInputValidationError("Tool yolu NUL karakteri içeremez.")
-    normalized = raw.replace("\\", "/")
-    if normalized.startswith("/") or _DRIVE_RE.match(normalized):
-        raise ToolInputValidationError(f"Mutlak tool yolu kabul edilmiyor: {raw!r}")
-    if normalized.startswith("~/") or normalized == "~" or _ENV_RE.match(normalized):
-        raise ToolInputValidationError(f"Tool yolu genişletilemez: {raw!r}")
-    parts = [part for part in normalized.split("/") if part not in ("", ".")]
-    if any(part == ".." for part in parts):
-        raise ToolInputValidationError(f"'..' tool yolunda kullanılamaz: {raw!r}")
-    if not parts:
-        if allow_root and normalized in (".", "./"):
-            return "."
-        raise ToolInputValidationError("Boş tool yolu kabul edilmiyor.")
-    return "/".join(parts)
+    try:
+        return normalize_workspace_relative_path(raw, allow_root=allow_root)
+    except WorkspaceBoundaryError as exc:
+        raise ToolInputValidationError(str(exc)) from exc
 
 
 def _path_argument(arguments: Mapping[str, Any], key: str = "path", *, allow_root: bool = False) -> str:
