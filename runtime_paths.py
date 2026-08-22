@@ -58,6 +58,24 @@ def log_path() -> Path:
     return app_data_dir() / "logs" / "app.log"
 
 
+def workspaces_dir() -> Path:
+    """İzole ajan çalışma alanlarının (Git worktree tabanlı) kök dizini.
+
+    Yalnızca yolu döndürür; dizini oluşturmaz. Oluşturma sorumluluğu
+    workspace oluşturma koduna (workspace/worktree.py) aittir.
+    """
+    return app_data_dir() / "workspaces"
+
+
+def run_runtime_db_path() -> Path:
+    """Kanonik Task/Run/Event yürütme geçmişinin SQLite veritabanı yolu.
+
+    Yalnızca yolu döndürür; dosyayı oluşturmaz. Oluşturma sorumluluğu
+    run_runtime.store.RunStore'a aittir.
+    """
+    return app_data_dir() / "runtime.sqlite3"
+
+
 def helper_executable(name: str) -> Path | None:
     """Ana exe yanındaki paketli yardımcı programı döndürür."""
     if not is_frozen():

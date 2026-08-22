@@ -14,6 +14,8 @@ def test_source_mode_keeps_legacy_paths(monkeypatch):
     assert runtime_paths.resource_root() == runtime_paths.SOURCE_ROOT
     assert runtime_paths.env_path() == runtime_paths.SOURCE_ROOT / ".env"
     assert runtime_paths.prefs_path() == Path.home() / ".multi_agent_ide" / "prefs.json"
+    assert runtime_paths.workspaces_dir() == Path.home() / ".multi_agent_ide" / "workspaces"
+    assert runtime_paths.run_runtime_db_path() == Path.home() / ".multi_agent_ide" / "runtime.sqlite3"
 
 
 def test_frozen_mode_separates_resources_and_writable_data(tmp_path, monkeypatch):
@@ -30,6 +32,8 @@ def test_frozen_mode_separates_resources_and_writable_data(tmp_path, monkeypatch
     assert runtime_paths.env_path() == data / ".env"
     assert runtime_paths.prefs_path() == data / "prefs.json"
     assert runtime_paths.log_path() == data / "logs" / "app.log"
+    assert runtime_paths.workspaces_dir() == data / "workspaces"
+    assert runtime_paths.run_runtime_db_path() == data / "runtime.sqlite3"
 
 
 def test_frozen_helper_resolves_next_to_executable(tmp_path, monkeypatch):
