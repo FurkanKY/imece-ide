@@ -60,6 +60,12 @@ def test_windows_style_absolute_path_rejected(ws):
         ws.read_text(r"\\server\share\file.txt")
 
 
+@pytest.mark.parametrize("drive_relative", ["C:", "C:foo", "C:foo/bar", "D:test.txt"])
+def test_windows_drive_relative_path_rejected_on_all_hosts(ws, drive_relative):
+    with pytest.raises(WorkspaceBoundaryError):
+        ws.read_text(drive_relative)
+
+
 def test_git_directory_access_rejected(ws):
     with pytest.raises(WorkspaceBoundaryError):
         ws.read_text(".git/config")

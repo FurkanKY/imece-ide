@@ -20,11 +20,12 @@ from __future__ import annotations
 import re
 import shutil
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from workspace.errors import WorkspaceBoundaryError
 
-_WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:/")
+_WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:")
 
 
 def _looks_absolute(raw: str) -> bool:
@@ -33,7 +34,28 @@ def _looks_absolute(raw: str) -> bool:
     return normalized.startswith("/") or bool(_WINDOWS_DRIVE_RE.match(normalized))
 
 
-def resolve_within_workspace(root: Path, relative_path: str, *, resolve_final: bool = True) -> Path:
+def _reject_symlink_components(
+    root: Path, parts: list[str], *, include_leaf: bool = True
+) -> None:
+    """Reject existing symlink components without resolving them."""
+    current = root
+    last_index = len(parts) if include_leaf else max(len(parts) - 1, 0)
+    for index, part in enumerate(parts):
+        current = current / part
+        if index < last_index and current.is_symlink():
+            raise WorkspaceBoundaryError(
+                f"Sembolik bağ üzerinden workspace erişimi engellendi: {part!r}"
+            )
+
+
+def resolve_within_workspace(
+    root: Path,
+    relative_path: str,
+    *,
+    resolve_final: bool = True,
+    reject_symlinks: bool = False,
+    allow_final_symlink: bool = False,
+) -> Path:
     """`relative_path`i `root`a göre çözer; kök dışına veya `.git` altına çıkışı reddeder.
 
     Sadece string ön-eki karşılaştırması YAPMAZ: sembolik bağlar gerçek yola
@@ -68,6 +90,9 @@ def resolve_within_workspace(root: Path, relative_path: str, *, resolve_final: b
         raise WorkspaceBoundaryError(
             f".git dizinine genel dosya erişimi engellendi: {relative_path!r}"
         )
+
+    if reject_symlinks:
+        _reject_symlink_components(root.resolve(strict=True), parts, include_leaf=not allow_final_symlink)
 
     resolved_root = root.resolve(strict=True)
 
@@ -114,11 +139,11 @@ class Workspace(ABC):
 
     def read_text(self, relative_path: str) -> str:
         """Dosyanın TAM içeriğini döndürür (context karakter sınırı burada uygulanmaz)."""
-        path = self._resolve(relative_path)
-        return path.read_text(encoding="utf-8", errors="replace")
+        path = self._resolve(relative_path, reject_symlinks=True)
+        return path.read_text(encoding="utf-8")
 
     def write_text(self, relative_path: str, content: str) -> None:
-        path = self._resolve(relative_path)
+        path = self._resolve(relative_path, reject_symlinks=True)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8", newline="\n")
 
@@ -134,7 +159,12 @@ class Workspace(ABC):
 
         Hedef bir sembolik bağsa, hedefi değil bağın KENDİSİNİ kaldırır.
         """
-        path = self._resolve(relative_path, resolve_final=False)
+        path = self._resolve(
+            relative_path,
+            resolve_final=False,
+            reject_symlinks=True,
+            allow_final_symlink=True,
+        )
         if path.is_symlink():
             path.unlink()
         elif path.is_dir():
@@ -148,8 +178,73 @@ class Workspace(ABC):
     def dispose(self) -> None:
         """Bu workspace'in ayırdığı kaynakları serbest bırakır. İdempotent olmalıdır."""
 
-    def _resolve(self, relative_path: str, *, resolve_final: bool = True) -> Path:
-        return resolve_within_workspace(self.root, relative_path, resolve_final=resolve_final)
+    def iter_files(
+        self,
+        relative_scope: str = ".",
+        *,
+        excluded_dirs: Iterable[str] = (),
+    ) -> Iterator[str]:
+        """Yield regular, non-symlink files under a workspace-relative scope.
+
+        Traversal is deliberately owned by Workspace so alternate workspace
+        implementations can replace the filesystem mechanism without changing
+        tool contracts. Directory exclusions are names, not .gitignore rules.
+        """
+        scope_parts = [
+            part
+            for part in relative_scope.replace("\\", "/").split("/")
+            if part not in ("", ".")
+        ]
+        if not scope_parts:
+            if relative_scope.replace("\\", "/") not in (".", "./"):
+                raise WorkspaceBoundaryError(f"Geçersiz scope: {relative_scope!r}")
+            scope = self.root.resolve(strict=True)
+        else:
+            scope = resolve_within_workspace(
+                self.root,
+                relative_scope,
+                reject_symlinks=True,
+            )
+
+        excluded = {name.casefold() for name in excluded_dirs}
+        root = self.root.resolve(strict=True)
+
+        def visit(current: Path) -> Iterator[str]:
+            if current.is_symlink():
+                return
+            if current.is_file():
+                yield current.relative_to(root).as_posix()
+                return
+            if not current.is_dir():
+                return
+            entries = sorted(current.iterdir(), key=lambda entry: entry.name.casefold())
+            for entry in entries:
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir():
+                    if entry.name.casefold() in excluded:
+                        continue
+                    yield from visit(entry)
+                elif entry.is_file():
+                    yield entry.relative_to(root).as_posix()
+
+        yield from visit(scope)
+
+    def _resolve(
+        self,
+        relative_path: str,
+        *,
+        resolve_final: bool = True,
+        reject_symlinks: bool = False,
+        allow_final_symlink: bool = False,
+    ) -> Path:
+        return resolve_within_workspace(
+            self.root,
+            relative_path,
+            resolve_final=resolve_final,
+            reject_symlinks=reject_symlinks,
+            allow_final_symlink=allow_final_symlink,
+        )
 
     def __enter__(self) -> "Workspace":
         return self
