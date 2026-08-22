@@ -20,6 +20,7 @@ from run_runtime.errors import (
     EventStreamClosedError,
     EventValidationError,
     InvalidRunStateError,
+    RunCompletionError,
     RunNotFoundError,
     RunProjectionError,
     RunRuntimeError,
@@ -29,6 +30,7 @@ from run_runtime.errors import (
 from run_runtime.events import CURRENT_SCHEMA_VERSION, RunEvent, RunEventSpec, RunEventType, build_event
 from run_runtime.models import RunPhase, RunRecord, RunStatus, TaskRecord
 from run_runtime.native_agent import CanonicalAgentEventSink
+from run_runtime.completion import RunCompletionGate
 from run_runtime.verification import CanonicalVerificationEventSink
 from run_runtime.projector import project_run
 from run_runtime.readmodels import (
@@ -55,6 +57,7 @@ __all__ = [
     "EventConflictError",
     "EventStreamClosedError",
     "InvalidRunStateError",
+    "RunCompletionError",
     "RunStoreError",
     "RunProjectionError",
     "RunEvent",
@@ -74,6 +77,7 @@ __all__ = [
     "EventSubscription",
     "RunRuntime",
     "CanonicalAgentEventSink",
+    "RunCompletionGate",
     "CanonicalVerificationEventSink",
     "DurableEventTail",
     "RecoveryReport",

@@ -59,3 +59,7 @@ class InvalidRunStateError(RunRuntimeError):
     Örn. Run WAITING_USER değilken proposal.applied/proposal.rejected
     yerleştirmeye (settle) çalışmak (bkz. run_runtime.legacy.LegacyRunCoordinator).
     """
+
+
+class RunCompletionError(RunRuntimeError):
+    """A requested Run terminal decision lacks valid canonical evidence."""

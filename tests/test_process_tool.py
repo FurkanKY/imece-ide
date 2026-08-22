@@ -254,7 +254,7 @@ def test_process_tool_canonical_bridge_preserves_metadata(tmp_path):
     )
     outcome = session.start("run process")
     assert outcome.final_text == "finished"
-    assert runtime.get_run(run.run_id).status is RunStatus.SUCCEEDED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
     events = runtime.events(run.run_id, limit=200).events
     completed = next(event for event in events if event.type == RunEventType.TOOL_COMPLETED)
     assert completed.payload["call_id"] == "process-1"

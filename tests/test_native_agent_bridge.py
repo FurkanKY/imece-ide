@@ -167,7 +167,7 @@ def test_text_only_agent_is_canonically_completed_before_return(tmp_path):
     )
     outcome = session.start("do it")
     assert outcome.final_text == "finished"
-    assert runtime.get_run(run.run_id).status is RunStatus.SUCCEEDED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
     assert event_types(runtime, run)[1:] == [
         RunEventType.EXECUTION_STARTED,
         RunEventType.TURN_STARTED,
@@ -176,7 +176,6 @@ def test_text_only_agent_is_canonically_completed_before_return(tmp_path):
         RunEventType.USAGE_RECORDED,
         RunEventType.TURN_COMPLETED,
         RunEventType.EXECUTION_COMPLETED,
-        RunEventType.RUN_COMPLETED,
     ]
     events = runtime.events(run.run_id, limit=200).events
     assert len({event.execution_id for event in events[1:]}) == 1
@@ -243,7 +242,7 @@ def test_approval_bridge_waits_then_resumes_atomically(tmp_path):
     assert (tmp_path / "x.txt").read_text(encoding="utf-8") == "x"
     types = event_types(runtime, run)
     assert types.index(RunEventType.PERMISSION_RESOLVED) < types.index(RunEventType.RUN_RESUMED) < types.index(RunEventType.TOOL_STARTED)
-    assert runtime.get_run(run.run_id).status is RunStatus.SUCCEEDED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 def test_approval_denial_is_canonical_and_model_recovers(tmp_path):
@@ -275,7 +274,7 @@ def test_approval_denial_is_canonical_and_model_recovers(tmp_path):
     assert failed.payload["recoverable"] is True
     assert failed.item_id == requested.item_id
     assert not any(event.type == RunEventType.TOOL_STARTED and event.payload.get("call_id") == "write" for event in events)
-    assert runtime.get_run(run.run_id).status is RunStatus.SUCCEEDED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 @pytest.mark.parametrize("invalid_return", [object(), {"text": "not a ModelTurn"}])
@@ -298,10 +297,9 @@ def test_invalid_model_return_records_model_failed_before_execution_failed(tmp_p
         RunEventType.MODEL_STARTED,
         RunEventType.MODEL_FAILED,
         RunEventType.EXECUTION_FAILED,
-        RunEventType.RUN_FAILED,
     ]
     assert RunEventType.MODEL_COMPLETED not in types
-    assert runtime.get_run(run.run_id).status is RunStatus.FAILED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 def test_internal_prepare_failure_closes_tool_lifecycle(tmp_path):
@@ -324,8 +322,8 @@ def test_internal_prepare_failure_closes_tool_lifecycle(tmp_path):
     assert failed[0].payload["stage"] == "prepare"
     assert failed[0].item_id == next(event.item_id for event in events if event.type == RunEventType.TOOL_REQUESTED and event.payload.get("call_id") == "same")
     assert RunEventType.TOOL_STARTED not in [event.type for event in events if event.payload.get("call_id") == "same"]
-    assert events[-2].type == RunEventType.EXECUTION_FAILED
-    assert events[-1].type == RunEventType.RUN_FAILED
+    assert events[-1].type == RunEventType.EXECUTION_FAILED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 def test_internal_execute_failure_closes_started_tool_lifecycle(tmp_path):
@@ -350,8 +348,8 @@ def test_internal_execute_failure_closes_started_tool_lifecycle(tmp_path):
     assert lifecycle[-1].payload["recoverable"] is False
     assert lifecycle[-1].payload["stage"] == "execute"
     assert len({event.item_id for event in lifecycle}) == 1
-    assert events[-2].type == RunEventType.EXECUTION_FAILED
-    assert events[-1].type == RunEventType.RUN_FAILED
+    assert events[-1].type == RunEventType.EXECUTION_FAILED
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 def test_provider_failure_records_model_and_execution_failure(tmp_path):
@@ -363,12 +361,12 @@ def test_provider_failure_records_model_and_execution_failure(tmp_path):
     assert isinstance(error.value.__cause__, RuntimeError)
     types = event_types(runtime, run)
     assert types[-4:] == [
+        RunEventType.TURN_STARTED,
         RunEventType.MODEL_STARTED,
         RunEventType.MODEL_FAILED,
         RunEventType.EXECUTION_FAILED,
-        RunEventType.RUN_FAILED,
-    ][-4:]
-    assert runtime.get_run(run.run_id).status is RunStatus.FAILED
+    ]
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 def test_sink_failure_before_model_or_tool_side_effect_fails_closed(tmp_path):

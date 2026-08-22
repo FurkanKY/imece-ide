@@ -183,24 +183,15 @@ class CanonicalAgentEventSink:
         if isinstance(event, TurnCompleted):
             return [self._spec(event, RunEventType.TURN_COMPLETED, {}, turn_id=event.turn_id)]
         if isinstance(event, ExecutionCompleted):
-            return [
-                self._spec(event, RunEventType.EXECUTION_COMPLETED, {
-                    "final_text": event.final_text,
-                    "model_turns": event.model_turns,
-                    "tool_calls": event.tool_calls,
-                    "tool_errors": event.tool_errors,
-                    "input_tokens": event.input_tokens,
-                    "output_tokens": event.output_tokens,
-                    "cost_usd": event.cost_usd,
-                }),
-                self._spec(event, RunEventType.RUN_COMPLETED, {}),
-            ]
+            return [self._spec(event, RunEventType.EXECUTION_COMPLETED, {
+                "final_text": event.final_text,
+                "model_turns": event.model_turns,
+                "tool_calls": event.tool_calls,
+                "tool_errors": event.tool_errors,
+                "input_tokens": event.input_tokens,
+                "output_tokens": event.output_tokens,
+                "cost_usd": event.cost_usd,
+            })]
         if isinstance(event, ExecutionFailed):
-            return [
-                self._spec(event, RunEventType.EXECUTION_FAILED, _error_payload(event)),
-                self._spec(event, RunEventType.RUN_FAILED, {
-                    "error_code": event.error_type,
-                    "error_message": event.message[:2000],
-                }),
-            ]
+            return [self._spec(event, RunEventType.EXECUTION_FAILED, _error_payload(event))]
         return []
