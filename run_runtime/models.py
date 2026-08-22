@@ -37,6 +37,10 @@ def new_event_id() -> str:
     return f"evt_{uuid.uuid4()}"
 
 
+def new_execution_id() -> str:
+    return f"exec_{uuid.uuid4()}"
+
+
 def to_canonical_utc(dt: datetime | None, field_name: str) -> datetime | None:
     """`dt`yi kanonik UTC'ye normalize eder; None ise None döner.
 

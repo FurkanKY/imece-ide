@@ -5,6 +5,31 @@ generator'ının olayları DEĞİŞMEDEN `run.event` kanalına forward edilir
 (stage/info/output/metric/diff/verdict/proposal). Proposal içerikleri sunucu
 tarafında tutulur → applyProposals yalnız yol listesi alır (içerik köprüden
 geri taşınmaz). Proposal gelince geçmişe kaydedilir (desktop.py davranışı).
+
+2F (kanonik run runtime entegrasyonu): project_runner hâlâ DEĞİŞMEDEN, ham
+legacy dict event'ler üretiyor. Her legacy event, arayüze iletilmeden ÖNCE
+LegacyRunCoordinator aracılığıyla SQLite'a (run_events) DAYANIKLI biçimde
+kaydedilir (bkz. run_runtime.legacy). Kanonik kalıcılık başarısız olursa
+orijinal legacy event ASLA `run.event` kanalına iletilmez ve koşu, host
+tarafında "failed" olarak sonlandırılır. run.start/run.event/run.finished'ın
+tel (wire) sözleşmesi TAMAMEN AYNI kalır — mevcut React arayüzü bu geçişten
+habersizdir.
+
+2F sertleştirme geçişi: run.finished artık YALNIZCA kanonik yerleşim (terminal
+settlement) BAŞARILI olduğunda "done"/"cancelled" bildirir — coordinator.
+finish_normal()/finish_cancelled() başarısız olursa "failed" olarak raporlanır
+(bkz. on_worker_finished/on_worker_cancelled). Böylece UI, SQLite hâlâ RUNNING
+derken asla "başarılı" bir bildirim almaz.
+
+BİLİNEN GEÇİCİ SINIRLAMALAR (2F): tek seferde yalnızca bir aktif legacy
+worker; süreç sahipliği/kira/heartbeat YOK; başlangıçta otomatik kurtarma
+YOK (recover_running_runs açık bir primitif olarak kalır); Apply/Reject
+bekleyen bir proposal, süreç yeniden başlatıldıktan sonra bellek-içi
+`_active` durumundan yeniden kurulamaz (yalnızca SQLite'taki kanonik
+WAITING_USER durumu kalıcıdır); ReceiptStore/HistoryStore hâlâ ikincil,
+en-iyi-çaba uyumluluk yazımlarıdır (2G bunları değiştirecek); checkpoint
+restore bu dilimde kanonikleştirilmedi (bkz. webhost/api/checkpoint.py,
+DEĞİŞTİRİLMEDİ).
 """
 
 from PySide6.QtCore import QThread, Signal
@@ -16,10 +41,15 @@ from project import Project
 from project_runner import run_project_task
 import providers as provider_registry
 from agents import DEFAULT_ROUTING
+from run_runtime.legacy import LegacyRunCoordinator
+from run_runtime.models import RunStatus
 from webhost import state
 from webhost.bridge import handler, BridgeError
 
-_active: dict = {"worker": None, "run_id": 0, "proposals": [], "task": "", "receipt": None}
+_active: dict = {
+    "worker": None, "coordinator": None, "run_id": None,
+    "proposals": [], "task": "", "receipt": None, "receipt_id": None,
+}
 
 
 class _Worker(QThread):
@@ -55,6 +85,71 @@ def _require_project() -> Project:
     return proj
 
 
+_TERMINAL_RUN_STATUSES = frozenset({
+    RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.INTERRUPTED,
+})
+
+
+def _active_canonical_run_blocks_start() -> bool:
+    """Yeni bir koşu başlatmadan önce, önceki koşunun kanonik olarak hâlâ
+    TERMİNAL-OLMAYAN bir durumda olup olmadığını kontrol eder.
+
+    Yalnızca WAITING_USER (bekleyen proposal) YETERSİZDİR: bir worker'ın
+    terminal yerleşimi (settlement) başarısız olabilir — örn. finish_normal()
+    başarısız olur, en iyi çaba finish_failed() de başarısız olur. UI doğru
+    biçimde "failed" görür, ama SQLite'ta Run hâlâ RUNNING kalmış olabilir.
+    QThread durduktan sonra yalnızca WAITING_USER kontrol eden eski bir
+    koruma, RUNNING != WAITING_USER olduğu için yeni bir koşuya izin verip
+    çözülmemiş bir kanonik Run'ı sessizce terk ederdi. Bu yüzden CREATED,
+    RUNNING, WAITING_USER dahil TERMİNAL OLMAYAN her durum engelleyicidir;
+    yalnızca SUCCEEDED/FAILED/CANCELLED/INTERRUPTED yeni bir koşuya izin verir.
+
+    Bellek-içi `_active["proposals"]` listesi BOŞ olsa bile (örn. beklenmedik
+    bir durum) bu kontrol bağımsız olarak uygulanır — yalnızca bellek-içi
+    duruma GÜVENİLMEZ. Süreçler arası (process yeniden başlatma sonrası)
+    yeniden inşa BU MİLESTONDA YOKTUR; bu yalnızca AYNI süreç içindeki bir
+    tutarlılık kontrolüdür (kira/heartbeat/çapraz-süreç tarama EKLENMEDİ).
+
+    KAPALI BAŞARISIZ (fail closed): bir coordinator VARSA ama kanonik durumu
+    OKUNAMIYORSA, "bekleyen bir Run yok" diye SESSİZCE VARSAYILMAZ — önceki
+    koşunun durumu doğrulanamadığından run.start tipli bir BridgeError ile
+    reddedilir (bkz. çağrı yeri).
+    """
+    if _active.get("proposals"):
+        return True
+    coordinator = _active.get("coordinator")
+    if coordinator is None:
+        return False
+    try:
+        current = coordinator.get_run()
+    except Exception as exc:
+        raise BridgeError(
+            "canonical_state_unavailable",
+            f"Önceki koşunun kanonik durumu doğrulanamadı; yeni koşu güvenli "
+            f"biçimde başlatılamaz: {exc}",
+        )
+    return current.status not in _TERMINAL_RUN_STATUSES
+
+
+def _safe_restore_checkpoint(proj: Project, checkpoint_id: str) -> tuple[bool, Exception | None]:
+    """Checkpoint'i geri yüklemeyi (restore) dener.
+
+    (restored_ok, error) döner. restore BAŞARILI olursa checkpoint dosyası
+    DÜŞÜRÜLÜR (drop); restore BAŞARISIZ olursa checkpoint KASITLI OLARAK
+    düşürülmez (tanı/olası manuel kurtarma için saklanır).
+    """
+    store = CheckpointStore(proj.root)
+    try:
+        store.restore(proj, checkpoint_id)
+    except Exception as e:
+        return False, e
+    try:
+        store.drop(checkpoint_id)
+    except Exception:
+        pass  # düşürme en iyi çabadır; restore zaten başarılı oldu
+    return True, None
+
+
 @handler("run.providers")
 def _providers(params, ctx):
     # Rol menüsü: kullanıma hazır sağlayıcılar + varsayılan atamalar (anahtar
@@ -72,67 +167,165 @@ def _start(params, ctx):
         raise BridgeError("empty_task", "Görev boş.")
     if _active["worker"] is not None and _active["worker"].isRunning():
         raise BridgeError("busy", "Zaten bir koşu sürüyor.")
+    if _active_canonical_run_blocks_start():
+        # Kanonik Run hâlâ terminal-olmayan bir durumda (CREATED/RUNNING/
+        # WAITING_USER) olabilir; yeni bir koşu başlatmak bu durumu sessizce
+        # terk ederdi.
+        raise BridgeError("pending_proposals", "Bekleyen öneriler var; önce uygula veya reddet.")
 
     routing = params.get("routing") or {}
-    _active["run_id"] += 1
-    run_id = str(_active["run_id"])
+    runtime = state.get_run_runtime()
+    # run.created/run.started BURADA, QThread BAŞLAMADAN ÖNCE kalıcı olur.
+    # Başarısız olursa (Task/Run kalıcılığı) BridgeError doğal olarak
+    # yukarı taşınır — hiçbir yerel worker/host durumu KURULMAMIŞ olur.
+    coordinator = LegacyRunCoordinator.start(
+        runtime, project_root=proj.root, task=task, routing=routing,
+    )
+    run_id = coordinator.run_id
+
     _active["proposals"] = []
     _active["task"] = task
     _active["receipt_id"] = None
-    _active["receipt"] = {"task": task, "routing": routing, "plan": None, "proposals": [],
-                          "review": {"verdict": "UNKNOWN", "note": ""},
-                          "metrics": {"latency_s": 0.0, "tokens": 0, "cost_usd": 0.0}}
+    _active["coordinator"] = coordinator
+    _active["run_id"] = run_id
+    _active["receipt"] = {
+        "task": task, "routing": dict(coordinator.routing), "plan": None, "proposals": [],
+        "review": {"verdict": "UNKNOWN", "note": ""},
+        "metrics": {"latency_s": 0.0, "tokens": 0, "cost_usd": 0.0},
+    }
 
-    bridge = ctx._bridge  # ana thread'e sinyalle taşınır (queued connection)
-    worker = _Worker(proj.root, task, routing)
+    try:
+        bridge = ctx._bridge  # ana thread'e sinyalle taşınır (queued connection)
+        # Worker'a TAM OLARAK kanonik Run'da saklanan routing verilir —
+        # build_agents'ın örtük ikinci bir DEFAULT_ROUTING türetmesine
+        # GÜVENİLMEZ; kalıcı routing ile fiilen kullanılan routing AYNI olur.
+        worker = _Worker(proj.root, task, coordinator.routing)
 
-    def on_event(ev: dict):
-        receipt = _active["receipt"]
-        if ev.get("type") == "plan":
-            receipt["plan"] = {"summary": ev.get("summary", ""), "files": ev.get("files", [])}
-        elif ev.get("type") == "diff":
-            receipt["proposals"].append({"path": ev.get("path", ""), "is_new": bool(ev.get("is_new")), "diff": ev.get("diff", "")})
-        elif ev.get("type") == "metric":
-            metric = receipt["metrics"]
-            metric["latency_s"] = round(metric["latency_s"] + float(ev.get("latency_s", 0)), 2)
-            metric["tokens"] += int(ev.get("tokens", 0))
-            metric["cost_usd"] = round(metric["cost_usd"] + float(ev.get("cost_usd", 0)), 5)
-        elif ev.get("type") == "verdict":
-            receipt["review"] = {"verdict": ev.get("verdict", "UNKNOWN"), "note": ev.get("note", "")}
-        if ev.get("type") == "proposal":
-            _active["proposals"] = ev.get("proposals", [])
-        bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
+        ended = {"flag": False}  # failed/cancelled sonrası ikinci "done" yayınlanmasın
 
-    ended = {"flag": False}  # failed/cancelled sonrası ikinci "done" yayınlanmasın
+        def settle_canonical_failure(message: str) -> None:
+            # En iyi çaba: kanonik yerleşimin KENDİSİ de başarısız olabilir; yine
+            # de arayüze bir run.finished bildirimi GÖNDERİLECEK (aşağıda), ama
+            # kalıcılığın başarılı olduğu ASLA iddia edilmez.
+            try:
+                coordinator.finish_failed(message)
+            except Exception:
+                pass
 
-    def finish(status: str, error: str | None = None):
-        if ended["flag"]:
-            return
-        ended["flag"] = True
-        receipt = dict(_active["receipt"] or {})
-        receipt["status"] = "failed" if status == "failed" else "cancelled" if status == "cancelled" else "proposed" if _active["proposals"] else "completed"
-        if error:
-            receipt["error"] = error
+        def on_event(ev: dict):
+            try:
+                coordinator.handle_legacy_event(ev)
+            except Exception as exc:
+                if ended["flag"]:
+                    return
+                worker.cancel()
+                message = f"Kanonik olay kalıcılığı başarısız: {exc}"
+                settle_canonical_failure(message)
+                finish("failed", message)
+                return
+
+            # BURAYA yalnızca kanonik kalıcılık BAŞARILI olduysa ulaşılır.
+            receipt = _active["receipt"]
+            if ev.get("type") == "plan":
+                receipt["plan"] = {"summary": ev.get("summary", ""), "files": ev.get("files", [])}
+            elif ev.get("type") == "diff":
+                receipt["proposals"].append({"path": ev.get("path", ""), "is_new": bool(ev.get("is_new")), "diff": ev.get("diff", "")})
+            elif ev.get("type") == "metric":
+                metric = receipt["metrics"]
+                metric["latency_s"] = round(metric["latency_s"] + float(ev.get("latency_s", 0)), 2)
+                metric["tokens"] += int(ev.get("tokens", 0))
+                metric["cost_usd"] = round(metric["cost_usd"] + float(ev.get("cost_usd", 0)), 5)
+            elif ev.get("type") == "verdict":
+                receipt["review"] = {"verdict": ev.get("verdict", "UNKNOWN"), "note": ev.get("note", "")}
+            if ev.get("type") == "proposal":
+                _active["proposals"] = ev.get("proposals", [])
+            bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
+
+        def finish(status: str, error: str | None = None):
+            if ended["flag"]:
+                return
+            ended["flag"] = True
+            receipt = dict(_active["receipt"] or {})
+            receipt["status"] = "failed" if status == "failed" else "cancelled" if status == "cancelled" else "proposed" if _active["proposals"] else "completed"
+            if error:
+                receipt["error"] = error
+            try:
+                stored = ReceiptStore(proj.root).create(receipt)
+                _active["receipt_id"] = stored["id"]
+                metric = stored["metrics"]
+                HistoryStore(proj.root).add(task, stored["review"].get("verdict", "UNKNOWN"), metric["tokens"], metric["cost_usd"], [p.get("path", "") for p in stored["proposals"]], stored["id"], stored["status"])
+            except OSError:
+                # Makbuz diske yazılamasa bile koşu sonucu ve kullanıcı kararı kaybolmaz
+                # (kanonik Run zaten SQLite'a COMMIT olmuştur — ya da hiç olmamıştır;
+                # o karar bu satırdan ÖNCE, aşağıdaki status parametresiyle verilmiştir).
+                _active["receipt_id"] = None
+            payload = {"runId": run_id, "status": status}
+            if error:
+                payload["error"] = error
+            bridge.emit_event("run.finished", payload)
+
+        def on_worker_failed(msg: str):
+            if ended["flag"]:
+                return
+            # FAILED sinyali: kanonik yerleşim en iyi çabadır; UI HER ZAMAN
+            # "failed" görür (zaten olumsuz bir sonuç raporlanıyor).
+            settle_canonical_failure(msg)
+            finish("failed", msg)
+
+        def on_worker_cancelled():
+            if ended["flag"]:
+                return
+            try:
+                coordinator.finish_cancelled()
+            except Exception as exc:
+                # Kanonik iptal yerleşimi BAŞARISIZ oldu: UI'a "cancelled"
+                # DEĞİL, "failed" bildirilir — SQLite hâlâ RUNNING derken
+                # asla bir başarı/iptal iddia edilmez. En iyi çaba olarak
+                # run.failed ile durum kapatılmaya çalışılır.
+                message = f"Kanonik iptal kalıcılığı başarısız: {exc}"
+                settle_canonical_failure(message)
+                finish("failed", message)
+                return
+            finish("cancelled")
+
+        def on_worker_finished():
+            if ended["flag"]:
+                return
+            try:
+                coordinator.finish_normal()
+            except Exception as exc:
+                # Kanonik normal sonlanma BAŞARISIZ oldu: UI'a "done" DEĞİL,
+                # "failed" bildirilir.
+                message = f"Kanonik normal sonlanma başarısız: {exc}"
+                settle_canonical_failure(message)
+                finish("failed", message)
+                return
+            finish("done")
+
+        worker.event.connect(on_event)
+        worker.failed.connect(on_worker_failed)
+        worker.cancelled.connect(on_worker_cancelled)
+        worker.finished.connect(on_worker_finished)
+
+        worker.start()
+    except Exception as exc:
+        # Kanonik run.created/run.started ZATEN commit oldu ama yerel QThread
+        # kurulumu/başlatılması başarısız oldu: Run'ı kalıcı olarak RUNNING
+        # bırakmak yerine en iyi çaba bir run.failed yerleştirmesi deneriz,
+        # host durumunu SIFIRLARIZ ve BridgeError fırlatırız. Hiçbir zaman
+        # hiç başlamamış bir worker için run.finished YAYINLANMAZ — bu istek
+        # zaten BridgeError ile başarısız olacaktır.
         try:
-            stored = ReceiptStore(proj.root).create(receipt)
-            _active["receipt_id"] = stored["id"]
-            metric = stored["metrics"]
-            HistoryStore(proj.root).add(task, stored["review"].get("verdict", "UNKNOWN"), metric["tokens"], metric["cost_usd"], [p.get("path", "") for p in stored["proposals"]], stored["id"], stored["status"])
-        except OSError:
-            # Makbuz diske yazılamasa bile koşu sonucu ve kullanıcı kararı kaybolmaz.
-            _active["receipt_id"] = None
-        payload = {"runId": run_id, "status": status}
-        if error:
-            payload["error"] = error
-        bridge.emit_event("run.finished", payload)
-
-    worker.event.connect(on_event)
-    worker.failed.connect(lambda msg: finish("failed", msg))
-    worker.cancelled.connect(lambda: finish("cancelled"))
-    worker.finished.connect(lambda: finish("done"))
+            coordinator.finish_failed(f"Yerel worker başlatılamadı: {exc}")
+        except Exception:
+            pass
+        _active["worker"] = None
+        _active["coordinator"] = None
+        _active["run_id"] = None
+        _active["proposals"] = []
+        raise BridgeError("worker_start_failed", f"Koşu başlatılamadı: {exc}")
 
     _active["worker"] = worker
-    worker.start()
     return {"runId": run_id}
 
 
@@ -151,9 +344,16 @@ def _apply(params, ctx):
     proposals = [p for p in _active.get("proposals", []) if p.get("path") in wanted]
     if not proposals:
         return {"applied": [], "errors": [], "checkpointId": None}
+
+    coordinator = _active.get("coordinator")
+    if coordinator is None:
+        # Bekleyen öneriler var ama kanonik koordinatör yok: KAPALI BAŞARISIZ
+        # olunur — dosya sistemine DOKUNULMAZ, öneriler TEMİZLENMEZ.
+        raise BridgeError("no_active_run", "Aktif bir kanonik koşu yok; öneri uygulanamaz.")
+
     try:
         checkpoint = CheckpointStore(proj.root).create(
-            proj, [p["path"] for p in proposals], str(_active.get("run_id")),
+            proj, [p["path"] for p in proposals], _active.get("run_id"),
         )
     except Exception as e:
         raise BridgeError("checkpoint", f"Checkpoint oluşturulamadı: {e}")
@@ -165,33 +365,96 @@ def _apply(params, ctx):
             applied.append(p["path"])
         except Exception as e:
             errors.append({"path": p.get("path", ""), "message": str(e)})
-    # Kısmi apply'da checkpoint geri yüklenir; kullanıcı hiçbir yarım değişiklik görmez.
+
     if errors:
-        store = CheckpointStore(proj.root)
-        store.restore(proj, checkpoint["id"])
-        store.drop(checkpoint["id"])
-        applied = []
-    if applied:
-        _active["proposals"] = [
-            p for p in _active["proposals"] if p.get("path") not in set(applied)
-        ]
-    if applied:
-        ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
-        if _active.get("receipt_id"):
-            ReceiptStore(proj.root).update(_active["receipt_id"], {"status": "applied", "applied": applied, "checkpointId": checkpoint["id"]})
+        # Kısmi apply'da checkpoint geri yüklenir; kullanıcı hiçbir yarım
+        # değişiklik görmez. proposal.applied HİÇ eklenmez; kanonik Run
+        # WAITING_USER kalır.
+        restored_ok, restore_err = _safe_restore_checkpoint(proj, checkpoint["id"])
+        if not restored_ok:
+            # Geri alma da başarısız: dosya sistemi durumu BİLİNMİYOR/TUTARSIZ
+            # olabilir. Checkpoint'i KASITLI OLARAK düşürmüyoruz (tanı için).
+            ctx._bridge.emit_event(
+                "fs.changed", {"kind": "modified", "paths": [p["path"] for p in proposals]},
+            )
+            raise BridgeError(
+                "apply_rollback_failed",
+                f"Kısmi apply başarısız oldu VE geri alma (rollback) da başarısız oldu "
+                f"(checkpoint={checkpoint['id']}); dosya sistemi durumu tutarsız olabilir: {restore_err}",
+            )
+        return {"applied": [], "errors": errors, "checkpointId": None}
+
+    # Dosya yazımları TAMAMEN başarılı. Şimdi kanonik yerleşimi (settlement)
+    # dene — bu, dosya değişikliklerinin "gerçek" sayılıp sayılmayacağına
+    # karar veren ADIMDIR.
+    try:
+        coordinator.record_proposal_applied(applied_paths=applied, checkpoint_id=checkpoint["id"])
+    except Exception as e:
+        # KRİTİK: dosya sistemi zaten değişti ama kanonik geçmiş bunu
+        # yansıtamadı. Dosya sistemini GERİ ALMAYI DENE; fs.changed
+        # YAYINLAMA (restore başarılıysa); aktif önerileri TEMİZLEME;
+        # başarılı bir apply RAPORLAMA.
+        restored_ok, restore_err = _safe_restore_checkpoint(proj, checkpoint["id"])
+        if not restored_ok:
+            ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
+            raise BridgeError(
+                "canonical_apply_rollback_failed",
+                f"Kanonik onay kalıcılığı başarısız oldu VE dosya sistemi geri alma "
+                f"(rollback) da başarısız oldu (checkpoint={checkpoint['id']}); dosya "
+                f"sistemi durumu tutarsız olabilir: {restore_err} (orijinal hata: {e})",
+            )
+        raise BridgeError(
+            "canonical_apply_failed",
+            f"Dosyalar geri alındı: kanonik onay kalıcılığı başarısız oldu: {e}",
+        )
+
+    # Kanonik onay BAŞARILI: checkpoint Undo için SAKLANIR, mantıksal öneri
+    # kararı durumu (bu milestonda kısmi çoklu-karar desteklenmediğinden)
+    # TAMAMEN temizlenir.
+    _active["proposals"] = []
+    ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
+    if _active.get("receipt_id"):
+        try:
+            ReceiptStore(proj.root).update(
+                _active["receipt_id"],
+                {"status": "applied", "applied": applied, "checkpointId": checkpoint["id"]},
+            )
+        except (OSError, ValueError):
+            pass  # en iyi çaba uyumluluk yazımı; kanonik onay zaten kalıcı
     return {
         "applied": applied,
-        "errors": errors,
-        "checkpointId": checkpoint["id"] if applied else None,
+        "errors": [],
+        "checkpointId": checkpoint["id"],
     }
 
 
 @handler("run.rejectProposals")
 def _reject(params, ctx):
     proj = _require_project()
-    if _active.get("receipt_id"):
-        ReceiptStore(proj.root).update(_active["receipt_id"], {"status": "rejected", "rejected": [p.get("path", "") for p in _active.get("proposals", [])]})
+    active_proposals = _active.get("proposals") or []
+    if not active_proposals:
+        return {}
+
+    coordinator = _active.get("coordinator")
+    if coordinator is None:
+        # Bekleyen öneriler var ama kanonik koordinatör yok: KAPALI BAŞARISIZ
+        # olunur — öneriler TEMİZLENMEZ.
+        raise BridgeError("no_active_run", "Aktif bir kanonik koşu yok; öneri reddedilemez.")
+
+    rejected_paths = [p.get("path", "") for p in active_proposals]
+    try:
+        coordinator.record_proposal_rejected(rejected_paths=rejected_paths)
+    except Exception as e:
+        raise BridgeError("canonical_reject_failed", f"Kanonik ret kalıcılığı başarısız oldu: {e}")
+
     _active["proposals"] = []
+    if _active.get("receipt_id"):
+        try:
+            ReceiptStore(proj.root).update(
+                _active["receipt_id"], {"status": "rejected", "rejected": rejected_paths},
+            )
+        except (OSError, ValueError):
+            pass  # en iyi çaba uyumluluk yazımı; kanonik ret zaten kalıcı
     return {}
 
 

@@ -45,5 +45,17 @@ class RunProjectionError(RunRuntimeError):
 
 
 class EventStreamClosedError(RunRuntimeError):
-    """next_page(), kapatılmış (ve dayanıklı geri kalanı tükenmiş) bir
-    DurableEventTail üzerinde çağrıldı (bkz. run_runtime.service)."""
+    """next_page(), kapatılmış bir DurableEventTail üzerinde çağrıldı.
+
+    close() SERT bir kaynak sınırıdır: kapandıktan SONRA next_page(), SQLite'ta
+    okunmamış dayanıklı event'ler olsa BİLE, hiçbir sorgu yapmadan HER ZAMAN bu
+    hatayı fırlatır (backlog DRAIN EDİLMEZ) — bkz. run_runtime.service.DurableEventTail.
+    """
+
+
+class InvalidRunStateError(RunRuntimeError):
+    """Bir işlem, Run'ın şu anki durumuyla (status) uyumsuz olduğu için reddedildi.
+
+    Örn. Run WAITING_USER değilken proposal.applied/proposal.rejected
+    yerleştirmeye (settle) çalışmak (bkz. run_runtime.legacy.LegacyRunCoordinator).
+    """
