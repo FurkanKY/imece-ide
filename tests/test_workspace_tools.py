@@ -31,6 +31,7 @@ from tool_runtime.tools.workspace_files import (
     READ_MAX_LINES,
     READ_MAX_OUTPUT_CHARS,
     SEARCH_MAX_OUTPUT_CHARS,
+    register_workspace_read_tools,
     register_workspace_tools,
 )
 from workspace.local import LocalWorkspace
@@ -276,6 +277,45 @@ def test_reviewer_policy_can_inspect_but_not_mutate(ws):
     with pytest.raises(ToolDeniedError):
         _run(dispatcher, context, "delete_path", {"path": "file.txt"})
     assert (ws.root / "file.txt").read_text(encoding="utf-8") == "before"
+
+
+def test_register_workspace_read_tools_exposes_exactly_the_read_only_surface():
+    registry = ToolRegistry()
+    register_workspace_read_tools(registry)
+    names = {spec.name for spec in registry.list_specs()}
+    assert names == {"read_file", "list_files", "search_text"}
+    for spec in registry.list_specs():
+        assert spec.annotations.read_only is True
+        assert spec.annotations.destructive is False
+
+
+def test_register_workspace_tools_still_registers_full_surface_in_same_order():
+    registry = ToolRegistry()
+    register_workspace_tools(registry)
+    names = [spec.name for spec in registry.list_specs()]
+    assert names == ["read_file", "list_files", "search_text", "write_file", "delete_path"]
+
+
+def test_register_workspace_read_tools_schemas_match_full_registration(tmp_path):
+    full = ToolRegistry()
+    register_workspace_tools(full)
+    read_only = ToolRegistry()
+    register_workspace_read_tools(read_only)
+    for name in ("read_file", "list_files", "search_text"):
+        assert full.get(name).input_schema == read_only.get(name).input_schema
+        assert full.get(name).description == read_only.get(name).description
+
+
+def test_read_only_tools_execute_identically_through_read_only_registry(tmp_path):
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+    ws = LocalWorkspace(tmp_path)
+    registry = ToolRegistry()
+    register_workspace_read_tools(registry)
+    policy = PolicyEvaluator([PermissionRule("*", "*", PermissionEffect.ALLOW)])
+    dispatcher = Dispatcher(registry, policy)
+    context = ToolExecutionContext(workspace=ws)
+    observation = _run(dispatcher, context, "read_file", {"path": "a.txt"})
+    assert "hello" in observation.content
 
 
 def _git(args, cwd):

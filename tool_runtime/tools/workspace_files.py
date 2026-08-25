@@ -204,9 +204,9 @@ def _schema(properties: dict[str, Any], required: list[str] | None = None) -> di
     }
 
 
-def register_workspace_tools(registry: ToolRegistry) -> None:
+def register_workspace_read_tools(registry: ToolRegistry) -> None:
+    """Register exactly the read-only workspace tools: read_file, list_files, search_text."""
     read_only = ToolAnnotations(read_only=True, idempotent=True)
-    destructive = ToolAnnotations(destructive=True, idempotent=True)
     registry.register(
         ToolSpec(
             "read_file",
@@ -257,6 +257,11 @@ def register_workspace_tools(registry: ToolRegistry) -> None:
         ),
         _SearchTextExecutor(),
     )
+
+
+def register_workspace_tools(registry: ToolRegistry) -> None:
+    destructive = ToolAnnotations(destructive=True, idempotent=True)
+    register_workspace_read_tools(registry)
     registry.register(
         ToolSpec(
             "write_file",

@@ -10,6 +10,7 @@ from agent_runtime.errors import AgentBackendError  # noqa: E402
 from process_runtime import ProcessRequest, ProcessResult  # noqa: E402
 from run_runtime import (  # noqa: E402
     CanonicalAgentEventSink,
+    CanonicalReviewEventSink,
     CanonicalVerificationEventSink,
     RunCompletionGate,
     RunEventSpec,
@@ -21,6 +22,7 @@ from run_runtime import (  # noqa: E402
     build_receipt,
     recover_running_runs,
 )
+from review_runtime.models import ReviewFinding, ReviewReport, ReviewSeverity, ReviewVerdict  # noqa: E402
 from run_runtime.errors import EventSequenceError, RunCompletionError  # noqa: E402
 from run_runtime.readmodels import RunReadSnapshot  # noqa: E402
 from verification_runtime import (  # noqa: E402
@@ -367,3 +369,64 @@ def test_recovery_does_not_invent_terminal_result_for_ungated_windows(tmp_path):
     append_verification(runtime, run.run_id, "ver", "pass")
     recover_running_runs(runtime)
     assert runtime.get_run(run.run_id).status is RunStatus.INTERRUPTED
+
+
+def test_reviewer_canonical_lifecycle_does_not_block_completion_gate(tmp_path):
+    """Milestone 3G regression: worker -> verification PASS -> reviewer
+    APPROVED lifecycle must still let RunCompletionGate.complete_verified
+    succeed, and the Reviewer must not have produced any canonical
+    execution.* lifecycle event (see run_runtime/reviewer.py)."""
+    runtime, _, run = setup_runtime(tmp_path)
+    agent = AgentSession(
+        backend=ScriptedBackend([ModelTurn("done", (), ModelStopReason.COMPLETED, ModelUsage())]),
+        registry=ToolRegistry(),
+        policy=PolicyEvaluator(),
+        context=ToolExecutionContext(LocalWorkspace(tmp_path), run_id=run.run_id, execution_id="exec-1"),
+        event_sink=CanonicalAgentEventSink(runtime, run.run_id, execution_id="exec-1"),
+        execution_id="exec-1",
+    )
+    agent.start("task")
+
+    verification_id = "ver-1"
+    VerificationRunner(
+        FakeProcessRunner(),
+        CanonicalVerificationEventSink(runtime, run.run_id, verification_id=verification_id),
+    ).run(
+        LocalWorkspace(tmp_path),
+        VerificationPlan(("plan"), (
+            VerificationCheck("check", "Check", ProcessRequest((sys.executable, "-c", "pass"))),
+        )),
+        verification_id=verification_id,
+    )
+
+    review_id = "rev-1"
+    review_sink = CanonicalReviewEventSink(runtime, run.run_id, review_id=review_id)
+    reviewer_agent = AgentSession(
+        backend=ScriptedBackend([ModelTurn(
+            '{"verdict":"APPROVED","summary":"ok","findings":[]}', (), ModelStopReason.COMPLETED, ModelUsage(),
+        )]),
+        registry=ToolRegistry(),
+        policy=PolicyEvaluator(),
+        context=ToolExecutionContext(LocalWorkspace(tmp_path)),
+        event_sink=review_sink,
+        execution_id=f"review_exec_{review_id}",
+    )
+    outcome = reviewer_agent.start("review this")
+    review_sink.complete(ReviewReport(
+        review_id=review_id, verdict=ReviewVerdict.APPROVED, summary=outcome.final_text[:200] or "ok",
+        findings=(), repository_fingerprint="a" * 64, diff_sha256="b" * 64,
+        verification_id=verification_id, verification_status="pass",
+    ))
+
+    events = runtime.events(run.run_id, limit=200).events
+    reviewer_events = [event for event in events if event.source == "reviewer"]
+    assert reviewer_events, "reviewer must have produced canonical events"
+    lifecycle_types = {RunEventType.EXECUTION_STARTED, RunEventType.EXECUTION_COMPLETED, RunEventType.EXECUTION_FAILED}
+    assert all(event.type not in lifecycle_types for event in reviewer_events)
+    assert all(event.execution_id is None for event in reviewer_events)
+    assert reviewer_events[-1].type == RunEventType.REVIEW_COMPLETED
+
+    RunCompletionGate(runtime).complete_verified(run.run_id, verification_id=verification_id)
+    completed = runtime.get_run(run.run_id)
+    assert completed.status is RunStatus.SUCCEEDED
+    assert runtime.events(run.run_id, limit=200).events[-1].type == RunEventType.RUN_COMPLETED

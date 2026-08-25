@@ -17,12 +17,14 @@ from run_runtime.legacy import LegacyRunCoordinator  # noqa: E402
 from run_runtime.readmodels import (  # noqa: E402
     HISTORY_MAX_ITEMS,
     RunReadService,
+    RunReadSnapshot,
     build_history_item,
     build_receipt,
     canonical_status_string,
     load_full_event_history,
     merge_canonical_and_legacy_history,
 )
+from run_runtime.events import RunEventSpec  # noqa: E402
 from run_runtime.service import RunRuntime  # noqa: E402
 from run_runtime.store import RunStore  # noqa: E402
 
@@ -559,3 +561,98 @@ def test_malformed_legacy_entries_not_mutated():
     original = dict(malformed)
     merge_canonical_and_legacy_history([], [malformed], limit=100)
     assert malformed == original
+
+
+# ==================== native semantic Reviewer: latest-attempt read model ====================
+
+
+def _seed_running_run(runtime, *, project_root=PROJECT_ROOT):
+    task = runtime.create_task(project_root=project_root, prompt="review me")
+    run = runtime.create_run(task_id=task.task_id)
+    runtime.record(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    return task, run
+
+
+def _review_receipt_verdict(runtime, task, run):
+    current = runtime.get_run(run.run_id)
+    snapshot = RunReadSnapshot(
+        task=task, run=current, events=runtime.events(run.run_id, limit=200).events,
+    )
+    receipt = build_receipt(snapshot)
+    history_verdict = build_history_item(snapshot)["verdict"]
+    assert receipt["review"]["verdict"] == history_verdict
+    return receipt["review"]
+
+
+def test_legacy_review_completed_without_review_started_still_works(runtime):
+    task, run = _seed_running_run(runtime)
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.REVIEW_COMPLETED,
+        payload={"verdict": "APPROVED", "note": "legacy verdict"},
+    )
+    review = _review_receipt_verdict(runtime, task, run)
+    assert review == {"verdict": "APPROVED", "note": "legacy verdict"}
+
+
+def test_native_review_running_shows_unknown(runtime):
+    task, run = _seed_running_run(runtime)
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.REVIEW_STARTED, payload={"review_id": "rev-1"},
+        correlation_id="rev-1", source="reviewer",
+    )
+    review = _review_receipt_verdict(runtime, task, run)
+    assert review == {"verdict": "UNKNOWN", "note": "Review is running."}
+
+
+def test_native_review_failed_shows_unknown(runtime):
+    task, run = _seed_running_run(runtime)
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(RunEventType.REVIEW_STARTED, {"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer"),
+        RunEventSpec(RunEventType.REVIEW_FAILED, {"review_id": "rev-1", "error_type": "X", "error_message": "boom"}, correlation_id="rev-1", source="reviewer"),
+    ))
+    review = _review_receipt_verdict(runtime, task, run)
+    assert review == {"verdict": "UNKNOWN", "note": "Review failed."}
+
+
+def test_native_review_interrupted_shows_unknown(runtime):
+    task, run = _seed_running_run(runtime)
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(RunEventType.REVIEW_STARTED, {"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer"),
+        RunEventSpec(RunEventType.REVIEW_INTERRUPTED, {"review_id": "rev-1", "reason": "process_restart"}, correlation_id="rev-1", source="reviewer"),
+    ))
+    review = _review_receipt_verdict(runtime, task, run)
+    assert review == {"verdict": "UNKNOWN", "note": "Review was interrupted."}
+
+
+def test_native_review_completed_shows_verdict_and_summary(runtime):
+    task, run = _seed_running_run(runtime)
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(RunEventType.REVIEW_STARTED, {"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer"),
+        RunEventSpec(RunEventType.REVIEW_COMPLETED, {
+            "review_id": "rev-1", "verdict": "NEEDS_FIX", "note": "Found a bug.", "summary": "Found a bug.",
+            "findings": [{"severity": "major", "message": "m", "path": None, "start_line": None, "end_line": None}],
+            "repository_fingerprint": "a" * 64, "diff_sha256": "b" * 64,
+            "verification_id": None, "verification_status": None,
+        }, correlation_id="rev-1", source="reviewer"),
+    ))
+    review = _review_receipt_verdict(runtime, task, run)
+    assert review == {"verdict": "NEEDS_FIX", "note": "Found a bug."}
+
+
+def test_stale_older_review_verdict_never_leaks_once_newer_attempt_started(runtime):
+    task, run = _seed_running_run(runtime)
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(RunEventType.REVIEW_STARTED, {"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer"),
+        RunEventSpec(RunEventType.REVIEW_COMPLETED, {
+            "review_id": "rev-1", "verdict": "APPROVED", "note": "old ok", "summary": "old ok",
+            "findings": [], "repository_fingerprint": "a" * 64, "diff_sha256": "b" * 64,
+            "verification_id": None, "verification_status": None,
+        }, correlation_id="rev-1", source="reviewer"),
+    ))
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.REVIEW_STARTED, payload={"review_id": "rev-2"},
+        correlation_id="rev-2", source="reviewer",
+    )
+    review = _review_receipt_verdict(runtime, task, run)
+    assert review["verdict"] != "APPROVED"
+    assert review == {"verdict": "UNKNOWN", "note": "Review is running."}

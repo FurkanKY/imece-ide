@@ -198,6 +198,41 @@ def recover_running_runs(runtime: RunRuntime) -> RecoveryReport:
                             source=RECOVERY_SOURCE,
                         )
                     )
+            review_starts = [
+                event for event in history
+                if event.type == RunEventType.REVIEW_STARTED
+                and isinstance(event.payload.get("review_id"), str)
+            ]
+            for index, started in enumerate(review_starts):
+                review_id = started.payload["review_id"]
+                next_start_seq = None
+                for later in review_starts[index + 1:]:
+                    if later.payload["review_id"] == review_id:
+                        next_start_seq = later.seq
+                        break
+                has_review_terminal = any(
+                    event.seq > started.seq
+                    and (next_start_seq is None or event.seq < next_start_seq)
+                    and event.payload.get("review_id") == review_id
+                    and event.type in {
+                        RunEventType.REVIEW_COMPLETED,
+                        RunEventType.REVIEW_FAILED,
+                        RunEventType.REVIEW_INTERRUPTED,
+                    }
+                    for event in history
+                )
+                if not has_review_terminal:
+                    specs.append(
+                        RunEventSpec(
+                            type=RunEventType.REVIEW_INTERRUPTED,
+                            payload={
+                                "review_id": review_id,
+                                "reason": RECOVERY_INTERRUPT_REASON,
+                            },
+                            correlation_id=started.correlation_id or review_id,
+                            source=RECOVERY_SOURCE,
+                        )
+                    )
             if not specs:
                 # Preserve the established single-event recovery seam when no
                 # unfinished tool exists; this also keeps existing store-level

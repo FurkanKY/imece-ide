@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from run_runtime.errors import RunStoreError  # noqa: E402
-from run_runtime.events import RunEventType  # noqa: E402
+from run_runtime.events import RunEventSpec, RunEventType  # noqa: E402
 from run_runtime.models import RunPhase, RunStatus  # noqa: E402
 from run_runtime.recovery import recover_running_runs  # noqa: E402
 from run_runtime.service import RunRuntime  # noqa: E402
@@ -185,6 +185,92 @@ def test_multiple_running_runs_handled_independently(runtime):
     assert set(report.interrupted_run_ids) == {"run_a", "run_b"}
     assert runtime.get_run("run_a").status == RunStatus.INTERRUPTED
     assert runtime.get_run("run_b").status == RunStatus.INTERRUPTED
+
+
+def test_unfinished_review_is_interrupted(runtime):
+    run = _seed_run(runtime, task_id="task_a", run_id="run_a")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.store.append_event(
+        run_id=run.run_id, type=RunEventType.REVIEW_STARTED,
+        payload={"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer",
+    )
+
+    report = recover_running_runs(runtime)
+
+    assert report.interrupted_run_ids == ("run_a",)
+    events = runtime.events("run_a", limit=200).events
+    review_interrupted = [event for event in events if event.type == RunEventType.REVIEW_INTERRUPTED]
+    assert len(review_interrupted) == 1
+    assert review_interrupted[0].payload == {"review_id": "rev-1", "reason": "process_restart"}
+    types = [event.type for event in events]
+    assert types.index(RunEventType.REVIEW_INTERRUPTED) < types.index(RunEventType.RUN_INTERRUPTED)
+    assert runtime.get_run("run_a").status == RunStatus.INTERRUPTED
+
+
+def test_unfinished_reviewer_tool_and_review_are_both_interrupted_in_order(runtime):
+    run = _seed_run(runtime, task_id="task_a", run_id="run_a")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(
+            RunEventType.REVIEW_STARTED, {"review_id": "rev-1"},
+            correlation_id="rev-1", source="reviewer",
+        ),
+        RunEventSpec(
+            RunEventType.TOOL_REQUESTED,
+            {"call_id": "c1", "tool_name": "search_text", "arguments": {}},
+            turn_id="t1", item_id="i1", correlation_id="rev-1", source="reviewer",
+        ),
+        RunEventSpec(
+            RunEventType.TOOL_STARTED,
+            {"call_id": "c1", "tool_name": "search_text"},
+            turn_id="t1", item_id="i1", correlation_id="rev-1", source="reviewer",
+        ),
+    ))
+
+    report = recover_running_runs(runtime)
+
+    assert report.interrupted_run_ids == ("run_a",)
+    events = runtime.events("run_a", limit=200).events
+    types = [event.type for event in events]
+    assert types.index(RunEventType.TOOL_INTERRUPTED) < types.index(RunEventType.REVIEW_INTERRUPTED)
+    assert types.index(RunEventType.REVIEW_INTERRUPTED) < types.index(RunEventType.RUN_INTERRUPTED)
+
+
+def test_completed_review_is_not_interrupted(runtime):
+    run = _seed_run(runtime, task_id="task_a", run_id="run_a")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(RunEventType.REVIEW_STARTED, {"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer"),
+        RunEventSpec(RunEventType.REVIEW_COMPLETED, {
+            "review_id": "rev-1", "verdict": "APPROVED", "note": "ok", "summary": "ok",
+            "findings": [], "repository_fingerprint": "a" * 64, "diff_sha256": "b" * 64,
+            "verification_id": None, "verification_status": None,
+        }, correlation_id="rev-1", source="reviewer"),
+    ))
+
+    recover_running_runs(runtime)
+
+    events = runtime.events("run_a", limit=200).events
+    assert RunEventType.REVIEW_INTERRUPTED not in [event.type for event in events]
+    assert runtime.get_run("run_a").status == RunStatus.INTERRUPTED  # run itself still settles
+
+
+def test_review_recovery_is_idempotent_on_repeated_scan(runtime):
+    run = _seed_run(runtime, task_id="task_a", run_id="run_a")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.store.append_event(
+        run_id=run.run_id, type=RunEventType.REVIEW_STARTED,
+        payload={"review_id": "rev-1"}, correlation_id="rev-1", source="reviewer",
+    )
+
+    first = recover_running_runs(runtime)
+    assert first.interrupted_run_ids == ("run_a",)
+    before = len(runtime.events("run_a", limit=200).events)
+
+    second = recover_running_runs(runtime)
+    assert second.interrupted_run_ids == ()
+    after = len(runtime.events("run_a", limit=200).events)
+    assert after == before
 
 
 def test_recovery_emits_live_notification_through_event_bus(runtime):

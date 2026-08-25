@@ -240,6 +240,54 @@ def _verification_receipt(events: tuple[RunEvent, ...]) -> dict[str, str]:
     return {"status": status, "detail": detail}
 
 
+def _review_receipt(events: tuple[RunEvent, ...]) -> dict[str, str]:
+    """Derive the latest-attempt-aware review verdict/note.
+
+    Without any `review.started` event, this falls back to the legacy
+    review.completed-only compatibility shape (latest wins). Once a
+    `review.started` attempt exists, only that latest attempt's own terminal
+    outcome is exposed — an older APPROVED/NEEDS_FIX from a prior attempt
+    NEVER leaks through a newer, still-running or differently-terminated
+    attempt."""
+    starts = [event for event in events if event.type == RunEventType.REVIEW_STARTED]
+    if not starts:
+        legacy = _latest(events, RunEventType.REVIEW_COMPLETED)
+        if legacy is None:
+            return {"verdict": "UNKNOWN", "note": ""}
+        return {
+            "verdict": legacy.payload.get("verdict", "UNKNOWN"),
+            "note": legacy.payload.get("note", ""),
+        }
+
+    latest = starts[-1]
+    review_id = latest.payload.get("review_id")
+    if not isinstance(review_id, str):
+        return {"verdict": "UNKNOWN", "note": "Review is running."}
+    attempt = [
+        event for event in events
+        if event.seq >= latest.seq and event.payload.get("review_id") == review_id
+    ]
+    terminals = [
+        event for event in attempt
+        if event.type in {
+            RunEventType.REVIEW_COMPLETED,
+            RunEventType.REVIEW_FAILED,
+            RunEventType.REVIEW_INTERRUPTED,
+        }
+    ]
+    terminal = terminals[-1] if terminals else None
+    if terminal is None:
+        return {"verdict": "UNKNOWN", "note": "Review is running."}
+    if terminal.type == RunEventType.REVIEW_FAILED:
+        return {"verdict": "UNKNOWN", "note": "Review failed."}
+    if terminal.type == RunEventType.REVIEW_INTERRUPTED:
+        return {"verdict": "UNKNOWN", "note": "Review was interrupted."}
+    return {
+        "verdict": terminal.payload.get("verdict", "UNKNOWN"),
+        "note": terminal.payload.get("note", terminal.payload.get("summary", "")),
+    }
+
+
 def build_receipt(snapshot: RunReadSnapshot) -> dict[str, Any]:
     """Mevcut frontend Receipt sözlük şeklini (receipts.py ile AYNI) kanonik
     veriden inşa eder. SAF'tır — hiçbir I/O yapmaz, hiçbir event'i MUTASYONA
@@ -257,13 +305,7 @@ def build_receipt(snapshot: RunReadSnapshot) -> dict[str, Any]:
             "files": list(plan_event.payload.get("files", [])),
         }
 
-    review_event = _latest(events, RunEventType.REVIEW_COMPLETED)
-    review = {"verdict": "UNKNOWN", "note": ""}
-    if review_event is not None:
-        review = {
-            "verdict": review_event.payload.get("verdict", "UNKNOWN"),
-            "note": review_event.payload.get("note", ""),
-        }
+    review = _review_receipt(events)
 
     proposal_ready = _latest(events, RunEventType.PROPOSAL_READY)
     if proposal_ready is not None:
@@ -323,8 +365,7 @@ def build_history_item(snapshot: RunReadSnapshot) -> dict[str, Any]:
     task = snapshot.task
     events = snapshot.events
 
-    review_event = _latest(events, RunEventType.REVIEW_COMPLETED)
-    verdict = review_event.payload.get("verdict", "UNKNOWN") if review_event is not None else "UNKNOWN"
+    verdict = _review_receipt(events)["verdict"]
 
     proposal_ready = _latest(events, RunEventType.PROPOSAL_READY)
     if proposal_ready is not None:

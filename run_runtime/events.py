@@ -64,7 +64,10 @@ class RunEventType(StrEnum):
     PROPOSAL_APPLIED = "proposal.applied"
     PROPOSAL_REJECTED = "proposal.rejected"
 
+    REVIEW_STARTED = "review.started"
     REVIEW_COMPLETED = "review.completed"
+    REVIEW_FAILED = "review.failed"
+    REVIEW_INTERRUPTED = "review.interrupted"
 
     VERIFICATION_STARTED = "verification.started"
     VERIFICATION_CHECK_STARTED = "verification.check_started"
