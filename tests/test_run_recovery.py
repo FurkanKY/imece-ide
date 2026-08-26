@@ -324,3 +324,195 @@ def test_recovery_emits_live_notification_through_event_bus(runtime):
 
     final = runtime.get_run("run_a")
     assert final.status == RunStatus.INTERRUPTED
+
+
+# ==================== 3H: bounded Fix Loop recovery ====================
+
+
+def _seed_running_fix_loop_run(runtime, *, task_id="task_fix", run_id="run_fix"):
+    run = _seed_run(runtime, task_id=task_id, run_id=run_id)
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    return run
+
+
+def _append_fix_loop_started(runtime, run_id, fix_loop_id):
+    runtime.record(
+        run_id=run_id, type=RunEventType.FIX_LOOP_STARTED, payload={"fix_loop_id": fix_loop_id},
+        correlation_id=fix_loop_id, source="fix_loop",
+    )
+
+
+def _append_fix_loop_terminal(runtime, run_id, fix_loop_id, event_type, payload=None):
+    runtime.record(
+        run_id=run_id, type=event_type, payload=payload or {"fix_loop_id": fix_loop_id, "reason": "x"},
+        correlation_id=fix_loop_id, source="fix_loop",
+    )
+
+
+def _append_fix_attempt_started(runtime, run_id, fix_loop_id, fix_attempt_id, attempt_index, worker_execution_id):
+    runtime.record(
+        run_id=run_id, type=RunEventType.FIX_ATTEMPT_STARTED,
+        payload={
+            "fix_loop_id": fix_loop_id, "fix_attempt_id": fix_attempt_id, "attempt_index": attempt_index,
+            "trigger_kind": "verification_fail", "worker_execution_id": worker_execution_id,
+            "before_diff_sha256": "a" * 64,
+        },
+        correlation_id=fix_loop_id, source="fix_loop",
+    )
+
+
+def _append_fix_attempt_completed(runtime, run_id, fix_loop_id, fix_attempt_id, attempt_index, worker_execution_id):
+    runtime.record(
+        run_id=run_id, type=RunEventType.FIX_ATTEMPT_COMPLETED,
+        payload={
+            "fix_loop_id": fix_loop_id, "fix_attempt_id": fix_attempt_id, "attempt_index": attempt_index,
+            "worker_execution_id": worker_execution_id, "before_diff_sha256": "a" * 64,
+            "after_diff_sha256": "b" * 64, "changed": True,
+        },
+        correlation_id=fix_loop_id, source="fix_loop",
+    )
+
+
+def test_unfinished_fix_attempt_is_interrupted(runtime):
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+
+    report = recover_running_runs(runtime)
+
+    assert report.interrupted_run_ids == (run.run_id,)
+    events = runtime.events(run.run_id, limit=200).events
+    attempt_interrupted = [e for e in events if e.type == RunEventType.FIX_ATTEMPT_INTERRUPTED]
+    assert len(attempt_interrupted) == 1
+    assert attempt_interrupted[0].payload == {
+        "fix_loop_id": "fix-1", "fix_attempt_id": "att-1", "attempt_index": 1,
+        "worker_execution_id": "exec-fix-1", "reason": "process_restart", "outcome_unknown": True,
+    }
+
+
+def test_unfinished_fix_loop_is_interrupted(runtime):
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+    _append_fix_attempt_completed(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+
+    recover_running_runs(runtime)
+
+    events = runtime.events(run.run_id, limit=200).events
+    loop_interrupted = [e for e in events if e.type == RunEventType.FIX_LOOP_INTERRUPTED]
+    assert len(loop_interrupted) == 1
+    assert loop_interrupted[0].payload == {"fix_loop_id": "fix-1", "reason": "process_restart"}
+    assert RunEventType.FIX_ATTEMPT_INTERRUPTED not in [e.type for e in events]
+
+
+def test_ordering_tool_then_fix_attempt_then_fix_loop_then_run(runtime):
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.TOOL_REQUESTED,
+        payload={"call_id": "c", "tool_name": "search_text", "arguments": {}},
+        execution_id="exec-fix-1", turn_id="t", item_id="i", correlation_id="exec-fix-1", source="native_agent",
+    )
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.TOOL_STARTED,
+        payload={"call_id": "c", "tool_name": "search_text"},
+        execution_id="exec-fix-1", turn_id="t", item_id="i", correlation_id="exec-fix-1", source="native_agent",
+    )
+
+    recover_running_runs(runtime)
+
+    events = runtime.events(run.run_id, limit=200).events
+    types = [e.type for e in events]
+    assert types.index(RunEventType.TOOL_INTERRUPTED) < types.index(RunEventType.FIX_ATTEMPT_INTERRUPTED)
+    assert types.index(RunEventType.FIX_ATTEMPT_INTERRUPTED) < types.index(RunEventType.FIX_LOOP_INTERRUPTED)
+    assert types.index(RunEventType.FIX_LOOP_INTERRUPTED) < types.index(RunEventType.RUN_INTERRUPTED)
+
+
+def test_ordering_verification_then_fix_loop(runtime):
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+    _append_fix_attempt_completed(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.VERIFICATION_STARTED,
+        payload={"verification_id": "ver-1", "plan_id": "plan", "check_count": 1},
+        correlation_id="ver-1", source="verification",
+    )
+
+    recover_running_runs(runtime)
+
+    events = runtime.events(run.run_id, limit=200).events
+    types = [e.type for e in events]
+    assert types.index(RunEventType.VERIFICATION_INTERRUPTED) < types.index(RunEventType.FIX_LOOP_INTERRUPTED)
+    assert types.index(RunEventType.FIX_LOOP_INTERRUPTED) < types.index(RunEventType.RUN_INTERRUPTED)
+
+
+def test_completed_fix_attempt_is_not_interrupted(runtime):
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+    _append_fix_attempt_completed(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+    _append_fix_loop_terminal(runtime, run.run_id, "fix-1", RunEventType.FIX_LOOP_EXHAUSTED, {
+        "fix_loop_id": "fix-1", "reason": "stalled", "attempts_used": 1, "max_fix_attempts": 2,
+    })
+
+    recover_running_runs(runtime)
+
+    events = runtime.events(run.run_id, limit=200).events
+    assert RunEventType.FIX_ATTEMPT_INTERRUPTED not in [e.type for e in events]
+    assert RunEventType.FIX_LOOP_INTERRUPTED not in [e.type for e in events]
+
+
+@pytest.mark.parametrize("terminal_type", [
+    RunEventType.FIX_LOOP_COMPLETED, RunEventType.FIX_LOOP_EXHAUSTED, RunEventType.FIX_LOOP_FAILED,
+])
+def test_loop_with_terminal_is_not_interrupted(runtime, terminal_type):
+    run = _seed_running_fix_loop_run(runtime, task_id=f"task_{terminal_type.name}", run_id=f"run_{terminal_type.name}")
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    payload = {"fix_loop_id": "fix-1", "reason": "x"}
+    if terminal_type == RunEventType.FIX_LOOP_COMPLETED:
+        payload = {
+            "fix_loop_id": "fix-1", "attempts_used": 1, "final_execution_id": "e",
+            "verification_id": "v", "review_id": "r", "diff_sha256": "c" * 64,
+        }
+    elif terminal_type == RunEventType.FIX_LOOP_EXHAUSTED:
+        payload = {"fix_loop_id": "fix-1", "reason": "stalled", "attempts_used": 1, "max_fix_attempts": 2}
+    _append_fix_loop_terminal(runtime, run.run_id, "fix-1", terminal_type, payload)
+
+    recover_running_runs(runtime)
+
+    events = runtime.events(run.run_id, limit=200).events
+    assert RunEventType.FIX_LOOP_INTERRUPTED not in [e.type for e in events]
+
+
+def test_fix_loop_recovery_repeated_scan_is_idempotent(runtime):
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+
+    first = recover_running_runs(runtime)
+    assert first.interrupted_run_ids == (run.run_id,)
+    before_count = len(runtime.events(run.run_id, limit=200).events)
+
+    second = recover_running_runs(runtime)
+    assert second.interrupted_run_ids == ()
+    after_count = len(runtime.events(run.run_id, limit=200).events)
+    assert after_count == before_count
+    assert runtime.get_run(run.run_id).status == RunStatus.INTERRUPTED
+
+
+def test_fix_loop_recovery_never_reruns_worker(runtime):
+    """Recovery only settles canonical state; it never invokes a Worker port,
+    so there is nothing to assert beyond: no new fix_attempt.started/completed
+    is added beyond the interrupted marker, and the Run ends INTERRUPTED."""
+    run = _seed_running_fix_loop_run(runtime)
+    _append_fix_loop_started(runtime, run.run_id, "fix-1")
+    _append_fix_attempt_started(runtime, run.run_id, "fix-1", "att-1", 1, "exec-fix-1")
+
+    recover_running_runs(runtime)
+
+    events = runtime.events(run.run_id, limit=200).events
+    starts = [e for e in events if e.type == RunEventType.FIX_ATTEMPT_STARTED]
+    assert len(starts) == 1
+    assert runtime.get_run(run.run_id).status == RunStatus.INTERRUPTED

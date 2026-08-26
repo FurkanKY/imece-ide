@@ -233,6 +233,79 @@ def recover_running_runs(runtime: RunRuntime) -> RecoveryReport:
                             source=RECOVERY_SOURCE,
                         )
                     )
+            fix_loop_starts = [
+                event for event in history
+                if event.type == RunEventType.FIX_LOOP_STARTED
+                and isinstance(event.payload.get("fix_loop_id"), str)
+            ]
+            for index, started in enumerate(fix_loop_starts):
+                fix_loop_id = started.payload["fix_loop_id"]
+                next_start_seq = None
+                for later in fix_loop_starts[index + 1:]:
+                    if later.payload["fix_loop_id"] == fix_loop_id:
+                        next_start_seq = later.seq
+                        break
+
+                def in_loop(event, *, after: int) -> bool:
+                    return (
+                        event.seq > after
+                        and (next_start_seq is None or event.seq < next_start_seq)
+                        and event.payload.get("fix_loop_id") == fix_loop_id
+                    )
+
+                attempt_starts = [
+                    event for event in history
+                    if event.type == RunEventType.FIX_ATTEMPT_STARTED
+                    and in_loop(event, after=started.seq)
+                ]
+                for attempt_started in attempt_starts:
+                    fix_attempt_id = attempt_started.payload.get("fix_attempt_id")
+                    has_attempt_terminal = any(
+                        event.payload.get("fix_attempt_id") == fix_attempt_id
+                        and event.type in {
+                            RunEventType.FIX_ATTEMPT_COMPLETED,
+                            RunEventType.FIX_ATTEMPT_INTERRUPTED,
+                        }
+                        and in_loop(event, after=attempt_started.seq)
+                        for event in history
+                    )
+                    if has_attempt_terminal:
+                        continue
+                    specs.append(
+                        RunEventSpec(
+                            type=RunEventType.FIX_ATTEMPT_INTERRUPTED,
+                            payload={
+                                "fix_loop_id": fix_loop_id,
+                                "fix_attempt_id": fix_attempt_id,
+                                "attempt_index": attempt_started.payload.get("attempt_index"),
+                                "worker_execution_id": attempt_started.payload.get("worker_execution_id"),
+                                "reason": RECOVERY_INTERRUPT_REASON,
+                                "outcome_unknown": True,
+                            },
+                            correlation_id=fix_loop_id,
+                            source=RECOVERY_SOURCE,
+                        )
+                    )
+
+                has_loop_terminal = any(
+                    event.type in {
+                        RunEventType.FIX_LOOP_COMPLETED,
+                        RunEventType.FIX_LOOP_EXHAUSTED,
+                        RunEventType.FIX_LOOP_FAILED,
+                        RunEventType.FIX_LOOP_INTERRUPTED,
+                    }
+                    and in_loop(event, after=started.seq)
+                    for event in history
+                )
+                if not has_loop_terminal:
+                    specs.append(
+                        RunEventSpec(
+                            type=RunEventType.FIX_LOOP_INTERRUPTED,
+                            payload={"fix_loop_id": fix_loop_id, "reason": RECOVERY_INTERRUPT_REASON},
+                            correlation_id=fix_loop_id,
+                            source=RECOVERY_SOURCE,
+                        )
+                    )
             if not specs:
                 # Preserve the established single-event recovery seam when no
                 # unfinished tool exists; this also keeps existing store-level

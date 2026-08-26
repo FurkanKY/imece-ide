@@ -123,6 +123,92 @@ def append_verification(runtime, run_id, verification_id, status):
     ))
 
 
+def append_review_started(runtime, run_id, review_id):
+    runtime.record(
+        run_id=run_id, type=RunEventType.REVIEW_STARTED, payload={"review_id": review_id},
+        correlation_id=review_id, source="reviewer",
+    )
+
+
+def append_review_terminal(
+    runtime, run_id, review_id, terminal, *, verdict="APPROVED",
+    verification_id="ver", verification_status="pass", diff_sha256=None,
+):
+    diff_sha256 = diff_sha256 or "c" * 64
+    if terminal == "completed":
+        findings = [] if verdict == "APPROVED" else [
+            {"severity": "major", "message": "m", "path": None, "start_line": None, "end_line": None}
+        ]
+        runtime.record(
+            run_id=run_id, type=RunEventType.REVIEW_COMPLETED,
+            payload={
+                "review_id": review_id, "verdict": verdict, "note": "n", "summary": "n",
+                "findings": findings, "repository_fingerprint": "a" * 64, "diff_sha256": diff_sha256,
+                "verification_id": verification_id, "verification_status": verification_status,
+            },
+            correlation_id=review_id, source="reviewer",
+        )
+    elif terminal == "failed":
+        runtime.record(
+            run_id=run_id, type=RunEventType.REVIEW_FAILED,
+            payload={"review_id": review_id, "error_type": "X", "error_message": "y"},
+            correlation_id=review_id, source="reviewer",
+        )
+    elif terminal == "interrupted":
+        runtime.record(
+            run_id=run_id, type=RunEventType.REVIEW_INTERRUPTED,
+            payload={"review_id": review_id, "reason": "process_restart"},
+            correlation_id=review_id, source="reviewer",
+        )
+
+
+def append_review(
+    runtime, run_id, review_id, *, terminal="completed", verdict="APPROVED",
+    verification_id="ver", verification_status="pass", diff_sha256=None,
+):
+    append_review_started(runtime, run_id, review_id)
+    if terminal is not None:
+        append_review_terminal(
+            runtime, run_id, review_id, terminal, verdict=verdict,
+            verification_id=verification_id, verification_status=verification_status,
+            diff_sha256=diff_sha256,
+        )
+
+
+def append_fix_loop(runtime, run_id, fix_loop_id, terminal):
+    runtime.record(
+        run_id=run_id, type=RunEventType.FIX_LOOP_STARTED, payload={"fix_loop_id": fix_loop_id},
+        correlation_id=fix_loop_id, source="fix_loop",
+    )
+    if terminal == "completed":
+        runtime.record(
+            run_id=run_id, type=RunEventType.FIX_LOOP_COMPLETED,
+            payload={
+                "fix_loop_id": fix_loop_id, "attempts_used": 1, "final_execution_id": "e",
+                "verification_id": "v", "review_id": "r", "diff_sha256": "c" * 64,
+            },
+            correlation_id=fix_loop_id, source="fix_loop",
+        )
+    elif terminal == "exhausted":
+        runtime.record(
+            run_id=run_id, type=RunEventType.FIX_LOOP_EXHAUSTED,
+            payload={"fix_loop_id": fix_loop_id, "reason": "budget_exhausted", "attempts_used": 2, "max_fix_attempts": 2},
+            correlation_id=fix_loop_id, source="fix_loop",
+        )
+    elif terminal == "failed":
+        runtime.record(
+            run_id=run_id, type=RunEventType.FIX_LOOP_FAILED,
+            payload={"fix_loop_id": fix_loop_id, "reason": "verification_timeout"},
+            correlation_id=fix_loop_id, source="fix_loop",
+        )
+    elif terminal == "interrupted":
+        runtime.record(
+            run_id=run_id, type=RunEventType.FIX_LOOP_INTERRUPTED,
+            payload={"fix_loop_id": fix_loop_id, "reason": "process_restart"},
+            correlation_id=fix_loop_id, source="fix_loop",
+        )
+
+
 def receipt(runtime, task, run):
     current = runtime.get_run(run.run_id)
     return build_receipt(RunReadSnapshot(
@@ -430,3 +516,357 @@ def test_reviewer_canonical_lifecycle_does_not_block_completion_gate(tmp_path):
     completed = runtime.get_run(run.run_id)
     assert completed.status is RunStatus.SUCCEEDED
     assert runtime.events(run.run_id, limit=200).events[-1].type == RunEventType.RUN_COMPLETED
+
+
+# ==================== 3H: complete_reviewed ====================
+
+
+def test_complete_reviewed_happy_path(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    RunCompletionGate(runtime).complete_reviewed(
+        run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+    )
+    completed = runtime.get_run(run.run_id)
+    assert completed.status is RunStatus.SUCCEEDED
+    assert completed.phase is RunPhase.DONE
+    last = runtime.events(run.run_id, limit=200).events[-1]
+    assert last.type == RunEventType.RUN_COMPLETED
+    assert last.payload["reason"] == "reviewed"
+    assert last.payload["review_verdict"] == "APPROVED"
+    assert last.payload["verified_execution_id"] == "e1"
+
+
+def test_complete_reviewed_no_verification(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_verification_non_pass(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "fail")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_requested_verification_not_latest(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_verification(runtime, run.run_id, "v2", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_execution_not_completed_before_verification(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_execution(runtime, run.run_id, "e2", RunEventType.EXECUTION_STARTED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_execution_id_missing(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    runtime.record(
+        run_id=run.run_id, type=RunEventType.EXECUTION_COMPLETED, payload={"final_text": "done"},
+        execution_id=None, source="native_agent",
+    )
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_newer_execution_after_verification_start(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_execution(runtime, run.run_id, "e2", RunEventType.EXECUTION_COMPLETED)
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_no_review(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_requested_review_not_latest(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    append_review(runtime, run.run_id, "r2", verdict="NEEDS_FIX", verification_id="v1", diff_sha256="d" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_review_starts_before_verification_completed(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_review_started(runtime, run.run_id, "r1")
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review_terminal(runtime, run.run_id, "r1", "completed", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_review_failed(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", terminal="failed")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_review_interrupted(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", terminal="interrupted")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_needs_fix(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verdict="NEEDS_FIX", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_verification_id_mismatch_in_review_payload(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="OTHER", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_verification_status_not_pass_in_review_payload(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", verification_status="fail", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+
+
+def test_complete_reviewed_diff_sha_mismatch(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="d" * 64,
+        )
+
+
+@pytest.mark.parametrize("bad_sha", ["", "not-hex", "a" * 63, "A" * 64, "g" * 64])
+def test_complete_reviewed_malformed_current_sha(tmp_path, bad_sha):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256=bad_sha,
+        )
+
+
+def test_complete_reviewed_optimistic_sequence_race(tmp_path, monkeypatch):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    gate = RunCompletionGate(runtime)
+    original = runtime.record
+    injected = False
+
+    def racing_record(**kwargs):
+        nonlocal injected
+        if not injected and kwargs["type"] == RunEventType.RUN_COMPLETED:
+            injected = True
+            original(run_id=run.run_id, type="future.event", payload={}, source="other")
+        return original(**kwargs)
+
+    monkeypatch.setattr(runtime, "record", racing_record)
+    with pytest.raises(EventSequenceError):
+        gate.complete_reviewed(run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64)
+    assert RunEventType.RUN_COMPLETED not in [event.type for event in runtime.events(run.run_id, limit=200).events]
+
+
+# ==================== 3H: critical stale-evidence integration test ====================
+
+
+def test_stale_verification_and_review_rejected_after_fix_attempt_produces_new_evidence(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "exec-1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "ver-1", "pass")
+    append_review(runtime, run.run_id, "rev-1", verdict="NEEDS_FIX", verification_id="ver-1", diff_sha256="a" * 64)
+
+    # fix attempt: fresh worker execution, fresh verification, fresh review
+    append_execution(runtime, run.run_id, "exec-2", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "ver-2", "pass")
+    append_review(runtime, run.run_id, "rev-2", verification_id="ver-2", diff_sha256="e" * 64)
+
+    gate = RunCompletionGate(runtime)
+    with pytest.raises(RunCompletionError):
+        gate.complete_reviewed(
+            run.run_id, verification_id="ver-1", review_id="rev-1", current_diff_sha256="a" * 64,
+        )
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+
+    gate.complete_reviewed(run.run_id, verification_id="ver-2", review_id="rev-2", current_diff_sha256="e" * 64)
+    completed = runtime.get_run(run.run_id)
+    assert completed.status is RunStatus.SUCCEEDED
+
+    events = runtime.events(run.run_id, limit=200).events
+    reviewer_events = [event for event in events if event.source == "reviewer"]
+    lifecycle_types = {RunEventType.EXECUTION_STARTED, RunEventType.EXECUTION_COMPLETED, RunEventType.EXECUTION_FAILED}
+    assert all(event.type not in lifecycle_types for event in reviewer_events)
+    assert all(event.execution_id is None for event in reviewer_events)
+
+
+# ==================== 3H: critical workspace-SHA test ====================
+
+
+def test_complete_reviewed_rejects_approved_diff_after_workspace_mutation(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="a" * 64)  # SHA A
+
+    gate = RunCompletionGate(runtime)
+    with pytest.raises(RunCompletionError):
+        gate.complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="b" * 64,  # SHA B != A
+        )
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+    assert RunEventType.RUN_COMPLETED not in [e.type for e in runtime.events(run.run_id, limit=200).events]
+
+
+# ==================== 3H: fail_fix_loop ====================
+
+
+def test_fail_fix_loop_exhausted_happy_path(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_fix_loop(runtime, run.run_id, "fix-1", "exhausted")
+    RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+    failed = runtime.get_run(run.run_id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.error_code == "fix_loop_exhausted"
+
+
+def test_fail_fix_loop_failed_happy_path(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_fix_loop(runtime, run.run_id, "fix-1", "failed")
+    RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+    failed = runtime.get_run(run.run_id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.error_code == "fix_loop_failed"
+
+
+def test_fail_fix_loop_completed_loop_rejected(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_fix_loop(runtime, run.run_id, "fix-1", "completed")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+
+
+def test_fail_fix_loop_interrupted_loop_rejected(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_fix_loop(runtime, run.run_id, "fix-1", "interrupted")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+
+
+def test_fail_fix_loop_no_terminal_rejected(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_fix_loop(runtime, run.run_id, "fix-1", None)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+
+
+def test_fail_fix_loop_stale_non_latest_loop_rejected(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_fix_loop(runtime, run.run_id, "fix-1", "exhausted")
+    append_fix_loop(runtime, run.run_id, "fix-2", "exhausted")
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+
+
+def test_fail_fix_loop_newer_execution_after_terminal_rejected(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_fix_loop(runtime, run.run_id, "fix-1", "exhausted")
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime).fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+
+
+def test_fail_fix_loop_optimistic_sequence_race(tmp_path, monkeypatch):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_fix_loop(runtime, run.run_id, "fix-1", "exhausted")
+    gate = RunCompletionGate(runtime)
+    original = runtime.record
+    injected = False
+
+    def racing_record(**kwargs):
+        nonlocal injected
+        if not injected and kwargs["type"] == RunEventType.RUN_FAILED:
+            injected = True
+            original(run_id=run.run_id, type="future.event", payload={}, source="other")
+        return original(**kwargs)
+
+    monkeypatch.setattr(runtime, "record", racing_record)
+    with pytest.raises(EventSequenceError):
+        gate.fail_fix_loop(run.run_id, fix_loop_id="fix-1")
+    assert RunEventType.RUN_FAILED not in [event.type for event in runtime.events(run.run_id, limit=200).events]

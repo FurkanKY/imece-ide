@@ -63,3 +63,9 @@ class InvalidRunStateError(RunRuntimeError):
 
 class RunCompletionError(RunRuntimeError):
     """A requested Run terminal decision lacks valid canonical evidence."""
+
+
+class FixLoopRecordingError(RunRuntimeError):
+    """A required canonical fix-loop lifecycle event could not be recorded
+    (e.g. out-of-order attempt, duplicate terminal, or recording before
+    fix_loop.started). Raised by run_runtime.fix_loop.CanonicalFixLoopRecorder."""

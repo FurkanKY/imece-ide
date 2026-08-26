@@ -80,6 +80,15 @@ class RunEventType(StrEnum):
     CHECKPOINT_CREATED = "checkpoint.created"
     CHECKPOINT_RESTORED = "checkpoint.restored"
 
+    FIX_LOOP_STARTED = "fix_loop.started"
+    FIX_ATTEMPT_STARTED = "fix_attempt.started"
+    FIX_ATTEMPT_COMPLETED = "fix_attempt.completed"
+    FIX_ATTEMPT_INTERRUPTED = "fix_attempt.interrupted"
+    FIX_LOOP_COMPLETED = "fix_loop.completed"
+    FIX_LOOP_EXHAUSTED = "fix_loop.exhausted"
+    FIX_LOOP_FAILED = "fix_loop.failed"
+    FIX_LOOP_INTERRUPTED = "fix_loop.interrupted"
+
 @dataclass(frozen=True, slots=True)
 class RunEventSpec:
     """A validated event request used by atomic batch append operations."""
