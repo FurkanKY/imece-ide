@@ -123,6 +123,41 @@ def recover_running_runs(runtime: RunRuntime) -> RecoveryReport:
                         source=RECOVERY_SOURCE,
                     )
                 )
+            plan_starts = [
+                event for event in history
+                if event.type == RunEventType.PLAN_STARTED
+                and isinstance(event.payload.get("plan_id"), str)
+            ]
+            for index, started in enumerate(plan_starts):
+                plan_id = started.payload["plan_id"]
+                next_start_seq = None
+                for later in plan_starts[index + 1:]:
+                    if later.payload["plan_id"] == plan_id:
+                        next_start_seq = later.seq
+                        break
+                has_plan_terminal = any(
+                    event.seq > started.seq
+                    and (next_start_seq is None or event.seq < next_start_seq)
+                    and event.payload.get("plan_id") == plan_id
+                    and event.type in {
+                        RunEventType.PLAN_COMPLETED,
+                        RunEventType.PLAN_FAILED,
+                        RunEventType.PLAN_INTERRUPTED,
+                    }
+                    for event in history
+                )
+                if not has_plan_terminal:
+                    specs.append(
+                        RunEventSpec(
+                            type=RunEventType.PLAN_INTERRUPTED,
+                            payload={
+                                "plan_id": plan_id,
+                                "reason": RECOVERY_INTERRUPT_REASON,
+                            },
+                            correlation_id=started.correlation_id or plan_id,
+                            source=RECOVERY_SOURCE,
+                        )
+                    )
             verification_starts = [
                 event for event in history
                 if event.type == RunEventType.VERIFICATION_STARTED

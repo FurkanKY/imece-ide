@@ -516,3 +516,190 @@ def test_fix_loop_recovery_never_reruns_worker(runtime):
     starts = [e for e in events if e.type == RunEventType.FIX_ATTEMPT_STARTED]
     assert len(starts) == 1
     assert runtime.get_run(run.run_id).status == RunStatus.INTERRUPTED
+
+
+# ==================== Planner recovery ====================
+
+
+def test_unfinished_plan_is_interrupted(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.store.append_event(
+        run_id=run.run_id, type=RunEventType.PLAN_STARTED,
+        payload={"plan_id": "plan-1"}, correlation_id="plan-1", source="planner",
+    )
+
+    report = recover_running_runs(runtime)
+
+    assert report.interrupted_run_ids == ("run_plan",)
+    events = runtime.events("run_plan", limit=200).events
+    plan_interrupted = [event for event in events if event.type == RunEventType.PLAN_INTERRUPTED]
+    assert len(plan_interrupted) == 1
+    assert plan_interrupted[0].payload == {"plan_id": "plan-1", "reason": "process_restart"}
+    assert plan_interrupted[0].execution_id is None
+    assert plan_interrupted[0].correlation_id == "plan-1"
+    types = [event.type for event in events]
+    assert types.index(RunEventType.PLAN_INTERRUPTED) < types.index(RunEventType.RUN_INTERRUPTED)
+    assert runtime.get_run("run_plan").status == RunStatus.INTERRUPTED
+
+
+def test_completed_plan_is_not_interrupted(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(
+            RunEventType.PLAN_STARTED, {"plan_id": "plan-1"},
+            correlation_id="plan-1", source="planner",
+        ),
+        RunEventSpec(RunEventType.PLAN_COMPLETED, {
+            "plan_id": "plan-1", "summary": "ok",
+            "steps": [{"title": "t", "objective": "o"}],
+            "acceptance_criteria": [], "risks": [],
+            "task_profile": {"complexity": "LOW", "scope": "LOCAL"},
+            "repository_fingerprint": "a" * 64, "task_sha256": "b" * 64,
+        }, correlation_id="plan-1", source="planner"),
+    ))
+
+    recover_running_runs(runtime)
+
+    events = runtime.events("run_plan", limit=200).events
+    assert RunEventType.PLAN_INTERRUPTED not in [event.type for event in events]
+    assert runtime.get_run("run_plan").status == RunStatus.INTERRUPTED  # run itself still settles
+
+
+def test_failed_plan_is_not_interrupted(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(
+            RunEventType.PLAN_STARTED, {"plan_id": "plan-1"},
+            correlation_id="plan-1", source="planner",
+        ),
+        RunEventSpec(
+            RunEventType.PLAN_FAILED,
+            {"plan_id": "plan-1", "error_type": "PlannerProtocolError", "error_message": "bad json"},
+            correlation_id="plan-1", source="planner",
+        ),
+    ))
+
+    recover_running_runs(runtime)
+
+    events = runtime.events("run_plan", limit=200).events
+    assert RunEventType.PLAN_INTERRUPTED not in [event.type for event in events]
+
+
+def test_plan_interrupted_is_not_interrupted_again(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(
+            RunEventType.PLAN_STARTED, {"plan_id": "plan-1"},
+            correlation_id="plan-1", source="planner",
+        ),
+        RunEventSpec(
+            RunEventType.PLAN_INTERRUPTED, {"plan_id": "plan-1", "reason": "process_restart"},
+            correlation_id="plan-1", source="planner",
+        ),
+    ))
+
+    recover_running_runs(runtime)
+
+    events = runtime.events("run_plan", limit=200).events
+    plan_interrupted = [event for event in events if event.type == RunEventType.PLAN_INTERRUPTED]
+    assert len(plan_interrupted) == 1  # not doubled
+
+
+def test_two_plan_ids_only_unfinished_latest_attempt_settled(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(
+            RunEventType.PLAN_STARTED, {"plan_id": "plan-A"},
+            correlation_id="plan-A", source="planner",
+        ),
+        RunEventSpec(RunEventType.PLAN_COMPLETED, {
+            "plan_id": "plan-A", "summary": "ok",
+            "steps": [{"title": "t", "objective": "o"}],
+            "acceptance_criteria": [], "risks": [],
+            "task_profile": {"complexity": "LOW", "scope": "LOCAL"},
+            "repository_fingerprint": "a" * 64, "task_sha256": "b" * 64,
+        }, correlation_id="plan-A", source="planner"),
+        RunEventSpec(
+            RunEventType.PLAN_STARTED, {"plan_id": "plan-B"},
+            correlation_id="plan-B", source="planner",
+        ),
+    ))
+
+    recover_running_runs(runtime)
+
+    events = runtime.events("run_plan", limit=200).events
+    plan_interrupted = [event for event in events if event.type == RunEventType.PLAN_INTERRUPTED]
+    assert len(plan_interrupted) == 1
+    assert plan_interrupted[0].payload["plan_id"] == "plan-B"
+
+
+def test_unfinished_planner_tool_and_plan_are_both_interrupted_in_order(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record_many(run_id=run.run_id, specs=(
+        RunEventSpec(
+            RunEventType.PLAN_STARTED, {"plan_id": "plan-1"},
+            correlation_id="plan-1", source="planner",
+        ),
+        RunEventSpec(
+            RunEventType.TOOL_REQUESTED,
+            {"call_id": "c1", "tool_name": "search_text", "arguments": {}},
+            turn_id="t1", item_id="i1", correlation_id="plan-1", source="planner",
+        ),
+        RunEventSpec(
+            RunEventType.TOOL_STARTED,
+            {"call_id": "c1", "tool_name": "search_text"},
+            turn_id="t1", item_id="i1", correlation_id="plan-1", source="planner",
+        ),
+    ))
+
+    report = recover_running_runs(runtime)
+
+    assert report.interrupted_run_ids == ("run_plan",)
+    events = runtime.events("run_plan", limit=200).events
+    types = [event.type for event in events]
+    assert types.index(RunEventType.TOOL_INTERRUPTED) < types.index(RunEventType.PLAN_INTERRUPTED)
+    assert types.index(RunEventType.PLAN_INTERRUPTED) < types.index(RunEventType.RUN_INTERRUPTED)
+
+
+def test_plan_recovery_is_idempotent_on_repeated_scan(runtime):
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.store.append_event(
+        run_id=run.run_id, type=RunEventType.PLAN_STARTED,
+        payload={"plan_id": "plan-1"}, correlation_id="plan-1", source="planner",
+    )
+
+    first = recover_running_runs(runtime)
+    assert first.interrupted_run_ids == ("run_plan",)
+    before = len(runtime.events("run_plan", limit=200).events)
+
+    second = recover_running_runs(runtime)
+    assert second.interrupted_run_ids == ()
+    after = len(runtime.events("run_plan", limit=200).events)
+    assert after == before
+    assert runtime.get_run("run_plan").status == RunStatus.INTERRUPTED
+
+
+def test_plan_recovery_never_reruns_planner(runtime):
+    """Recovery only settles canonical state; it never invokes a Planner
+    AgentSession, so there is nothing to assert beyond: no new plan.started
+    is added beyond the interrupted marker, and the Run ends INTERRUPTED."""
+    run = _seed_run(runtime, task_id="task_plan", run_id="run_plan")
+    runtime.store.append_event(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.store.append_event(
+        run_id=run.run_id, type=RunEventType.PLAN_STARTED,
+        payload={"plan_id": "plan-1"}, correlation_id="plan-1", source="planner",
+    )
+
+    recover_running_runs(runtime)
+
+    events = runtime.events("run_plan", limit=200).events
+    starts = [e for e in events if e.type == RunEventType.PLAN_STARTED]
+    assert len(starts) == 1
+    assert runtime.get_run("run_plan").status == RunStatus.INTERRUPTED

@@ -55,7 +55,10 @@ class RunEventType(StrEnum):
     EXECUTION_COMPLETED = "execution.completed"
     EXECUTION_FAILED = "execution.failed"
 
+    PLAN_STARTED = "plan.started"
     PLAN_COMPLETED = "plan.completed"
+    PLAN_FAILED = "plan.failed"
+    PLAN_INTERRUPTED = "plan.interrupted"
 
     USAGE_RECORDED = "usage.recorded"
 
