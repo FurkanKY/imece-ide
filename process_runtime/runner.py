@@ -10,9 +10,8 @@ import time
 from pathlib import Path
 from typing import Mapping
 
-import psutil
-
 from process_runtime.capture import BoundedCapture
+from process_runtime.cleanup import terminate_process_tree
 from process_runtime.errors import ProcessCleanupError, ProcessRuntimeError, ProcessSpawnError
 from process_runtime.models import ProcessRequest, ProcessResult
 from workspace.base import resolve_within_workspace
@@ -68,38 +67,6 @@ def _resolve_executable(executable: str, workspace, environment: Mapping[str, st
     return resolved
 
 
-def _terminate_tree(pid: int) -> None:
-    try:
-        parent = psutil.Process(pid)
-        processes = parent.children(recursive=True)
-        processes.append(parent)
-    except psutil.NoSuchProcess:
-        return
-    except psutil.Error as exc:
-        raise ProcessCleanupError(f"Could not inspect process tree: {exc}") from exc
-    for process in processes:
-        try:
-            process.terminate()
-        except psutil.NoSuchProcess:
-            pass
-        except psutil.Error:
-            continue
-    _, survivors = psutil.wait_procs(processes, timeout=0.5)
-    for process in survivors:
-        try:
-            process.kill()
-        except psutil.NoSuchProcess:
-            pass
-        except psutil.Error:
-            continue
-    _, survivors = psutil.wait_procs(survivors, timeout=1.0)
-    if survivors:
-        raise ProcessCleanupError(
-            "Process timeout cleanup left survivors: "
-            + ", ".join(str(process.pid) for process in survivors)
-        )
-
-
 class ProcessRunner:
     def run(self, workspace, request: ProcessRequest) -> ProcessResult:
         if not isinstance(request, ProcessRequest):
@@ -145,7 +112,7 @@ class ProcessRunner:
             timed_out = True
             cleanup_error = None
             try:
-                _terminate_tree(process.pid)
+                terminate_process_tree(process.pid)
             except ProcessCleanupError as exc:
                 cleanup_error = exc
             try:

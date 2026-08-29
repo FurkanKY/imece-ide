@@ -1,5 +1,6 @@
 """Provider-independent synchronous local process runtime."""
 
+from process_runtime.cleanup import terminate_process_tree
 from process_runtime.errors import (
     ProcessCleanupError,
     ProcessInputError,
@@ -17,4 +18,5 @@ __all__ = [
     "ProcessRequest",
     "ProcessResult",
     "ProcessRunner",
+    "terminate_process_tree",
 ]
