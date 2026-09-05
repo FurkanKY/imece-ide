@@ -11,6 +11,9 @@ code. Mode is selected by argv[1]:
   child_process - spawns one harmless long-lived child process, writes its
                   PID to the path in $ACP_FAKE_AGENT_CHILD_PID_FILE, then
                   completes normally (drives descendant-cleanup test).
+  mutate        writes acp_worker_mutated.txt under the received cwd, then
+                completes normally (drives worktree-isolation tests).
+  fail          raises from prompt (drives ACP Worker failure settlement).
 """
 
 from __future__ import annotations
@@ -97,6 +100,15 @@ class FakeAgent:
                 handle.write(f"{probe_var}={probed_value}\n")
             await self._conn.session_update(session_id=session_id, update=acp.update_agent_message_text("probed env"))
             return acp.PromptResponse(stop_reason="end_turn")
+
+        if self._mode == "mutate":
+            with open("acp_worker_mutated.txt", "w", encoding="utf-8") as handle:
+                handle.write("mutated by ACP\n")
+            await self._conn.session_update(session_id=session_id, update=acp.update_agent_message_text("mutated"))
+            return acp.PromptResponse(stop_reason="end_turn")
+
+        if self._mode == "fail":
+            raise RuntimeError("fake ACP failure")
 
         # echo (default)
         await self._conn.session_update(session_id=session_id, update=acp.update_agent_message_text("hello from fake agent"))

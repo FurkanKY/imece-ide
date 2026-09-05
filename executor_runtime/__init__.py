@@ -18,6 +18,11 @@ from executor_runtime.errors import (
 from executor_runtime.native_reviewer import NativeReviewAttemptAdapter
 from executor_runtime.native_verification import NativeVerificationAttemptAdapter
 from executor_runtime.native_worker import NativeWorkerAttemptAdapter
+from executor_runtime.acp_worker import (
+    AcpWorkerAttemptAdapter,
+    AcpWorkerLaunchProfile,
+    resolve_acp_worker_launch,
+)
 
 __all__ = [
     "ExecutorAdapterError",
@@ -26,4 +31,7 @@ __all__ = [
     "NativeWorkerAttemptAdapter",
     "NativeVerificationAttemptAdapter",
     "NativeReviewAttemptAdapter",
+    "AcpWorkerLaunchProfile",
+    "AcpWorkerAttemptAdapter",
+    "resolve_acp_worker_launch",
 ]

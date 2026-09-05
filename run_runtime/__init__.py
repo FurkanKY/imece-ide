@@ -35,6 +35,7 @@ from run_runtime.verification import CanonicalVerificationEventSink
 from run_runtime.reviewer import CanonicalReviewEventSink
 from run_runtime.planner import CanonicalPlannerEventSink
 from run_runtime.fix_loop import CanonicalFixLoopRecorder
+from run_runtime.acp import CanonicalAcpEventSink
 from run_runtime.projector import project_run
 from run_runtime.readmodels import (
     HISTORY_MAX_ITEMS,
@@ -85,6 +86,7 @@ __all__ = [
     "CanonicalReviewEventSink",
     "CanonicalPlannerEventSink",
     "CanonicalFixLoopRecorder",
+    "CanonicalAcpEventSink",
     "DurableEventTail",
     "RecoveryReport",
     "recover_running_runs",
