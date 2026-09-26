@@ -16,7 +16,7 @@ from review_runtime.models import ReviewReport, ReviewRequest
 from verification_runtime.models import VerificationPlan, VerificationReport
 
 from fix_runtime.errors import FixLoopInputError
-from fix_runtime.models import FixWorkerRequest, _stable_id
+from fix_runtime.models import FixWorkerRequest, InitialWorkerRequest, _stable_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,30 +32,39 @@ class WorkerAttemptResult:
 class WorkerAttemptRunner(Protocol):
     """Runs exactly ONE fresh Worker execution.
 
+    `request` is either a FixWorkerRequest (a bounded fix attempt driven by
+    a FixTrigger) or an InitialWorkerRequest (the FIRST implementation
+    attempt of a Run, before any Verification/Review evidence exists).
+    Both shapes carry the same `rendered_input`/`task`/`plan` fields and are
+    handled identically by every WorkerAttemptRunner implementation.
+
     Contract:
       - the implementation MUST feed `request.rendered_input` verbatim to the
-        underlying harness as the actual fix instruction/input for this
-        attempt. `rendered_input` is the trust-boundary-enforced string
-        already produced by fix_runtime.prompt.render_fix_worker_input() —
-        it must not be discarded, and the adapter must not reconstruct an
-        unrelated prompt from `request.trigger` instead. Structured fields
-        on `request` (task/trigger/attempt_index/plan) MAY additionally be
-        used as metadata, but `rendered_input` is the input of record.
+        underlying harness as the actual instruction/input for this attempt.
+        `rendered_input` is the trust-boundary-enforced string already
+        produced by fix_runtime.prompt.render_fix_worker_input() (for a
+        FixWorkerRequest) or fix_runtime.prompt.render_initial_worker_input()
+        (for an InitialWorkerRequest) — it must not be discarded, and the
+        adapter must not reconstruct an unrelated prompt from
+        `request.trigger` instead. Structured fields on `request`
+        (task/trigger/attempt_index/plan, where present) MAY additionally be
+        used as metadata, but `rendered_input` is the input of record for
+        BOTH request shapes.
       - the implementation MUST use the supplied `execution_id` for this
         execution's canonical lifecycle (it does not invent its own).
       - this call represents ONE fresh execution — never a resumed or reused
-        AgentSession. FixLoopRunner always passes a brand-new execution_id
-        per attempt (see fix_runtime.models.new_fix_execution_id).
+        AgentSession. Callers always pass a brand-new execution_id per
+        attempt (see fix_runtime.models.new_fix_execution_id).
       - a successful return means the worker EXECUTION itself completed
         (e.g. its canonical execution.completed was recorded); it does NOT
-        assert the fix was correct — that is Verification/Reviewer's job.
+        assert the work is correct — that is Verification/Reviewer's job.
       - the concrete adapter owns recording that execution's own normal
-        canonical execution.* lifecycle; FixLoopRunner does not do this for
-        it and does not inspect AgentSession/ModelBackend state directly.
+        canonical execution.* lifecycle; the caller does not do this for it
+        and does not inspect AgentSession/ModelBackend state directly.
     """
 
     def run(
-        self, workspace, request: FixWorkerRequest, *, execution_id: str
+        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str
     ) -> WorkerAttemptResult: ...
 
 

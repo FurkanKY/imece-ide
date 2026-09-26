@@ -15,7 +15,7 @@ from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest
 
 from executor_runtime.errors import ExecutorAdapterExecutionError, ExecutorAdapterInputError
 from fix_runtime.errors import FixLoopInputError
-from fix_runtime.models import FixWorkerRequest
+from fix_runtime.models import FixWorkerRequest, InitialWorkerRequest
 from fix_runtime.ports import WorkerAttemptResult
 from run_runtime.acp import CanonicalAcpEventSink
 from run_runtime.service import RunRuntime
@@ -180,11 +180,11 @@ class AcpWorkerAttemptAdapter:
         return self._run_id
 
     def run(
-        self, workspace, request: FixWorkerRequest, *, execution_id: str
+        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str
     ) -> WorkerAttemptResult:
-        if not isinstance(request, FixWorkerRequest):
+        if not isinstance(request, (FixWorkerRequest, InitialWorkerRequest)):
             raise ExecutorAdapterInputError(
-                "AcpWorkerAttemptAdapter.run requires a FixWorkerRequest."
+                "AcpWorkerAttemptAdapter.run requires a FixWorkerRequest or InitialWorkerRequest."
             )
         if not isinstance(workspace, GitWorktreeWorkspace):
             raise ExecutorAdapterInputError(

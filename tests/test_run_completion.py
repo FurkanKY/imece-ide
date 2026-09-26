@@ -870,3 +870,142 @@ def test_fail_fix_loop_optimistic_sequence_race(tmp_path, monkeypatch):
     with pytest.raises(EventSequenceError):
         gate.fail_fix_loop(run.run_id, fix_loop_id="fix-1")
     assert RunEventType.RUN_FAILED not in [event.type for event in runtime.events(run.run_id, limit=200).events]
+
+
+# ==================== settlement="await_user" ====================
+
+
+def test_invalid_settlement_mode_rejected(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime, settlement="bogus")
+
+
+def test_complete_verified_await_user_happy_path(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+
+    RunCompletionGate(runtime, settlement="await_user").complete_verified(run.run_id, verification_id="v1")
+
+    settled = runtime.get_run(run.run_id)
+    assert settled.status is RunStatus.WAITING_USER
+    events = runtime.events(run.run_id, limit=200).events
+    assert RunEventType.RUN_COMPLETED not in [e.type for e in events]
+    assert events[-1].type == RunEventType.RUN_WAITING_USER
+    proposal = events[-2]
+    assert proposal.type == RunEventType.PROPOSAL_READY
+    assert proposal.payload["reason"] == "verified"
+    assert proposal.payload["verification_id"] == "v1"
+    assert proposal.payload["verification_status"] == "pass"
+    assert proposal.payload["verified_execution_id"] == "e1"
+
+
+def test_complete_verified_await_user_no_verification_raises_and_records_nothing(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime, settlement="await_user").complete_verified(run.run_id, verification_id="v1")
+    events = runtime.events(run.run_id, limit=200).events
+    assert not any(e.type in (RunEventType.PROPOSAL_READY, RunEventType.RUN_WAITING_USER) for e in events)
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+
+
+def test_complete_reviewed_await_user_happy_path(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+
+    RunCompletionGate(runtime, settlement="await_user").complete_reviewed(
+        run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+    )
+
+    settled = runtime.get_run(run.run_id)
+    assert settled.status is RunStatus.WAITING_USER
+    assert settled.phase is RunPhase.READY
+    events = runtime.events(run.run_id, limit=200).events
+    assert RunEventType.RUN_COMPLETED not in [e.type for e in events]
+    assert events[-1].type == RunEventType.RUN_WAITING_USER
+    proposal = events[-2]
+    assert proposal.type == RunEventType.PROPOSAL_READY
+    assert proposal.source == "run_gate"
+    assert proposal.payload["reason"] == "reviewed"
+    assert proposal.payload["review_verdict"] == "APPROVED"
+    assert proposal.payload["verified_execution_id"] == "e1"
+    assert proposal.payload["diff_sha256"] == "c" * 64
+
+
+def test_complete_reviewed_await_user_needs_fix_raises_and_records_nothing(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verdict="NEEDS_FIX", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime, settlement="await_user").complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+        )
+    events = runtime.events(run.run_id, limit=200).events
+    assert not any(e.type in (RunEventType.PROPOSAL_READY, RunEventType.RUN_WAITING_USER) for e in events)
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+
+
+def test_complete_reviewed_await_user_diff_sha_mismatch_raises_and_records_nothing(tmp_path):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    with pytest.raises(RunCompletionError):
+        RunCompletionGate(runtime, settlement="await_user").complete_reviewed(
+            run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="d" * 64,
+        )
+    events = runtime.events(run.run_id, limit=200).events
+    assert not any(e.type in (RunEventType.PROPOSAL_READY, RunEventType.RUN_WAITING_USER) for e in events)
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+
+
+def test_complete_reviewed_await_user_optimistic_sequence_race(tmp_path, monkeypatch):
+    runtime, _, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+    gate = RunCompletionGate(runtime, settlement="await_user")
+    original = runtime.record_many
+    injected = False
+
+    def racing_record_many(**kwargs):
+        nonlocal injected
+        if not injected:
+            injected = True
+            runtime.record(run_id=run.run_id, type="future.event", payload={}, source="other")
+        return original(**kwargs)
+
+    monkeypatch.setattr(runtime, "record_many", racing_record_many)
+    with pytest.raises(EventSequenceError):
+        gate.complete_reviewed(run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64)
+    events = runtime.events(run.run_id, limit=200).events
+    assert not any(e.type in (RunEventType.PROPOSAL_READY, RunEventType.RUN_WAITING_USER) for e in events)
+
+
+def test_await_user_settlement_then_user_applies_proposal(tmp_path):
+    """End-to-end proof this actually unblocks the Apply/Reject path: a
+    pipeline Run settled via await_user reaches WAITING_USER, and the
+    existing legacy Apply coordinator (which requires WAITING_USER) can then
+    record the user's decision."""
+    from run_runtime.legacy import LegacyRunCoordinator
+
+    runtime, task, run = setup_runtime(tmp_path)
+    append_execution(runtime, run.run_id, "e1", RunEventType.EXECUTION_COMPLETED)
+    append_verification(runtime, run.run_id, "v1", "pass")
+    append_review(runtime, run.run_id, "r1", verification_id="v1", diff_sha256="c" * 64)
+
+    RunCompletionGate(runtime, settlement="await_user").complete_reviewed(
+        run.run_id, verification_id="v1", review_id="r1", current_diff_sha256="c" * 64,
+    )
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+
+    coordinator = LegacyRunCoordinator(runtime, task_id=task.task_id, run_id=run.run_id, routing={})
+    coordinator.record_proposal_applied(applied_paths=["a.txt"], checkpoint_id="cp-1")
+
+    applied = runtime.get_run(run.run_id)
+    assert applied.status is RunStatus.SUCCEEDED
+    assert runtime.events(run.run_id, limit=200).events[-1].type == RunEventType.PROPOSAL_APPLIED

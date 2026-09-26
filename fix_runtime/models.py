@@ -145,6 +145,42 @@ class FixWorkerRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class InitialWorkerRequest:
+    """The bounded initial-implementation instruction handed to the Worker port.
+
+    Mirrors FixWorkerRequest's contract for the FIRST Worker attempt of a
+    Run (before any Verification/Review evidence exists): `rendered_input`
+    IS the trust-boundary-enforced string produced by
+    fix_runtime.prompt.render_initial_worker_input() for this exact attempt.
+    A concrete WorkerAttemptRunner MUST treat `rendered_input` as the actual
+    input it feeds to the underlying harness, exactly as it does for a
+    FixWorkerRequest — see fix_runtime.ports.WorkerAttemptRunner.
+    """
+
+    task: str
+    rendered_input: str
+    plan: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "task", _bounded_text(self.task, "InitialWorkerRequest.task", max_chars=_MAX_TASK_CHARS)
+        )
+        from fix_runtime.prompt import MAX_FIX_INPUT_CHARS  # lazy: prompt imports models
+
+        object.__setattr__(
+            self, "rendered_input",
+            _bounded_text(
+                self.rendered_input, "InitialWorkerRequest.rendered_input", max_chars=MAX_FIX_INPUT_CHARS,
+            ),
+        )
+        if self.plan is not None:
+            object.__setattr__(
+                self, "plan",
+                _bounded_text(self.plan, "InitialWorkerRequest.plan", max_chars=_MAX_PLAN_CHARS, allow_empty=True),
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class FixLoopRequest:
     task: str
     trigger: FixTrigger

@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from run_runtime.errors import InvalidRunStateError, RunCompletionError
 from run_runtime.events import RunEvent, RunEventType
 from run_runtime.models import RunStatus
+from run_runtime.pipeline import CanonicalPipelineRecorder
 from run_runtime.readmodels import load_full_event_history
 from run_runtime.service import RunRuntime
 
+_SETTLEMENT_MODES = frozenset({"complete", "await_user"})
 _MAX_MESSAGE = 2000
 _ERROR_STATUSES = {"fail", "timeout", "error"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -43,10 +45,39 @@ def _bounded_message(value: object, fallback: str) -> str:
 
 
 class RunCompletionGate:
-    """Validate canonical evidence and append explicit Run terminal events."""
+    """Validate canonical evidence and append explicit Run terminal events.
 
-    def __init__(self, runtime: RunRuntime) -> None:
+    `settlement` controls what a SUCCESSFUL complete_verified/
+    complete_reviewed evidence check actually writes:
+
+      - "complete" (default, unchanged behavior): run.completed.
+      - "await_user": the exact same evidence checks run unchanged, but the
+        Run is left WAITING_USER with a proposal.ready carrying the same
+        provenance payload run.completed would have used (see
+        run_runtime.pipeline.CanonicalPipelineRecorder.needs_user) — so a
+        human's Apply/Reject decision can be recorded afterward via
+        run_runtime.legacy.LegacyRunCoordinator.record_proposal_applied/
+        record_proposal_rejected. fail_execution/fail_verification/
+        fail_fix_loop are NEVER affected by `settlement` — a failure is
+        always a failure.
+    """
+
+    def __init__(self, runtime: RunRuntime, *, settlement: str = "complete") -> None:
+        if settlement not in _SETTLEMENT_MODES:
+            raise RunCompletionError(f"Invalid RunCompletionGate settlement mode: {settlement!r}")
         self._runtime = runtime
+        self._settlement = settlement
+
+    def _settle(self, run_id: str, expected_seq: int, payload: dict) -> None:
+        if self._settlement == "complete":
+            self._runtime.record(
+                run_id=run_id, type=RunEventType.RUN_COMPLETED, payload=payload,
+                source="run_gate", expected_last_event_seq=expected_seq,
+            )
+            return
+        CanonicalPipelineRecorder(self._runtime, run_id).needs_user(
+            payload=payload, expected_last_event_seq=expected_seq, source="run_gate",
+        )
 
     def _evidence(self, run_id: str) -> _RunEvidence:
         run = self._runtime.get_run(run_id)
@@ -147,17 +178,14 @@ class RunCompletionGate:
             )
         if not execution.execution_id:
             raise RunCompletionError("Successful execution evidence lacks execution_id")
-        self._runtime.record(
-            run_id=run_id,
-            type=RunEventType.RUN_COMPLETED,
-            payload={
+        self._settle(
+            run_id, evidence.decision_seq,
+            {
                 "reason": "verified",
                 "verification_id": verification_id,
                 "verification_status": "pass",
                 "verified_execution_id": execution.execution_id,
             },
-            source="run_gate",
-            expected_last_event_seq=evidence.decision_seq,
         )
 
     def fail_execution(self, run_id: str, *, execution_id: str) -> None:
@@ -317,10 +345,9 @@ class RunCompletionGate:
                 "Review diff_sha256 does not match the current workspace change set"
             )
 
-        self._runtime.record(
-            run_id=run_id,
-            type=RunEventType.RUN_COMPLETED,
-            payload={
+        self._settle(
+            run_id, evidence.decision_seq,
+            {
                 "reason": "reviewed",
                 "verification_id": verification_id,
                 "verification_status": "pass",
@@ -329,8 +356,6 @@ class RunCompletionGate:
                 "diff_sha256": current_diff_sha256,
                 "verified_execution_id": execution.execution_id,
             },
-            source="run_gate",
-            expected_last_event_seq=evidence.decision_seq,
         )
 
     def fail_fix_loop(self, run_id: str, *, fix_loop_id: str) -> None:
