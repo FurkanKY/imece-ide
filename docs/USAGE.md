@@ -49,6 +49,93 @@ the right, and the **status bar** at the bottom.
 **Safety:** agents can never write outside the folder you opened
 (path safety in `project.py`).
 
+### How a run works
+
+Runs on an existing project (Git repository, planner/worker/reviewer all
+assigned to a supported provider) use the new pipeline engine automatically.
+Otherwise — no Git repository, or a role assigned to a provider the new
+engine doesn't support yet — the classic engine is used instead, and an
+info card in the flow tells you why. You can also force the classic engine
+from Settings (see "AI engine" below).
+
+A pipeline run goes through these stages, shown live in the flow tab:
+
+1. **Planning** — the Planner scopes the change.
+2. **Working** — the Worker makes an attempt. This happens in an isolated
+   copy of your project (a separate Git worktree seeded from your current
+   `HEAD` plus whatever you have uncommitted), never in your real files
+   directly — nothing you do in the editor while a run is in progress can
+   collide with it, and nothing it does touches disk until you apply.
+3. **Verifying** — if the project has a recognizable test command, it is run
+   automatically inside that same isolated copy:
+   - a `pytest` config, a `tests/` folder, or a `test_*.py` file at the
+     project root → `python3 -m pytest -q`;
+   - a `package.json` with a real `scripts.test` → `npm test`;
+   - `Cargo.toml` → `cargo test`;
+   - `go.mod` → `go test ./...`.
+
+   You can also define your own checks in a `.imece/verify.json` file at the
+   project root, which takes priority over the heuristics above:
+
+   ```json
+   [
+     { "id": "unit", "title": "Unit tests", "argv": ["python3", "-m", "pytest", "-q"], "timeout_ms": 300000 }
+   ]
+   ```
+
+   `argv` is a plain argument list (not a shell command string), and
+   `timeout_ms` defaults to 300000 (5 minutes) if omitted. Every entry in the
+   list is run; all must pass.
+4. **Reviewing** — once verification passes (or if nothing could be
+   verified), the Reviewer inspects the diff. If no verification command was
+   found at all, the review is advisory only — there is nothing to
+   automatically "pass," so the run still waits for you at the next step
+   with the reviewer's notes attached.
+5. **Fixing** (only if verification fails or the Reviewer asks for changes)
+   — the Worker gets a bounded number of attempts (currently two) to address
+   the failure or the Reviewer's feedback, re-verifying and re-reviewing each
+   time. If it's still not right after that, the run ends as failed rather
+   than looping forever.
+6. **Proposal, Apply/Reject** — once the Reviewer approves (or the run
+   reaches the advisory case above), the same **Changes**/inline-diff/
+   Apply/Reject flow described above opens. Nothing is ever auto-applied —
+   a passing, approved run still waits for you.
+
+**Conflicts on Apply:** if a file targeted by the proposal changed on disk
+since the run started (you edited and saved it, or something else wrote to
+it), Apply refuses for the whole batch and tells you which files changed —
+nothing is written and no checkpoint is taken. Re-run the task to get a
+fresh proposal, or use Reject.
+
+The classic engine skips verification and the fix loop entirely: it goes
+straight from Plan → Code → Review to a proposal, with the Reviewer as the
+only check.
+
+### Accounts vs. API keys
+
+Each role (Planner/Worker/Reviewer) can be backed either by an API key
+(any provider in the catalog) or, for Claude, ChatGPT and Gemini, by your
+existing account through the vendor's own CLI, the same way you'd already be
+logged in to use that CLI yourself. Using an account instead of a key needs:
+
+- The CLI installed and logged in already (`claude`, `codex`, or `gemini`,
+  depending on the provider) — the pipeline engine drives your existing
+  login, it never asks for or stores a separate key for these.
+- Node.js and `npx` on `PATH` — account-based roles are launched via `npx`,
+  which fetches the small adapter package on first use and caches it.
+
+Which account-based providers are actually available depends on what the
+new engine currently supports — check Settings → Model providers for the
+current list before assuming a given CLI works with the new engine.
+
+### AI engine
+
+There is an "AI engine" preference with two modes: **Auto** (the default)
+picks the new pipeline engine whenever the project and role assignments
+support it and falls back to the classic engine otherwise; **Classic**
+always uses the classic engine. Change it in Settings → AI motoru
+(Otomatik / Klasik).
+
 ### Change receipts
 
 After each run, pick **Receipt (Makbuz)** from the history drawer. A receipt

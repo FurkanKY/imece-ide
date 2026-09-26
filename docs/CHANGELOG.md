@@ -3,6 +3,40 @@
 This file records public, user-visible releases. Development notes and internal
 planning records are intentionally not part of the published repository.
 
+## Unreleased
+
+- **New AI engine (pipeline):** on an existing Git-repository project, runs
+  now go through an isolated, multi-stage pipeline — plan, an initial
+  attempt made in a separate isolated copy of the project, automatic
+  verification (auto-detected `pytest`/`npm test`/`cargo test`/`go test`, or
+  a project-defined `.imece/verify.json`), a semantic review, and a bounded
+  automatic fix loop when verification fails or review asks for changes. The
+  final result is still always presented as a reviewable diff — Apply/Reject
+  is unchanged, and nothing is written to your files until you apply.
+  Falls back to the previous ("classic") engine automatically when a
+  project isn't a Git repository or a role's provider isn't supported yet by
+  the new engine; an "AI engine" preference can also force the classic
+  engine. See [ARCHITECTURE.md](ARCHITECTURE.md#ai-engine-pipeline).
+- **Apply conflict detection:** applying a proposal now checks whether any
+  targeted file changed on disk since the run started, and refuses the
+  whole batch (no partial writes) if it did, instead of silently
+  overwriting your intervening edit.
+- **Account-based access to Claude, ChatGPT and Gemini:** the Planner/Worker/
+  Reviewer roles can be backed by an existing Claude Code, Codex or Gemini CLI
+  login instead of an API key, driven locally through the Agent Client
+  Protocol (requires the CLI installed and logged in, plus Node.js/`npx`).
+- **Claude API provider:** Claude models can also be used with an Anthropic
+  API key (native Messages API backend, default model `claude-opus-5`).
+- **Provider picker:** role dropdowns are grouped into "with account" and
+  "with API key", show which providers are ready, and remember your choice;
+  first start picks a ready provider automatically.
+- **AI engine setting:** Settings → AI engine switches between Auto (new
+  engine where possible) and Classic.
+- **Linux support:** the desktop shell, integrated terminal (real PTY via
+  `ptyprocess`), and run/debug process cleanup now work from source on
+  Linux, alongside the existing Windows-first support. See
+  [SETUP.md](SETUP.md) for Linux setup notes.
+
 ## v0.4.0-beta.1
 
 - **Provider catalog:** the fixed Claude/DeepSeek/Gemini trio is replaced by a
