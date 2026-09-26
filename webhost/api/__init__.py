@@ -19,3 +19,12 @@ def register_all() -> None:
     from webhost.api import keys as _keys          # noqa: F401
     from webhost.api import providers as _providers  # noqa: F401
     from webhost.api import debug as _debug        # noqa: F401
+
+    # T1.2 — bir önceki oturumun çökmesi/olağandışı kapanması sonrası kalmış
+    # olabilecek izole (pipeline) worktree'leri temizle. En iyi çabadır;
+    # tek başına register_all()'ı asla başarısız kılmaz.
+    try:
+        import engine_factory
+        engine_factory.prune_startup_workspaces()
+    except Exception:
+        pass

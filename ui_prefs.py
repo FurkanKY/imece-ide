@@ -26,6 +26,9 @@ DEFAULTS = {
     "recent_projects": [],      # [{path, name, last_opened}]
     # [{root, fingerprint}] — proje komutu değişince yeniden kullanıcı onayı gerekir.
     "trusted_run_commands": [],
+    # T1.2 — AI koşu motoru tercihi: "auto" (uygunsa yeni pipeline motoru,
+    # değilse klasik motor) | "legacy" (her zaman klasik motor).
+    "ai_engine": "auto",
 }
 
 

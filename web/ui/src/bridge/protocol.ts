@@ -300,6 +300,8 @@ export interface Proposal {
   new: string;
   diff: string;
   is_new: boolean;
+  /** yeni (pipeline) motor: dosya izole çalışma alanında silinmiş. */
+  is_deleted?: boolean;
 }
 
 export interface DirEntry {
