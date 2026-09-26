@@ -277,6 +277,83 @@ def test_pipeline_apply_writes_file_and_disposes(bridge, qapp, monkeypatch, git_
     assert "proposal.applied" in canonical_types
 
 
+def test_pipeline_apply_conflict_when_file_modified_during_run(bridge, qapp, monkeypatch, git_repo):
+    """Koşu bitip öneri hazır olduktan SONRA, kullanıcı a.txt'yi (editörde
+    veya diskte) değiştirirse Apply hiçbir şey yazmamalı, checkpoint
+    oluşturmamalı ve öneri bekleyen (pending) kalmalıdır."""
+    ports_factory = _make_ports_factory(worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}')
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    (git_repo / "a.txt").write_text("kullanici-degistirdi\n", encoding="utf-8")
+
+    r = rpc(bridge, "run.applyProposals", {"paths": ["a.txt"]}, call_id=2)
+    assert r["ok"], r
+    assert r["result"]["applied"] == []
+    assert r["result"]["checkpointId"] is None
+    assert len(r["result"]["conflicts"]) == 1
+    assert r["result"]["conflicts"][0]["path"] == "a.txt"
+    assert "değişti" in r["result"]["conflicts"][0]["reason"]
+    # Dosyaya DOKUNULMADI (kullanıcının kendi değişikliği korunur).
+    assert (git_repo / "a.txt").read_text(encoding="utf-8") == "kullanici-degistirdi\n"
+
+    from webhost.api import run as run_api
+    # Öneri bekleyen (pending) kaldı — reddedilebilir/yeniden koşulabilir.
+    assert run_api._active["proposals"], "öneriler temizlenmemeli"
+
+    from webhost import state as _state
+    run_record = _state.get_run_runtime().get_run(run_id)
+    assert run_record.status.value == "waiting_user"
+    canonical_types = [e.type for e in _state.get_run_runtime().events(run_id, limit=500).events]
+    assert "proposal.applied" not in canonical_types
+
+
+def test_pipeline_apply_conflict_when_new_file_created_during_run(bridge, qapp, monkeypatch, git_repo):
+    """Öneri yeni bir dosya (b.txt) oluşturmayı önerir (taban durumu 'absent').
+    Koşu bitip Apply çağrılmadan önce kullanıcı b.txt'yi kendisi oluşturursa
+    bu da bir çakışma sayılmalıdır (sessizce üzerine yazılmamalı)."""
+    new_file_turns = [
+        ModelTurn(
+            "", (ModelToolCall("c1", "write_file", {"path": "b.txt", "content": "hello\n"}),),
+            ModelStopReason.TOOL_USE, ModelUsage(),
+        ),
+        _completed_turn("b.txt oluşturuldu."),
+    ]
+    ports_factory = _make_ports_factory(worker_turns=new_file_turns, review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}')
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    evs = _run_ev_payloads(events, run_id)
+    proposal_events = [e for e in evs if e["type"] == "proposal"]
+    assert proposal_events and proposal_events[0]["proposals"][0]["path"] == "b.txt"
+    assert proposal_events[0]["proposals"][0]["is_new"] is True
+
+    (git_repo / "b.txt").write_text("kullanici-olusturdu\n", encoding="utf-8")
+
+    r = rpc(bridge, "run.applyProposals", {"paths": ["b.txt"]}, call_id=2)
+    assert r["ok"], r
+    assert r["result"]["applied"] == []
+    assert r["result"]["checkpointId"] is None
+    assert len(r["result"]["conflicts"]) == 1
+    assert r["result"]["conflicts"][0]["path"] == "b.txt"
+    assert (git_repo / "b.txt").read_text(encoding="utf-8") == "kullanici-olusturdu\n"
+
+
+def test_pipeline_apply_conflict_when_file_deleted_during_run(bridge, qapp, monkeypatch, git_repo):
+    """Öneri a.txt'yi düzeltmeyi önerir; Apply'dan ÖNCE kullanıcı a.txt'yi
+    silerse bu da bir çakışmadır (taban durum artık uyuşmuyor)."""
+    ports_factory = _make_ports_factory(worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}')
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    (git_repo / "a.txt").unlink()
+
+    r = rpc(bridge, "run.applyProposals", {"paths": ["a.txt"]}, call_id=2)
+    assert r["ok"], r
+    assert r["result"]["applied"] == []
+    assert r["result"]["checkpointId"] is None
+    assert len(r["result"]["conflicts"]) == 1
+    assert r["result"]["conflicts"][0]["path"] == "a.txt"
+    assert not (git_repo / "a.txt").exists()  # dosya durumuna dokunulmadı
+
+
 def test_pipeline_reject_disposes_without_writing(bridge, qapp, monkeypatch, git_repo):
     ports_factory = _make_ports_factory(worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}')
     run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
@@ -436,3 +513,96 @@ def test_ai_engine_pref_legacy_skips_pipeline(bridge, qapp, monkeypatch, git_rep
     assert _wait_until(is_finished, qapp, timeout=5.0), f"olaylar: {events}"
     assert run_api._active["engine"] == "legacy"
     assert called["n"] == 0
+
+
+# ---------------- legacy motor: "stale apply" koruması ----------------
+
+def _fake_legacy_generator_with_stale_guard(root, task, routing):
+    """project_runner.run_project_task'ın gerçek diff-hesaplama adımını
+    (taban durum kaydı dahil) taklit eden minimal sahte generator — gerçek
+    ajan/ağ çağrısı YAPMAZ."""
+    from project import Project
+
+    proj = Project(root)
+    new_content = "fixed\n"
+    diff = proj.make_diff("a.txt", new_content)
+    base_hash = proj.hash_file("a.txt")  # project_runner ile AYNI an/yöntem
+    yield {"type": "stage", "stage": "plan", "provider": "x"}
+    yield {
+        "type": "proposal",
+        "proposals": [{
+            "path": "a.txt", "new": new_content, "diff": diff, "is_new": False,
+            "baseHash": base_hash,
+        }],
+        "totals": {"cost_usd": 0, "latency_s": 0, "tokens": 0},
+        "verdict": "APPROVED",
+    }
+
+
+def _legacy_conflict_repo(tmp_path, name, content):
+    plain_dir = tmp_path / name
+    plain_dir.mkdir()
+    (plain_dir / "a.txt").write_text(content, encoding="utf-8")
+    return plain_dir
+
+
+def test_legacy_apply_conflict_when_file_modified_during_run(bridge, qapp, monkeypatch, tmp_path):
+    from webhost.api import run as run_api
+
+    plain_dir = _legacy_conflict_repo(tmp_path, "plain-legacy-conflict", "dirty\n")
+    state.set_project(str(plain_dir))
+    monkeypatch.setattr(run_api, "run_project_task", _fake_legacy_generator_with_stale_guard)
+
+    events = []
+    bridge.event.connect(lambda raw: events.append(json.loads(raw)))
+    r = rpc(bridge, "run.start", {"task": "x", "routing": _all_native_routing()})
+    assert r["ok"], r
+
+    def is_finished():
+        return any(e["channel"] == "run.finished" for e in events)
+
+    assert _wait_until(is_finished, qapp, timeout=5.0), f"olaylar: {events}"
+    assert run_api._active["engine"] == "legacy"
+
+    # Kullanıcı a.txt'yi Apply'dan ÖNCE değiştirdi (editörde kaydetti / diskte düzenledi).
+    (plain_dir / "a.txt").write_text("kullanici-degistirdi\n", encoding="utf-8")
+
+    r2 = rpc(bridge, "run.applyProposals", {"paths": ["a.txt"]}, call_id=2)
+    assert r2["ok"], r2
+    assert r2["result"]["applied"] == []
+    assert r2["result"]["checkpointId"] is None
+    assert len(r2["result"]["conflicts"]) == 1
+    assert r2["result"]["conflicts"][0]["path"] == "a.txt"
+    assert "değişti" in r2["result"]["conflicts"][0]["reason"]
+    # Dosyaya DOKUNULMADI; checkpoint OLUŞTURULMADI.
+    assert (plain_dir / "a.txt").read_text(encoding="utf-8") == "kullanici-degistirdi\n"
+    assert not (plain_dir / ".imece" / "checkpoints").exists()
+    # Öneri bekleyen (pending) kaldı.
+    assert run_api._active["proposals"], "öneriler bekleyen kalmalı (legacy motor)"
+
+
+def test_legacy_apply_succeeds_when_file_unchanged(bridge, qapp, monkeypatch, tmp_path):
+    from webhost.api import run as run_api
+
+    plain_dir = _legacy_conflict_repo(tmp_path, "plain-legacy-ok", "dirty\n")
+    state.set_project(str(plain_dir))
+    monkeypatch.setattr(run_api, "run_project_task", _fake_legacy_generator_with_stale_guard)
+
+    events = []
+    bridge.event.connect(lambda raw: events.append(json.loads(raw)))
+    r = rpc(bridge, "run.start", {"task": "x", "routing": _all_native_routing()})
+    assert r["ok"], r
+
+    def is_finished():
+        return any(e["channel"] == "run.finished" for e in events)
+
+    assert _wait_until(is_finished, qapp, timeout=5.0), f"olaylar: {events}"
+
+    # Dosya değişmeden kaldı — Apply eskisi gibi başarılı olmalı.
+    r2 = rpc(bridge, "run.applyProposals", {"paths": ["a.txt"]}, call_id=2)
+    assert r2["ok"], r2
+    assert r2["result"]["applied"] == ["a.txt"]
+    assert r2["result"]["conflicts"] == []
+    assert r2["result"]["checkpointId"]
+    assert (plain_dir / "a.txt").read_text(encoding="utf-8") == "fixed\n"
+    assert run_api._active["proposals"] == []

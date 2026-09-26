@@ -8,6 +8,7 @@ Ajanların bir projeyi "görmesi" için dosyaları listeleyip okumamız; sonra
 Tüm yol işlemleri proje kökünün DIŞINA çıkamaz (güvenlik).
 """
 
+import hashlib
 import os
 import shutil
 import difflib
@@ -56,6 +57,22 @@ class Project:
 
     def exists(self, rel: str) -> bool:
         return os.path.isfile(self._safe(rel))
+
+    def hash_file(self, rel: str) -> str | None:
+        """Dosyanın MEVCUT sha256'sı (hex); dosya yoksa None ("absent").
+
+        Bir öneri (proposal) inşa edilirken bu, önerinin DİFF'lendiği taban
+        durumu kaydetmek için kullanılır — koşu sürerken kullanıcı dosyayı
+        değiştirirse (editörde veya diskte), Apply anında yeniden hesaplanan
+        hash farklı çıkar ve "stale apply" güvenli biçimde tespit edilir."""
+        p = self._safe(rel)
+        if not os.path.isfile(p):
+            return None
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 16), b""):
+                h.update(chunk)
+        return h.hexdigest()
 
     def make_diff(self, rel: str, new_content: str) -> str:
         """Mevcut içerik ile önerilen içeriğin unified diff'ini üretir."""

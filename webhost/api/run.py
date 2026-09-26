@@ -183,13 +183,21 @@ def _build_pipeline_proposals(proj: Project, workspace, change_set) -> tuple[lis
                 continue
             is_new = not proj.exists(rel)
             diff = proj.make_diff(rel, text)
-            proposals.append({"path": rel, "new": text, "diff": diff, "is_new": is_new})
+            # Taban durum: kullanıcının PROJE dosyasının (worktree DEĞİL) BU
+            # ANKİ hali — Apply anında yeniden hesaplanıp karşılaştırılır
+            # ("stale apply" koruması, bkz. _apply).
+            base_hash = proj.hash_file(rel)
+            proposals.append({
+                "path": rel, "new": text, "diff": diff, "is_new": is_new, "baseHash": base_hash,
+            })
         else:
             # worktree'de yok: taban durumuna göre silinmiş.
             if proj.exists(rel):
                 diff = proj.make_diff(rel, "")
+                base_hash = proj.hash_file(rel)
                 proposals.append({
                     "path": rel, "new": "", "diff": diff, "is_new": False, "is_deleted": True,
+                    "baseHash": base_hash,
                 })
             # proj'da da yoksa: çalışma sırasında oluşturulup silinmiş, gösterecek bir şey yok.
     return proposals, skipped_binary
@@ -639,19 +647,55 @@ def _cancel(params, ctx):
     return {}
 
 
+def _stale_apply_conflicts(proj: Project, proposals: list[dict]) -> list[dict]:
+    """Her önerinin kaydedilmiş taban durumunu (baseHash) BU ANKİ proje dosya
+    durumuyla karşılaştırır. Koşu sürerken kullanıcı bir dosyayı (editörde
+    kaydederek veya diskte doğrudan) değiştirmiş/oluşturmuş/silmişse, o dosya
+    için bir çakışma (conflict) kaydı üretir. Öneri sözlüğünde "baseHash"
+    ANAHTARI yoksa (eski/bilinmeyen bir kaynak) GÜVENLİ TARAFTA kalınır ve
+    dosya DEĞİŞMİŞ SAYILMAZ — yalnızca gerçekten kaydedilmiş bir taban durumu
+    varsa karşılaştırma yapılır."""
+    conflicts = []
+    for p in proposals:
+        if "baseHash" not in p:
+            continue
+        current = proj.hash_file(p["path"])
+        if current != p.get("baseHash"):
+            conflicts.append({
+                "path": p["path"],
+                "reason": (
+                    f"Dosya koşu sırasında değişti: {p['path']}. Öneriyi yeniden "
+                    "oluşturmak için görevi tekrar çalıştırın."
+                ),
+            })
+    return conflicts
+
+
 @handler("run.applyProposals")
 def _apply(params, ctx):
     proj = _require_project()
     wanted = set(params.get("paths") or [])
     proposals = [p for p in _active.get("proposals", []) if p.get("path") in wanted]
     if not proposals:
-        return {"applied": [], "errors": [], "checkpointId": None}
+        return {"applied": [], "errors": [], "conflicts": [], "checkpointId": None}
 
     coordinator = _active.get("coordinator")
     if coordinator is None:
         # Bekleyen öneriler var ama kanonik koordinatör yok: KAPALI BAŞARISIZ
         # olunur — dosya sistemine DOKUNULMAZ, öneriler TEMİZLENMEZ.
         raise BridgeError("no_active_run", "Aktif bir kanonik koşu yok; öneri uygulanamaz.")
+
+    # "Stale apply" koruması: checkpoint OLUŞTURULMADAN ÖNCE, seçilen her
+    # önerinin taban durumu bu anki proje dosyasıyla karşılaştırılır. Koşu
+    # dakikalarca sürebildiği için kullanıcı bu süre içinde proposal'daki bir
+    # dosyayı değiştirmiş olabilir (editörde kaydetmiş veya diskte elle
+    # düzenlemiş) — bu durumda apply SESSİZCE üzerine yazmaz: hiçbir dosyaya
+    # DOKUNULMAZ, checkpoint OLUŞTURULMAZ, öneriler bekleyen (pending) kalır
+    # (kullanıcı Reddet'i kullanabilir ya da görevi tekrar çalıştırabilir).
+    # Kanonik Run WAITING_USER'da KALIR (proposal.applied kaydedilmez).
+    conflicts = _stale_apply_conflicts(proj, proposals)
+    if conflicts:
+        return {"applied": [], "errors": [], "conflicts": conflicts, "checkpointId": None}
 
     try:
         checkpoint = CheckpointStore(proj.root).create(
@@ -691,7 +735,7 @@ def _apply(params, ctx):
                 f"Kısmi apply başarısız oldu VE geri alma (rollback) da başarısız oldu "
                 f"(checkpoint={checkpoint['id']}); dosya sistemi durumu tutarsız olabilir: {restore_err}",
             )
-        return {"applied": [], "errors": errors, "checkpointId": None}
+        return {"applied": [], "errors": errors, "conflicts": [], "checkpointId": None}
 
     # Dosya yazımları TAMAMEN başarılı. Şimdi kanonik yerleşimi (settlement)
     # dene — bu, dosya değişikliklerinin "gerçek" sayılıp sayılmayacağına
@@ -728,6 +772,7 @@ def _apply(params, ctx):
     return {
         "applied": applied,
         "errors": [],
+        "conflicts": [],
         "checkpointId": checkpoint["id"],
     }
 

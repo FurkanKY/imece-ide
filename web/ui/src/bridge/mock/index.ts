@@ -391,7 +391,7 @@ export class MockBridge implements Bridge {
           });
           this.emit("fs.changed", { kind: "modified", paths: applied });
         }
-        return { applied, errors: [], checkpointId } as R;
+        return { applied, errors: [], conflicts: [], checkpointId } as R;
       }
       case "checkpoint.list":
         return {

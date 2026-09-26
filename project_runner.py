@@ -128,7 +128,11 @@ def run_project_task(project_root, task, routing=None):
     for rel, new in changes.items():
         diff = proj.make_diff(rel, new)
         is_new = not proj.exists(rel)
-        proposals.append({"path": rel, "new": new, "diff": diff, "is_new": is_new})
+        # Öneri TAM OLARAK bu taban duruma (proj.hash_file) göre diff'lendi —
+        # applyProposals bunu apply anında yeniden hesaplayıp karşılaştırır
+        # (bkz. webhost/api/run.py _apply — "stale apply" koruması).
+        base_hash = proj.hash_file(rel)
+        proposals.append({"path": rel, "new": new, "diff": diff, "is_new": is_new, "baseHash": base_hash})
         yield {"type": "diff", "path": rel, "is_new": is_new,
                "diff": diff or "(içerik aynı — değişiklik yok)"}
 

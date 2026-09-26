@@ -187,7 +187,8 @@ export const useRun = create<RunState>((set, get) => ({
     }
     set({ checkpointBusy: true });
     try {
-      const { applied, errors, checkpointId } = await bridge.call("run.applyProposals", { paths });
+      const { applied, errors, conflicts, checkpointId } = await bridge.call("run.applyProposals", { paths });
+      for (const c of conflicts ?? []) toast.err(c.reason);
       for (const e of errors) toast.err(`${e.path}: ${e.message}`);
       if (!applied.length) return;
       if (!checkpointId) throw new Error("Uygulama tamamlandı ancak checkpoint kimliği alınamadı.");

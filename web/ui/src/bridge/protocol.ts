@@ -79,7 +79,14 @@ export interface Api {
   "run.cancel": { params: { runId?: string }; result: {} };
   "run.applyProposals": {
     params: { paths: string[] };
-    result: { applied: string[]; errors: { path: string; message: string }[]; checkpointId: string | null };
+    result: {
+      applied: string[];
+      errors: { path: string; message: string }[];
+      /** koşu sırasında kullanıcı tarafından değiştirilmiş/oluşturulmuş/silinmiş dosyalar —
+       * hiçbir şey yazılmadı, checkpoint oluşturulmadı, öneriler bekliyor kaldı. */
+      conflicts?: { path: string; reason: string }[];
+      checkpointId: string | null;
+    };
   };
   "checkpoint.list": { params: {}; result: { checkpoints: Checkpoint[] } };
   "checkpoint.restore": { params: { checkpointId: string }; result: { restored: string[] } };
