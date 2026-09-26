@@ -23,7 +23,11 @@ from executor_runtime.acp_worker import (
     AcpWorkerLaunchProfile,
     resolve_acp_worker_launch,
 )
-from executor_runtime.acp_presets import claude_code_acp_launch_profile, codex_acp_launch_profile
+from executor_runtime.acp_presets import (
+    claude_code_acp_launch_profile,
+    codex_acp_launch_profile,
+    gemini_cli_acp_launch_profile,
+)
 from executor_runtime.acp_reviewer import AcpReviewAttemptRunner
 
 __all__ = [
@@ -39,4 +43,5 @@ __all__ = [
     "AcpReviewAttemptRunner",
     "claude_code_acp_launch_profile",
     "codex_acp_launch_profile",
+    "gemini_cli_acp_launch_profile",
 ]
