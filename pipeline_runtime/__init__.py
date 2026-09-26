@@ -10,6 +10,7 @@ pipeline_runtime.runner for the full flow and the "no verification plan"
 design decision.
 """
 
+from pipeline_runtime.acp_planner import AcpPlanAttemptRunner
 from pipeline_runtime.errors import PipelineExecutionError, PipelineInputError, PipelineRuntimeError
 from pipeline_runtime.models import PipelineReport, PipelineStatus
 from pipeline_runtime.native_planner import NativePlanAttemptRunner
@@ -25,6 +26,7 @@ __all__ = [
     "PipelineReport",
     "PlanAttemptRunner",
     "NativePlanAttemptRunner",
+    "AcpPlanAttemptRunner",
     "PipelineRunner",
     "detect_verification_plan",
 ]
