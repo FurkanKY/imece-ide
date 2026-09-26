@@ -15,6 +15,12 @@ export interface Prefs {
   animations: boolean;
   lastProject: string | null;
   recentProjects: { path: string; name: string; lastOpened: string }[];
+  /** T1.2 — "auto" (git projelerinde izole pipeline motoru + doğrulama +
+      inceleme, uygun değilse klasik motor) | "legacy" (her zaman klasik). */
+  aiEngine: "auto" | "legacy";
+  /** Kullanıcının Composer'dan seçtiği rol->sağlayıcı ataması; null ->
+      run.providers'ın recommendedRouting'i kullanılır (bkz. state/run.ts). */
+  routing: Routing | null;
 }
 
 export interface RunEvent {
@@ -73,7 +79,7 @@ export interface Api {
   // ---- run / history (P2) ----
   "run.providers": {
     params: {};
-    result: { providers: string[]; defaultRouting: Routing };
+    result: { providers: ProviderInfo[]; recommendedRouting: Routing };
   };
   "run.start": { params: { task: string; routing: Routing }; result: { runId: string } };
   "run.cancel": { params: { runId?: string }; result: {} };
@@ -254,13 +260,23 @@ export type Routing = Record<Role, string>;
 export interface ProviderInfo {
   id: string;
   label: string;
-  kind: "openai" | "cli";
+  /** cli = hesap girişi (ör. Claude Code, Codex, Gemini CLI'ın OAuth girişi);
+      openai/anthropic = API anahtarıyla erişilen sağlayıcılar. */
+  kind: "openai" | "anthropic" | "cli";
   custom: boolean;
   ok: boolean;
   docsUrl: string;
   /** kind=cli: bulunan yol veya "bulunamadı" açıklaması */
   detail?: string;
-  /** kind=openai */
+  /** kind=cli: CLI ikili dosyası PATH'te bulundu mu */
+  cliAvailable?: boolean;
+  /** kind=cli: `npx` PATH'te mi (ACP hesap girişi Node.js gerektirir) */
+  npxAvailable?: boolean;
+  /** yeni (pipeline) motor bu sağlayıcıyı sürebiliyor mu — değilse Composer
+      "klasik motor" ipucu gösterir (bkz. engine_factory.role_supported) */
+  engineSupported?: boolean;
+  engineReason?: string;
+  /** kind=openai|anthropic */
   model?: string;
   models?: string[];
   keyHint?: string;

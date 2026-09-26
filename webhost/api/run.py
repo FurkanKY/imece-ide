@@ -277,11 +277,12 @@ def _safe_restore_checkpoint(proj: Project, checkpoint_id: str) -> tuple[bool, E
 
 @handler("run.providers")
 def _providers(params, ctx):
-    # Rol menüsü: kullanıma hazır sağlayıcılar + varsayılan atamalar (anahtar
-    # eksikse bile listede kalır; Composer eksik-anahtar uyarısını gösterir).
-    ready = [e["id"] for e in provider_registry.catalog() if provider_registry.is_ready(e)]
-    ids = list(dict.fromkeys([*DEFAULT_ROUTING.values(), *ready]))
-    return {"providers": ids, "defaultRouting": dict(DEFAULT_ROUTING)}
+    # Rol menüsü: TÜM katalog sağlayıcıları + durumları (anahtar/CLI eksikse
+    # bile listede kalır — Composer "Hesap ile"/"API anahtarı ile" gruplarını
+    # ve eksik-anahtar/CLI uyarısını buradan oluşturur) + kullanılabilirliğe
+    # göre önerilen routing (bkz. providers.recommended_routing).
+    items = [provider_registry.status_of(e) for e in provider_registry.catalog()]
+    return {"providers": items, "recommendedRouting": provider_registry.recommended_routing()}
 
 
 def _emit_pipeline_report(emit_ui, proj: Project, workspace, report) -> None:

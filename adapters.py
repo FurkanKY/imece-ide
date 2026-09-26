@@ -233,6 +233,69 @@ def call_gemini(system_prompt: str, user_prompt: str) -> LLMResponse:
 
 
 # ---------------------------------------------------------------------------
+# 3b) ANTHROPIC — Claude API (native Messages API, resmî `anthropic` SDK'sı).
+#     providers.py kataloğundaki "anthropic" kind'i (Claude API) bu fonksiyonla
+#     çağrılır; hesap girişi (Claude Code CLI) call_claude'dadır, ayrıdır.
+# ---------------------------------------------------------------------------
+# Haiku ailesi adaptive thinking'i desteklemiyor (bkz. claude-api skill dokümanı).
+_ANTHROPIC_NO_THINKING_PREFIX = "claude-haiku"
+
+
+def call_anthropic(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    model: str | None = None,
+    key_env: str | None = "ANTHROPIC_API_KEY",
+    pricing: dict | None = None,
+) -> LLMResponse:
+    key_env = key_env or "ANTHROPIC_API_KEY"
+    api_key = os.getenv(key_env, "").strip()
+    if not api_key:
+        raise RuntimeError(f"{key_env} tanımlı değil (Ayarlar'dan Claude API anahtarını ekleyin).")
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise RuntimeError("'anthropic' paketi kurulu değil (pip install anthropic).") from exc
+
+    mdl = model or "claude-opus-5"
+    client = anthropic.Anthropic(api_key=api_key)
+    kwargs: dict = {}
+    if not mdl.startswith(_ANTHROPIC_NO_THINKING_PREFIX):
+        kwargs["thinking"] = {"type": "adaptive"}
+
+    t0 = time.time()
+    resp = client.messages.create(
+        model=mdl,
+        max_tokens=16000,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+        **kwargs,
+    )
+    latency = time.time() - t0
+
+    # Yalnız "text" bloklarını oku; "thinking"/"redacted_thinking" bloklarını
+    # (varsa) görünür metne katma — bunlar iç muhakemedir, nihai cevap değil.
+    text = "".join(
+        getattr(block, "text", "") for block in resp.content if getattr(block, "type", None) == "text"
+    ).strip()
+
+    usage = getattr(resp, "usage", None)
+    pin = getattr(usage, "input_tokens", 0) or 0
+    pout = getattr(usage, "output_tokens", 0) or 0
+    price_in, price_out = (pricing or {}).get(mdl, (0.0, 0.0))
+    return LLMResponse(
+        text=text,
+        provider="anthropic",
+        model=mdl,
+        prompt_tokens=pin,
+        completion_tokens=pout,
+        latency_s=latency,
+        cost_usd=pin / 1_000_000 * price_in + pout / 1_000_000 * price_out,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 4) DİĞER AJAN CLI'LARI — Claude Code deseninin uyarlamaları: headless çağrı,
 #    JSON çıktı, metin + (varsa) token sayıları. Ayrıntılı alan adları CLI'dan
 #    CLI'ya değişir; parser'lar eksik alanlara toleranslıdır.

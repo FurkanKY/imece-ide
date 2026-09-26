@@ -29,6 +29,9 @@ DEFAULTS = {
     # T1.2 — AI koşu motoru tercihi: "auto" (uygunsa yeni pipeline motoru,
     # değilse klasik motor) | "legacy" (her zaman klasik motor).
     "ai_engine": "auto",
+    # Kullanıcının Composer'dan seçtiği rol->sağlayıcı ataması | None ->
+    # providers.recommended_routing() kullanılabilirliğe göre önerir.
+    "routing": None,
 }
 
 

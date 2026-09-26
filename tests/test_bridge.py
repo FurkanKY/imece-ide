@@ -96,8 +96,12 @@ def test_run_providers(bridge):
     import webhost.api.run  # noqa: F401 — handler kaydı
     r = rpc(bridge, "run.providers")
     assert r["ok"]
-    assert set(r["result"]["providers"]) >= {"claude", "deepseek", "gemini"}
-    assert r["result"]["defaultRouting"]["coder"] == "deepseek"
+    ids = {p["id"] for p in r["result"]["providers"]}
+    assert ids >= {"claude", "deepseek", "gemini", "anthropic"}
+    routing = r["result"]["recommendedRouting"]
+    assert set(routing) == {"planner", "coder", "reviewer"}
+    # tek sağlayıcı üç role de atanır (bkz. providers.recommended_routing)
+    assert len(set(routing.values())) == 1
 
 
 def test_providers_list_contract(bridge, tmp_path, monkeypatch):
@@ -146,8 +150,53 @@ def test_keys_status_covers_catalog(bridge, tmp_path, monkeypatch):
     assert provs["deepseek"]["masked"].endswith(provs["deepseek"]["masked"][-4:])
     assert "sk-uzun" not in json.dumps(provs)  # anahtar asla köprüden dönmez
     assert provs["claude"]["kind"] == "cli"
+    assert provs["anthropic"]["kind"] == "anthropic"
     r = rpc(bridge, "keys.test", {"provider": "boyle-biri-yok"})
     assert r["ok"] is False and r["error"]["code"] == "unknown_provider"
+
+
+def test_keys_set_and_status_for_anthropic(bridge, tmp_path, monkeypatch):
+    import os
+    import providers
+    import webhost.api.keys as keys_module
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    monkeypatch.setattr(keys_module, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    try:
+        r = rpc(bridge, "keys.status")
+        assert r["result"]["providers"]["anthropic"]["ok"] is False
+
+        r = rpc(bridge, "keys.set", {"anthropic": "sk-ant-gizli-uzun"})
+        assert r["ok"]
+        assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-gizli-uzun"
+
+        r = rpc(bridge, "keys.status")
+        assert r["result"]["providers"]["anthropic"]["ok"] is True
+        assert r["result"]["providers"]["anthropic"]["masked"].endswith("uzun")
+        assert "sk-ant-gizli-uzun" not in json.dumps(r["result"])
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_settings_routing_and_ai_engine_persist_roundtrip(bridge, tmp_path, monkeypatch):
+    """Composer'ın routing seçimi ve 'AI motoru' tercihi ui_prefs.json'a yazılıp
+    aynı biçimde geri okunmalı (bkz. ui_prefs.DEFAULTS: 'routing'/'ai_engine')."""
+    import ui_prefs
+    import webhost.api.settings  # noqa: F401 — handler kaydı
+    monkeypatch.setattr(ui_prefs, "_PATH", str(tmp_path / "prefs.json"))
+    monkeypatch.setattr(ui_prefs, "_DIR", str(tmp_path))
+
+    r = rpc(bridge, "settings.get")
+    assert r["result"]["routing"] is None
+    assert r["result"]["aiEngine"] == "auto"
+
+    routing = {"planner": "anthropic", "coder": "anthropic", "reviewer": "anthropic"}
+    r = rpc(bridge, "settings.set", {**r["result"], "routing": routing, "aiEngine": "legacy"})
+    assert r["ok"]
+
+    r = rpc(bridge, "settings.get")
+    assert r["result"]["routing"] == routing
+    assert r["result"]["aiEngine"] == "legacy"
 
 
 def test_run_and_history_require_project(bridge):

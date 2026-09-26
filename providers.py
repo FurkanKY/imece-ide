@@ -54,6 +54,18 @@ CATALOG: list[dict] = [
         "key_hint": "AIza…", "docs_url": "https://aistudio.google.com/apikey",
     },
     {
+        "id": "anthropic", "label": "Claude API", "kind": "anthropic",
+        "key_env": "ANTHROPIC_API_KEY", "model_env": "ANTHROPIC_MODEL",
+        "default_model": "claude-opus-5",
+        "models": [
+            ["claude-opus-5", 5.00, 25.00],
+            ["claude-sonnet-5", 2.00, 10.00],
+            ["claude-haiku-4-5", 1.00, 5.00],
+            ["claude-opus-5-5", 4.00, 20.00],
+        ],
+        "key_hint": "sk-ant-…", "docs_url": "https://platform.claude.com",
+    },
+    {
         "id": "openai", "label": "OpenAI", "kind": "openai",
         "base_url": "https://api.openai.com/v1",
         "key_env": "OPENAI_API_KEY", "model_env": "OPENAI_MODEL",
@@ -278,6 +290,17 @@ def is_ready(entry: dict) -> bool:
     return bool(os.getenv(entry["key_env"], "").strip())
 
 
+def _engine_support(provider_id: str) -> tuple[bool, str]:
+    """engine_factory.role_supported'ı gecikmeli (lazy) import ile çağırır —
+    engine_factory zaten bu modülü üst seviyede import ettiği için modül
+    yükleme zamanında döngüsel import'tan kaçınmak amacıyla."""
+    try:
+        import engine_factory
+    except ImportError:
+        return False, ""
+    return engine_factory.role_supported(provider_id)
+
+
 def status_of(entry: dict) -> dict:
     """UI listesi için tek sağlayıcının durumu (anahtar değeri asla dönmez)."""
     info = {
@@ -288,26 +311,36 @@ def status_of(entry: dict) -> dict:
     if entry["kind"] == "cli":
         path = _cli_path(entry)
         info["detail"] = path or f"'{entry['default_command']}' PATH'te bulunamadı"
+        info["cliAvailable"] = bool(path)
+        info["npxAvailable"] = shutil.which("npx") is not None
     else:
         info["model"] = selected_model(entry)
         info["models"] = [m[0] for m in entry.get("models", [])]
         info["keyHint"] = entry.get("key_hint", "")
         info["keyless"] = not entry.get("key_env")
+    info["engineSupported"], info["engineReason"] = _engine_support(entry["id"])
     return info
 
 
 def test_provider(provider_id: str, api_key: str | None = None) -> dict:
-    """Ucuz canlı doğrulama: GET {base}/models. Anahtar verilirse onunla dener
-    (kaydetmeden önce test), verilmezse ortamdaki anahtarla."""
+    """Ucuz canlı doğrulama. OpenAI-uyumlu uçlar: GET {base}/models. Anthropic
+    (Claude API): GET https://api.anthropic.com/v1/models (x-api-key başlığı;
+    OpenAI-uyumlu uçların Bearer token'ının Anthropic karşılığı). Anahtar
+    verilirse onunla dener (kaydetmeden önce test), verilmezse ortamdaki anahtarla."""
     entry = get(provider_id)
-    if entry is None or entry["kind"] != "openai":
+    if entry is None or entry["kind"] not in ("openai", "anthropic"):
         raise ValueError(f"Test edilemeyen sağlayıcı: {provider_id}")
     key = (api_key or "").strip()
     if not key and entry.get("key_env"):
         key = os.getenv(entry["key_env"], "").strip()
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    if entry["kind"] == "anthropic":
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"} if key else {}
+        url = "https://api.anthropic.com/v1/models"
+    else:
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        url = f"{entry['base_url']}/models"
     try:
-        resp = requests.get(f"{entry['base_url']}/models", headers=headers, timeout=20)
+        resp = requests.get(url, headers=headers, timeout=20)
     except requests.RequestException as e:
         return {"ok": False, "code": "network", "detail": f"Bağlantı kurulamadı: {e.__class__.__name__}"}
     if resp.status_code in (401, 403):
@@ -318,11 +351,46 @@ def test_provider(provider_id: str, api_key: str | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Akıllı varsayılan yönlendirme: kullanılabilirliğe göre üç rolü de aynı,
+# önce hesap tabanlı (ACP) sağlayıcı, yoksa anahtarı olan API sağlayıcısına
+# atar. Hiçbiri kullanılabilir değilse agents.DEFAULT_ROUTING'e düşer (hiçbir
+# şey çalışmaz ama en azından tutarlı, bilinen bir routing döner).
+# ---------------------------------------------------------------------------
+_ACCOUNT_PRIORITY = ("claude", "codex-cli", "gemini-cli")
+_API_PRIORITY = (
+    "anthropic", "openai", "deepseek", "gemini", "mistral", "groq",
+    "xai", "qwen", "moonshot", "openrouter", "ollama",
+)
+
+
+def recommended_routing() -> dict:
+    entries = {e["id"]: e for e in catalog()}
+    for pid in (*_ACCOUNT_PRIORITY, *_API_PRIORITY):
+        entry = entries.get(pid)
+        if entry is not None and is_ready(entry):
+            return {"planner": pid, "coder": pid, "reviewer": pid}
+    from agents import DEFAULT_ROUTING  # gecikmeli: agents <-> providers döngüsünü önler
+    return dict(DEFAULT_ROUTING)
+
+
+# ---------------------------------------------------------------------------
 # adapters.PROVIDERS beslemesi
 # ---------------------------------------------------------------------------
 def _make_caller(entry: dict):
     if entry["kind"] == "cli":
         return adapters.CLI_AGENTS[entry["id"]]
+
+    if entry["kind"] == "anthropic":
+        def _call_anthropic(system_prompt: str, user_prompt: str) -> adapters.LLMResponse:
+            live = get(entry["id"]) or entry
+            pricing = {m[0]: (m[1], m[2]) for m in live.get("models", [])}
+            return adapters.call_anthropic(
+                system_prompt, user_prompt,
+                model=selected_model(live), key_env=live.get("key_env"),
+                pricing=pricing,
+            )
+
+        return _call_anthropic
 
     def _call(system_prompt: str, user_prompt: str) -> adapters.LLMResponse:
         live = get(entry["id"]) or entry  # model/base güncel kalsın

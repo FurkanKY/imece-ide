@@ -15,7 +15,16 @@ from pathlib import Path
 
 from runtime_paths import app_data_dir, is_frozen
 
-_KEYS = ("DEEPSEEK_API_KEY", "GEMINI_API_KEY")
+
+def _known_key_envs() -> tuple[str, ...]:
+    """API anahtarı isteyen her katalog girdisinin (yerleşik + kullanıcının
+    özel uçları) env değişkeni adı. providers.py'yi burada modül seviyesinde
+    İTHAL ETMİYORUZ: secret_store paketli Windows'ta erken (uygulama açılışı,
+    henüz katalog/adapters kurulmadan) çağrılabilir; gecikmeli (lazy) import
+    hem olası döngüsel import'u hem de gereksiz erken yan etkileri (providers.
+    refresh() -> adapters.PROVIDERS mutasyonu) önler."""
+    import providers
+    return tuple(sorted({e["key_env"] for e in providers.catalog() if e.get("key_env")}))
 
 
 class SecretStoreError(RuntimeError):
@@ -75,11 +84,13 @@ class SecretStore:
             raise SecretStoreError("Anahtar deposu okunamadı.") from exc
         if not isinstance(data, dict):
             raise SecretStoreError("Anahtar deposu geçersiz.")
-        return {key: value for key, value in data.items() if key in _KEYS and isinstance(value, str) and value}
+        known = _known_key_envs()
+        return {key: value for key, value in data.items() if key in known and isinstance(value, str) and value}
 
     def save(self, updates: dict[str, str]) -> None:
         data = self.load()
-        data.update({key: value for key, value in updates.items() if key in _KEYS and value})
+        known = _known_key_envs()
+        data.update({key: value for key, value in updates.items() if key in known and value})
         self.path.parent.mkdir(parents=True, exist_ok=True)
         encoded = base64.b64encode(_protect(json.dumps(data, ensure_ascii=False).encode("utf-8")))
         tmp = self.path.with_suffix(".tmp")

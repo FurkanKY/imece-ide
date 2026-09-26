@@ -7,8 +7,8 @@ import { useRun } from "@/state/run";
 import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
 import { useKeys } from "@/state/keys";
-import { Role } from "@/bridge";
-import { Select } from "@/components/ui/Select";
+import { ProviderInfo, Role } from "@/bridge";
+import { Select, SelectGroup } from "@/components/ui/Select";
 import { Button } from "@/components/ui";
 
 const ROLE_ICONS: Record<Role, LucideIcon> = {
@@ -17,16 +17,61 @@ const ROLE_ICONS: Record<Role, LucideIcon> = {
   reviewer: SearchCheck,
 };
 
+// Backend label'ları (providers.py CATALOG) hesap/API farkını Composer'da
+// belirsiz bırakır ("Gemini" hem CLI hem API girdisinde geçer) — burada
+// yalnız Composer'ın dropdown'ı için hesap/API'yi netleştiren görünen adlar.
+const ACCOUNT_LABELS: Record<string, string> = {
+  claude: "Claude (Claude Code hesabı)",
+  "codex-cli": "ChatGPT (Codex hesabı)",
+  "gemini-cli": "Gemini (Google hesabı)",
+  "qwen-code": "Qwen (Qwen Code hesabı)",
+};
+const API_LABELS: Record<string, string> = {
+  anthropic: "Claude API",
+  openai: "OpenAI API",
+  gemini: "Gemini API",
+  deepseek: "DeepSeek API",
+};
+
+function displayLabel(p: ProviderInfo): string {
+  if (p.kind === "cli") return ACCOUNT_LABELS[p.id] ?? `${p.label} (hesap)`;
+  return API_LABELS[p.id] ?? `${p.label} API`;
+}
+
+function availabilityHint(p: ProviderInfo): string | undefined {
+  if (p.kind === "cli") {
+    if (!p.cliAvailable) return "— kurulu değil";
+    if (!p.npxAvailable) return "— Node.js (npx) eksik";
+    return undefined;
+  }
+  return p.ok ? undefined : "— anahtar yok";
+}
+
+/** Composer'ın rol dropdown'u için "Hesap ile" / "API anahtarı ile" grupları. */
+function providerGroups(providers: ProviderInfo[]): SelectGroup[] {
+  const account = providers.filter((p) => p.kind === "cli");
+  const api = providers.filter((p) => p.kind !== "cli");
+  const toOption = (p: ProviderInfo) => {
+    const hint = availabilityHint(p);
+    return { value: p.id, label: displayLabel(p), dim: !!hint, hint };
+  };
+  const groups: SelectGroup[] = [];
+  if (account.length) groups.push({ label: "Hesap ile", options: account.map(toOption) });
+  if (api.length) groups.push({ label: "API anahtarı ile", options: api.map(toOption) });
+  return groups;
+}
+
 function RoleSelect({ role }: { role: Role }) {
   const providers = useRun((s) => s.providers);
   const value = useRun((s) => s.routing[role]);
   const setRouting = useRun((s) => s.setRouting);
   const Icon = ROLE_ICONS[role];
+  const groups = providerGroups(providers);
 
   return (
     <Select
       value={value}
-      options={providers}
+      groups={groups}
       onChange={(v) => setRouting(role, v)}
       ariaLabel={role}
       icon={<Icon size={13} className="shrink-0 text-muted" strokeWidth={1.9} />}
@@ -68,6 +113,15 @@ export function Composer() {
   const missing = keysLoaded
     ? [...new Set(Object.values(routing))].filter((p) => keyProviders[p] && !keyProviders[p].ok)
     : [];
+  // routing'deki herhangi bir rol yeni (pipeline) motorca desteklenmiyorsa
+  // koşu klasik motora düşer — decision 4: bunu kullanıcıya ipucu olarak göster.
+  const runProviders = useRun((s) => s.providers);
+  const unsupported = runProviders.length
+    ? [...new Set(Object.values(routing))].filter((p) => {
+        const info = runProviders.find((x) => x.id === p);
+        return info && info.engineSupported === false;
+      })
+    : [];
 
   const helper = running
     ? "Koşu sürüyor. Gerekirse durdurun."
@@ -106,6 +160,11 @@ export function Composer() {
           <button onClick={() => setSettingsOpen(true)} className="underline underline-offset-2 hover:text-text">
             Ayarlar'dan ekle
           </button>
+        </div>
+      )}
+      {!helper && missing.length === 0 && unsupported.length > 0 && (
+        <div className="mb-1.5 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
+          {unsupported.join(", ")} yeni motoru desteklemiyor — bu koşu klasik motorla yürütülecek.
         </div>
       )}
       <div className="flex items-end gap-2">

@@ -201,7 +201,11 @@ function CliProviderRow({ p }: { p: ProviderInfo }) {
         <span className="truncate">{p.label}</span>
       </span>
       <span className="min-w-0 flex-1 truncate text-faint" style={{ fontSize: "var(--t-caption)" }}>
-        {p.ok ? `hazır (${p.detail})` : `${p.detail} — ${p.docsUrl.replace("https://", "")}`}
+        {p.cliAvailable && !p.npxAvailable
+          ? "hazır ama Node.js (npx) eksik — hesap girişi çalışmaz"
+          : p.ok
+            ? `hazır (${p.detail})`
+            : `${p.detail} — ${p.docsUrl.replace("https://", "")}`}
       </span>
     </div>
   );
@@ -322,7 +326,7 @@ function ProvidersSection() {
       )}
       {customOpen && <CustomProviderForm onDone={() => setCustomOpen(false)} />}
 
-      {visible.filter((p) => p.kind === "openai").map((p) => (
+      {visible.filter((p) => p.kind !== "cli").map((p) => (
         <ApiProviderCard key={p.id} p={p} />
       ))}
       {visible.filter((p) => p.kind === "cli").map((p) => (
@@ -333,6 +337,12 @@ function ProvidersSection() {
         Anahtarlar makinenizde kalır: kaynak modda yerel .env, paketli Windows sürümünde
         Windows hesabınıza bağlı şifreli depo. Hiçbir yere gönderilmez ve arayüze geri okunmaz.
       </p>
+      {visible.some((p) => p.kind === "cli") && (
+        <p className="mt-1 text-faint" style={{ fontSize: "var(--t-caption)" }}>
+          Hesap girişi olan sağlayıcılar (Claude Code, Codex, Gemini CLI) için ilgili CLI'da
+          önceden giriş yapılmış olması ve Node.js'in (npx) kurulu olması gerekir.
+        </p>
+      )}
     </div>
   );
 }
@@ -453,6 +463,24 @@ export function SettingsDialog() {
                   on={prefs.animations}
                   onChange={(v) => void update({ animations: v })}
                   ariaLabel="Animasyonlar"
+                />
+              </Row>
+
+              <Row
+                label="AI motoru"
+                hint={
+                  prefs.aiEngine === "legacy"
+                    ? "Klasik: eski tek geçişli akış."
+                    : "Otomatik: git projelerinde izole çalışma alanı + doğrulama + inceleme (uygun değilse klasik motora düşer)."
+                }
+              >
+                <Segmented
+                  value={prefs.aiEngine}
+                  options={[
+                    { id: "auto", label: "Otomatik (önerilen)" },
+                    { id: "legacy", label: "Klasik" },
+                  ]}
+                  onChange={(v) => void update({ aiEngine: v })}
                 />
               </Row>
 

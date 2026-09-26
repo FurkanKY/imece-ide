@@ -18,6 +18,8 @@ const DEFAULT_PREFS: Prefs = {
   density: "comfortable",
   enterToSend: true,
   animations: true,
+  aiEngine: "auto",
+  routing: null,
   lastProject: null,
   recentProjects: [
     { path: "C:/Projeler/imece", name: "imece", lastOpened: "2026-07-05T12:00:00Z" },
@@ -62,26 +64,42 @@ export class MockBridge implements Bridge {
     }
   }
 
+  /** engine_factory.role_supported'ın sahte aynası — hangi id'ler yeni motoru sürebilir */
+  private mockEngineSupport(id: string): { engineSupported: boolean; engineReason: string } {
+    if (id === "qwen-code") return { engineSupported: false, engineReason: "Qwen Code yeni motor tarafından henüz desteklenmiyor." };
+    if (["claude", "codex-cli", "gemini-cli"].includes(id)) return { engineSupported: true, engineReason: "hesap (ACP) girişi" };
+    return { engineSupported: true, engineReason: "openai-uyumlu API" };
+  }
+
   /** sahte sağlayıcı kataloğu — gerçek providers.py kataloğunun küçük aynası */
   private mockProviders(): ProviderInfo[] {
     const keys = this.mockKeys();
     const models = JSON.parse(localStorage.getItem("imece.mock.models") ?? "{}");
-    const api = (id: string, label: string, model: string, list: string[], hint: string): ProviderInfo => ({
-      id, label, kind: "openai", custom: false, ok: !!keys[id],
+    const api = (id: string, label: string, model: string, list: string[], hint: string, kind: "openai" | "anthropic" = "openai"): ProviderInfo => ({
+      id, label, kind, custom: false, ok: !!keys[id],
       docsUrl: "https://example.com", model: models[id] ?? model, models: list,
       keyHint: hint, keyless: false,
       masked: keys[id] ? "•••• " + keys[id].slice(-4) : "",
+      ...this.mockEngineSupport(id),
+    });
+    const cli = (id: string, label: string, docsUrl: string, cliAvailable: boolean, npxAvailable = true): ProviderInfo => ({
+      id, label, kind: "cli", custom: false, ok: cliAvailable, docsUrl,
+      detail: cliAvailable ? "C:\\mock\\" + id + ".exe" : `'${id}' PATH'te bulunamadı`,
+      cliAvailable, npxAvailable,
+      ...this.mockEngineSupport(id),
     });
     const out: ProviderInfo[] = [
-      { id: "claude", label: "Claude Code", kind: "cli", custom: false, ok: true, docsUrl: "https://claude.com/claude-code", detail: "C:\\mock\\claude.exe" },
+      cli("claude", "Claude Code", "https://claude.com/claude-code", true),
+      api("anthropic", "Claude API", "claude-opus-5", ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5-5"], "sk-ant-…", "anthropic"),
       api("deepseek", "DeepSeek", "deepseek-chat", ["deepseek-chat", "deepseek-reasoner"], "sk-…"),
+      cli("gemini-cli", "Gemini CLI", "https://github.com/google-gemini/gemini-cli", false),
       api("gemini", "Gemini", "gemini-2.5-flash", ["gemini-2.5-flash", "gemini-3.1-pro-preview"], "AIza…"),
+      cli("codex-cli", "Codex CLI", "https://github.com/openai/codex", false),
       api("openai", "OpenAI", "gpt-5.1", ["gpt-5.1", "gpt-5.1-mini"], "sk-…"),
       api("mistral", "Mistral", "mistral-large-latest", ["mistral-large-latest"], "…"),
       api("openrouter", "OpenRouter", "openrouter/auto", ["openrouter/auto"], "sk-or-…"),
-      { id: "ollama", label: "Ollama (yerel)", kind: "openai", custom: false, ok: false, docsUrl: "https://ollama.com", model: "qwen2.5-coder", models: ["qwen2.5-coder"], keyHint: "", keyless: true, masked: "" },
-      { id: "gemini-cli", label: "Gemini CLI", kind: "cli", custom: false, ok: false, docsUrl: "https://github.com/google-gemini/gemini-cli", detail: "'gemini' PATH'te bulunamadı" },
-      { id: "codex-cli", label: "Codex CLI", kind: "cli", custom: false, ok: false, docsUrl: "https://github.com/openai/codex", detail: "'codex' PATH'te bulunamadı" },
+      { id: "ollama", label: "Ollama (yerel)", kind: "openai", custom: false, ok: false, docsUrl: "https://ollama.com", model: "qwen2.5-coder", models: ["qwen2.5-coder"], keyHint: "", keyless: true, masked: "", ...this.mockEngineSupport("ollama") },
+      cli("qwen-code", "Qwen Code", "https://github.com/QwenLM/qwen-code", false),
     ];
     const custom = JSON.parse(localStorage.getItem("imece.mock.custom") ?? "[]");
     for (const c of custom) {
@@ -89,6 +107,7 @@ export class MockBridge implements Bridge {
         id: c.id, label: c.label, kind: "openai", custom: true, ok: !!keys[c.id],
         docsUrl: "", model: models[c.id] ?? c.model, models: [c.model],
         keyHint: "", keyless: false, masked: keys[c.id] ? "•••• " + keys[c.id].slice(-4) : "",
+        ...this.mockEngineSupport(c.id),
       });
     }
     return out;
@@ -351,10 +370,16 @@ export class MockBridge implements Bridge {
         localStorage.setItem("imece.prefs", JSON.stringify(this.prefs));
         return {} as R;
       case "run.providers": {
-        const ready = this.mockProviders().filter((p) => p.ok).map((p) => p.id);
+        const providers = this.mockProviders();
+        // providers.recommended_routing'in sahte aynası: önce hesap (claude ->
+        // codex-cli -> gemini-cli), yoksa anahtarı olan API sağlayıcısı.
+        const priority = ["claude", "codex-cli", "gemini-cli", "anthropic", "openai", "deepseek", "gemini"];
+        const best = priority.find((id) => providers.find((p) => p.id === id)?.ok)
+          ?? providers.find((p) => p.ok)?.id
+          ?? "claude";
         return {
-          providers: [...new Set(["claude", "deepseek", "gemini", ...ready])],
-          defaultRouting: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
+          providers,
+          recommendedRouting: { planner: best, coder: best, reviewer: best },
         } as R;
       }
       case "run.start": {

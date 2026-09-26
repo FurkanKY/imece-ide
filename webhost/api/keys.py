@@ -23,7 +23,7 @@ def _key_vars() -> dict[str, str]:
     return {
         e["id"]: e["key_env"]
         for e in providers.catalog()
-        if e["kind"] == "openai" and e.get("key_env")
+        if e["kind"] in ("openai", "anthropic") and e.get("key_env")
     }
 
 
@@ -89,7 +89,7 @@ def _status(params, ctx):
     result: dict = {}
     for entry in providers.catalog():
         info = providers.status_of(entry)
-        if entry["kind"] == "openai" and entry.get("key_env"):
+        if entry["kind"] in ("openai", "anthropic") and entry.get("key_env"):
             val = os.getenv(entry["key_env"], "").strip()
             info["masked"] = _mask(val) if val else ""
         result[entry["id"]] = info

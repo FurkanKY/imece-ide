@@ -64,10 +64,24 @@ def test_select_engine_claude_and_codex_cli_supported(git_repo):
 
 
 def test_select_engine_unsupported_cli_role_falls_back_to_legacy(git_repo):
-    routing = {**_all_native_routing(), "coder": "gemini-cli"}
+    routing = {**_all_native_routing(), "coder": "qwen-code"}
     selection = engine_factory.select_engine(git_repo, routing)
     assert selection.engine == "legacy"
     assert "desteklenmiyor" in selection.reason
+
+
+def test_select_engine_gemini_cli_supported(git_repo):
+    routing = {**_all_native_routing(), "reviewer": "gemini-cli"}
+    selection = engine_factory.select_engine(git_repo, routing)
+    assert selection.engine == "pipeline"
+    assert selection.reason is None
+
+
+def test_select_engine_anthropic_api_supported(git_repo):
+    routing = {**_all_native_routing(), "planner": "anthropic"}
+    selection = engine_factory.select_engine(git_repo, routing)
+    assert selection.engine == "pipeline"
+    assert selection.reason is None
 
 
 def test_select_engine_explicit_legacy_pref_always_legacy(git_repo):
@@ -131,6 +145,33 @@ def test_build_pipeline_ports_acp_for_claude_and_codex(tmp_path):
     assert isinstance(ports.planner, AcpPlanAttemptRunner)
     assert isinstance(ports.worker, AcpWorkerAttemptAdapter)
     assert isinstance(ports.reviewer, AcpReviewAttemptRunner)
+
+
+def test_build_pipeline_ports_acp_for_gemini_cli(tmp_path):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    routing = {"planner": "gemini", "coder": "deepseek", "reviewer": "gemini-cli"}
+    ports = engine_factory.build_pipeline_ports(
+        runtime, run_id, routing,
+        backend_factory=lambda pid: _FakeBackend(),
+        acp_client_factory=_FakeAcpClient,
+    )
+    assert isinstance(ports.reviewer, AcpReviewAttemptRunner)
+
+
+def test_build_pipeline_ports_native_for_anthropic(tmp_path):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    routing = {"planner": "anthropic", "coder": "deepseek", "reviewer": "openai"}
+    seen_providers = []
+
+    def backend_factory(provider_id):
+        seen_providers.append(provider_id)
+        return _FakeBackend()
+
+    ports = engine_factory.build_pipeline_ports(
+        runtime, run_id, routing, backend_factory=backend_factory,
+    )
+    assert isinstance(ports.planner, NativePlanAttemptRunner)
+    assert seen_providers[0] == "anthropic"
 
 
 def test_build_pipeline_ports_unsupported_role_raises(tmp_path):

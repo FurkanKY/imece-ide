@@ -4,7 +4,7 @@
    için tüketilir. desktop.py:on_event akışının store karşılığı. */
 
 import { create } from "zustand";
-import { bridge, Checkpoint, Proposal, Role, Routing, RunEvent } from "@/bridge";
+import { bridge, Checkpoint, Proposal, ProviderInfo, Role, Routing, RunEvent } from "@/bridge";
 import { toast } from "@/components/toasts/toasts";
 
 export const STAGE_ROLE: Record<string, Role> = {
@@ -58,7 +58,7 @@ interface RunState {
   task: string;
   plan: PlanInfo | null;
   routing: Routing;
-  providers: string[];
+  providers: ProviderInfo[];
   stages: Record<Role, StageInfo>;
   flow: FlowItem[];
   diffs: DiffRow[];
@@ -100,7 +100,7 @@ export const useRun = create<RunState>((set, get) => ({
   task: "",
   plan: null,
   routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
-  providers: ["claude", "deepseek", "gemini"],
+  providers: [],
   stages: IDLE_STAGES(),
   flow: [],
   diffs: [],
@@ -115,15 +115,26 @@ export const useRun = create<RunState>((set, get) => ({
 
   loadProviders: async () => {
     try {
-      const { providers, defaultRouting } = await bridge.call("run.providers", {});
-      set({ providers, routing: defaultRouting });
+      const [{ providers, recommendedRouting }, prefs] = await Promise.all([
+        bridge.call("run.providers", {}),
+        bridge.call("settings.get", {}),
+      ]);
+      // Kullanıcının önceden kaydettiği routing varsa o kalıcıdır (bkz.
+      // ui_prefs "routing"); yoksa kullanılabilirliğe göre önerilen atanır.
+      // Kaydedilmiş sağlayıcı artık kullanılamıyor olsa da DEĞİŞTİRİLMEZ —
+      // Composer'daki mevcut eksik-anahtar/CLI uyarısı zaten bunu gösterir.
+      const routing = prefs.routing ?? recommendedRouting;
+      set({ providers, routing });
     } catch {
       // varsayılanlar kalır
     }
   },
 
-  setRouting: (role, provider) =>
-    set((s) => ({ routing: { ...s.routing, [role]: provider } })),
+  setRouting: (role, provider) => {
+    const routing = { ...get().routing, [role]: provider };
+    set({ routing });
+    void import("@/state/settings").then(({ useSettings }) => useSettings.getState().update({ routing }));
+  },
 
   setTask: (task) => set({ task }),
 

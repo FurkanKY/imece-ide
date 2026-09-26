@@ -27,6 +27,7 @@ Rol yönlendirmesi (routing) providers.py kataloğundan gelir:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from pathlib import Path
 from typing import Callable
 
 import providers as provider_registry
+from anthropic_catalog import AnthropicKeyMissingError, anthropic_backend_from_config
 from change_runtime import GitWorktreeChangeProvider
 from change_runtime.provider import ChangeProvider
 from chat_completions_catalog import (
@@ -49,6 +51,7 @@ from executor_runtime import (
     NativeWorkerAttemptAdapter,
     claude_code_acp_launch_profile,
     codex_acp_launch_profile,
+    gemini_cli_acp_launch_profile,
 )
 from pipeline_runtime.acp_planner import AcpPlanAttemptRunner
 from pipeline_runtime.native_planner import NativePlanAttemptRunner
@@ -62,7 +65,14 @@ from workspace.worktree import GitWorktreeWorkspace
 _ACP_CLI_PRESETS: dict[str, Callable[[], object]] = {
     "claude": claude_code_acp_launch_profile,
     "codex-cli": codex_acp_launch_profile,
+    "gemini-cli": gemini_cli_acp_launch_profile,
 }
+
+# Yeni motorun kind="openai" gibi doğrudan (native, ACP olmayan) desteklediği
+# katalog kind'leri. "anthropic" (Claude API) da native'dir — ChatCompletions
+# değil AnthropicMessagesBackend kullanır (bkz. _build_planner/_build_worker/
+# _build_reviewer ve _default_backend_factory).
+_NATIVE_KINDS = ("openai", "anthropic")
 
 PIPELINE_ROLES = ("planner", "worker", "reviewer")
 # Kanonik pipeline rolü -> legacy DEFAULT_ROUTING/agents.py anahtarı
@@ -98,6 +108,8 @@ def role_supported(provider_id: str) -> tuple[bool, str]:
         return False, f"Bilinmeyen sağlayıcı: {provider_id!r}."
     if kind == "openai":
         return True, "openai-uyumlu API"
+    if kind == "anthropic":
+        return True, "Claude API"
     if kind == "cli":
         if provider_id in _ACP_CLI_PRESETS:
             return True, "hesap (ACP) girişi"
@@ -220,9 +232,23 @@ def build_pipeline_ports(
 
 
 def _default_backend_factory(provider_id: str):
+    entry = provider_registry.get(provider_id)
+    if entry is not None and entry.get("kind") == "anthropic":
+        return _anthropic_backend_factory(entry)
     try:
         return chat_completions_backend_from_catalog(provider_id)
     except (UnknownProviderError, ProviderKeyMissingError) as exc:
+        raise EngineUnsupportedError(str(exc)) from exc
+
+
+def _anthropic_backend_factory(entry: dict):
+    api_key = None
+    if entry.get("key_env"):
+        api_key = os.getenv(entry["key_env"], "").strip() or None
+    model = provider_registry.selected_model(entry)
+    try:
+        return anthropic_backend_from_config(api_key=api_key, model=model)
+    except AnthropicKeyMissingError as exc:
         raise EngineUnsupportedError(str(exc)) from exc
 
 
@@ -236,7 +262,7 @@ def _acp_launch_profile(provider_id: str):
 
 
 def _build_planner(runtime, run_id, *, provider_id, entry, kind, backend_factory, acp_client_factory):
-    if kind == "openai":
+    if kind in _NATIVE_KINDS:
         backend = backend_factory(provider_id)
         return NativePlanAttemptRunner(runtime, run_id, backend)
     launch_profile = _acp_launch_profile(provider_id)
@@ -245,7 +271,7 @@ def _build_planner(runtime, run_id, *, provider_id, entry, kind, backend_factory
 
 
 def _build_worker(runtime, run_id, *, provider_id, entry, kind, backend_factory, acp_client_factory):
-    if kind == "openai":
+    if kind in _NATIVE_KINDS:
         backend = backend_factory(provider_id)
         return NativeWorkerAttemptAdapter(runtime, run_id, backend)
     launch_profile = _acp_launch_profile(provider_id)
@@ -254,7 +280,7 @@ def _build_worker(runtime, run_id, *, provider_id, entry, kind, backend_factory,
 
 
 def _build_reviewer(runtime, run_id, *, provider_id, entry, kind, backend_factory, acp_client_factory):
-    if kind == "openai":
+    if kind in _NATIVE_KINDS:
         backend = backend_factory(provider_id)
         return NativeReviewAttemptAdapter(runtime, run_id, ReviewerRunner(backend))
     launch_profile = _acp_launch_profile(provider_id)
