@@ -16,6 +16,8 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 import runconfig
 import ui_prefs
+from process_runtime.cleanup import terminate_process_tree
+from process_runtime.errors import ProcessCleanupError
 from webhost import state
 from webhost.bridge import handler, BridgeError
 
@@ -120,7 +122,13 @@ class _Exec(QObject):
                 subprocess.run(["taskkill", "/PID", str(self.proc.pid), "/T", "/F"],
                                capture_output=True)
             else:
-                self.proc.terminate()
+                # kabuk + çocukları (npm/node/python vb.) birlikte ölsün — process_runtime'ın
+                # zaten kanıtlanmış psutil tabanlı ağaç temizliğini kullan (SIGTERM → bekle →
+                # SIGKILL), taskkill /T'nin POSIX karşılığı.
+                try:
+                    terminate_process_tree(self.proc.pid)
+                except ProcessCleanupError:
+                    pass
         self.reader.wait(1500)
 
 
@@ -148,11 +156,16 @@ def _run(params, ctx):
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # POSIX'te ayrı oturum: kabuk kendi süreç grubunun lideri olsun, ana IDE
+    # sürecine gidecek sinyallerden (ör. terminalde Ctrl+C) etkilenmesin —
+    # terminate_process_tree zaten ppid zinciriyle çalışır, bu sadece izolasyon.
+    posix_kwargs = {"start_new_session": True} if os.name != "nt" else {}
     try:
         proc = subprocess.Popen(
             command, shell=True, cwd=proj.root, env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            **posix_kwargs,
         )
     except OSError as e:
         raise BridgeError("spawn_failed", f"Komut başlatılamadı: {e}")

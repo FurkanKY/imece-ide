@@ -1,6 +1,6 @@
 # Imece IDE
 
-> Açık beta · `v0.4.0-beta.1` · kaynak sürüm, Windows öncelikli · [English](README.md)
+> Açık beta · `v0.4.0-beta.1` · kaynak sürüm, Windows öncelikli, kaynaktan Linux'ta da çalışır · [English](README.md)
 
 **Imece**, seçtiğin modellerle çalışan bir AI ekibinin — Planner, Coder ve
 Reviewer — bir değişiklik üzerinde birlikte çalıştığı ve sonucu tek bir dosyaya
@@ -17,8 +17,9 @@ checkpoint'ler ve her AI koşusu için kalıcı değişiklik makbuzu.
 ## Hızlı başlangıç
 
 Imece IDE şimdilik yalnız **kaynak kod** olarak dağıtılıyor; hazır bir
-`.exe` paketi henüz yayınlanmıyor. Masaüstü kabuk Windows 10/11 hedefler;
-Python 3.14 ve Node ≥ 20 gerekir (ayrıntı: [SETUP](docs/SETUP.md)).
+`.exe` paketi henüz yayınlanmıyor. Masaüstü kabuk önce Windows 10/11 hedefler,
+kaynaktan çalıştırıldığında Linux'ta da kullanılabilir; Python 3.14 ve
+Node ≥ 20 gerekir (Linux notları dahil ayrıntı: [SETUP](docs/SETUP.md)).
 
 ```bash
 python -m venv .venv

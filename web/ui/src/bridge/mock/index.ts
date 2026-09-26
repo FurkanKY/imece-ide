@@ -426,7 +426,7 @@ export class MockBridge implements Bridge {
             data: "Windows PowerShell (mock)\r\n\x1b[38;2;106;161;255mPS C:\\Projeler\\demo-api>\x1b[0m ",
           });
         }, 120);
-        return { termId: id } as R;
+        return { termId: id, shell: "powershell" } as R;
       }
       case "terminal.write": {
         const { termId, data } = params as { termId: string; data: string };

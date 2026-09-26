@@ -1,9 +1,14 @@
-"""terminal.* — gerçek etkileşimli terminal (pywinpty / ConPTY).
+"""terminal.* — gerçek etkileşimli terminal (Windows'ta pywinpty/ConPTY,
+POSIX'te ptyprocess/gerçek PTY).
 
 Eski terminal.py'nin komut-başına QProcess yaklaşımının yerine tam PTY:
 ok tuşları, renkler, REPL'ler, interaktif programlar çalışır. Okuyucu QThread
 ham chunk'ları sinyalle ana thread'e taşır; 16ms/256KB birleştirmeli flush
 (plan risk 1: QWebChannel debisi) → `terminal.data` olayı.
+
+İki backend de aynı minik yüzeyi (read/write/isalive/exitstatus/terminate/
+setwinsize) sağlar; POSIX tarafı `_PosixPty` ile bu yüzeye sarmalanır, böylece
+`_Reader`/`_Term` platform bilmez.
 """
 
 import os
@@ -62,6 +67,52 @@ class _Reader(QThread):
         self.exited.emit(_clamp_i32(code))
 
 
+class _PosixPty:
+    """ptyprocess.PtyProcessUnicode sarmalayıcısı — winpty.PtyProcess ile aynı yüzey.
+
+    ptyprocess normal çıkışta ``exitstatus``, sinyalle öldüğünde ``signalstatus``
+    doldurur (ikisi ayrı alan, biri hep None); pywinpty tarafı ile tek alanda
+    tutarlı olsun diye subprocess kuralına uyup sinyal durumunu -sinyal_no
+    olarak exitstatus'a taşıyoruz.
+    """
+
+    def __init__(self, proc):
+        self._proc = proc
+
+    def read(self, size: int = 4096) -> str:
+        return self._proc.read(size)
+
+    def write(self, data: str) -> int:
+        return self._proc.write(data)
+
+    def isalive(self) -> bool:
+        return self._proc.isalive()
+
+    def setwinsize(self, rows: int, cols: int) -> None:
+        self._proc.setwinsize(rows, cols)
+
+    def terminate(self, force: bool = False) -> None:
+        self._proc.terminate(force=force)
+
+    @property
+    def exitstatus(self):
+        if self._proc.exitstatus is not None:
+            return self._proc.exitstatus
+        if self._proc.signalstatus is not None:
+            return -self._proc.signalstatus
+        return None
+
+
+def _posix_shell() -> str:
+    """$SHELL varsa ve çalıştırılabilirse onu kullan; yoksa bash, o da yoksa sh."""
+    shell = os.environ.get("SHELL")
+    if shell and os.path.isfile(shell) and os.access(shell, os.X_OK):
+        return shell
+    if os.path.isfile("/bin/bash") and os.access("/bin/bash", os.X_OK):
+        return "/bin/bash"
+    return "/bin/sh"
+
+
 class _Term(QObject):
     """Ana thread'de yaşar: tampon + zamanlayıcı + PTY yazma ucu."""
 
@@ -114,10 +165,6 @@ class _Term(QObject):
 @handler("terminal.create")
 def _create(params, ctx):
     global _next_id
-    try:
-        from winpty import PtyProcess
-    except ImportError:
-        raise BridgeError("no_pty", "pywinpty kurulu değil (pip install pywinpty).")
 
     proj = state.get_project()
     cwd = params.get("cwd") or (proj.root if proj else os.path.expanduser("~"))
@@ -128,20 +175,43 @@ def _create(params, ctx):
     env["PYTHONUTF8"] = "1"          # cp1254 tuzağı (bkz. SETUP)
     env["PYTHONIOENCODING"] = "utf-8"
 
-    try:
-        pty = PtyProcess.spawn(
-            ["powershell.exe", "-NoLogo"],
-            dimensions=(rows, cols),
-            cwd=cwd,
-            env=env,
-        )
-    except Exception as e:
-        raise BridgeError("spawn_failed", f"Terminal başlatılamadı: {e}")
+    if os.name == "nt":
+        try:
+            from winpty import PtyProcess
+        except ImportError:
+            raise BridgeError("no_pty", "pywinpty kurulu değil (pip install pywinpty).")
+        try:
+            pty = PtyProcess.spawn(
+                ["powershell.exe", "-NoLogo"],
+                dimensions=(rows, cols),
+                cwd=cwd,
+                env=env,
+            )
+        except Exception as e:
+            raise BridgeError("spawn_failed", f"Terminal başlatılamadı: {e}")
+        shell_name = "powershell"
+    else:
+        try:
+            from ptyprocess import PtyProcessUnicode
+        except ImportError:
+            raise BridgeError("no_pty", "ptyprocess kurulu değil (pip install ptyprocess).")
+        shell_path = _posix_shell()
+        env["TERM"] = "xterm-256color"
+        try:
+            pty = _PosixPty(PtyProcessUnicode.spawn(
+                [shell_path],
+                dimensions=(rows, cols),
+                cwd=cwd,
+                env=env,
+            ))
+        except Exception as e:
+            raise BridgeError("spawn_failed", f"Terminal başlatılamadı: {e}")
+        shell_name = os.path.basename(shell_path)
 
     _next_id += 1
     term_id = f"t{_next_id}"
     _terms[term_id] = _Term(term_id, pty, ctx._bridge)
-    return {"termId": term_id}
+    return {"termId": term_id, "shell": shell_name}
 
 
 def _get(term_id: str) -> "_Term":

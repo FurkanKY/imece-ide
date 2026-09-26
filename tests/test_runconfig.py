@@ -10,7 +10,8 @@ import runconfig  # noqa: E402
 
 
 def test_file_command_by_extension():
-    assert runconfig.file_command("src/main.py") == 'python "src/main.py"'
+    py = runconfig._PY
+    assert runconfig.file_command("src/main.py") == f'{py} "src/main.py"'
     assert runconfig.file_command("index.mjs") == 'node "index.mjs"'
     assert runconfig.file_command("notlar.md") is None
 
@@ -22,10 +23,11 @@ def test_detect_npm_dev_over_start(tmp_path):
 
 
 def test_detect_python_entry(tmp_path):
+    py = runconfig._PY
     (tmp_path / "app.py").write_text("", encoding="utf-8")
-    assert runconfig.detect_project_command(str(tmp_path)) == 'python "app.py"'
+    assert runconfig.detect_project_command(str(tmp_path)) == f'{py} "app.py"'
     (tmp_path / "main.py").write_text("", encoding="utf-8")
-    assert runconfig.detect_project_command(str(tmp_path)) == 'python "main.py"'
+    assert runconfig.detect_project_command(str(tmp_path)) == f'{py} "main.py"'
 
 
 def test_detect_none(tmp_path):
@@ -38,7 +40,7 @@ def test_saved_command_wins_and_roundtrips(tmp_path):
     assert runconfig.project_command(str(tmp_path)) == "python -m paket --debug"
     # dosya bozuksa sezgiye düşer
     (tmp_path / ".imece" / "run.json").write_text("{bozuk", encoding="utf-8")
-    assert runconfig.project_command(str(tmp_path)) == 'python "main.py"'
+    assert runconfig.project_command(str(tmp_path)) == f'{runconfig._PY} "main.py"'
 
 
 def test_resolve_and_fingerprint_changes_when_command_changes(tmp_path):

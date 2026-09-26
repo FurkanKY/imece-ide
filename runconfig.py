@@ -14,10 +14,16 @@ Dosya komutu uzantıdan gelir (FILE_CMDS); bilinmeyen uzantı → None (UI yol g
 
 import json
 import hashlib
+import os
 from pathlib import Path
 
+# Linux dağıtımlarının çoğunda `python` yok, yalnız `python3` var (Windows'ta
+# tersi durum nadir); PATH'e göre değil platforma göre seçiyoruz ki proje
+# içindeki .imece/run.json her makinede aynı komutu üretsin.
+_PY = "python" if os.name == "nt" else "python3"
+
 FILE_CMDS = {
-    ".py": 'python "{file}"',
+    ".py": f'{_PY} "{{file}}"',
     ".js": 'node "{file}"',
     ".mjs": 'node "{file}"',
 }
@@ -73,7 +79,7 @@ def detect_project_command(root: str) -> str | None:
         return "go run ."
     for entry in ("main.py", "app.py"):
         if (r / entry).exists():
-            return f'python "{entry}"'
+            return f'{_PY} "{entry}"'
     return None
 
 

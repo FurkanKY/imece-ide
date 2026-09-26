@@ -8,7 +8,8 @@ supported way to use it — prebuilt binaries are not published yet (see
 
 | Component | Version / notes |
 |-----------|-----------------|
-| Windows | 10/11 — the desktop shell targets Windows (ConPTY terminal, DPAPI key store) |
+| Windows | 10/11 — the desktop shell targets Windows first (ConPTY terminal, DPAPI key store); packaging (prebuilt binaries) is Windows-only |
+| Linux | also supported from source (real PTY terminal via `ptyprocess`, `.env`-based key storage — no DPAPI); no packaged build yet |
 | Python | 3.14 (what CI and packaging use; PySide6 ≥ 6.11.1 requires a recent Python) |
 | Node.js | ≥ 20, for building the frontend |
 | Claude Code CLI | optional — `claude --version` must work; a Pro/Max subscription is enough, no API key needed |
@@ -25,12 +26,20 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
+On Linux, use `python3` and the POSIX venv layout instead:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
 For a test/contribution environment use `requirements-dev.txt` instead, which
 adds `pytest`.
 
 Contents: `requests`, `python-dotenv`, `flask` (web interface),
 `PySide6` (desktop shell), `pywinpty` (integrated terminal, ConPTY;
-Windows-only), `basedpyright` (Python IntelliSense — ships its own Node
+Windows-only), `ptyprocess` (integrated terminal, real PTY; Linux/macOS-only),
+`basedpyright` (Python IntelliSense — ships its own Node
 runtime), `debugpy` (debugger).
 
 **Fonts:** the UI uses the Windows `Segoe UI Variable` / `Segoe UI` system
@@ -151,3 +160,36 @@ subprocess call.
 `app.py` runs with `use_reloader=False`; otherwise each run writes
 `output/result.py`, which triggers the reloader and kills the in-flight
 request.
+
+## Linux (source mode)
+
+Running from source works the same way as on Windows, with POSIX paths:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cd web/ui && npm ci && npm run build && cd ../..
+.venv/bin/python shell.py
+```
+
+The integrated terminal uses `ptyprocess` (a real PTY) instead of ConPTY, and
+spawns `$SHELL` if it is set and executable, falling back to `/bin/bash` then
+`/bin/sh`. Key storage falls back to the plain `.env` file (no DPAPI
+equivalent is used outside a packaged Windows build); packaging itself
+(prebuilt binaries) remains Windows-only for now.
+
+### Pre-set `PYTHONPATH` from another toolchain breaks pytest
+
+If your shell has a global `PYTHONPATH` set by an unrelated toolchain (for
+example ROS's `setup.bash`), it can shadow this project's own packages and
+break `pytest`'s plugin loading or make imports resolve to the wrong modules,
+with confusing errors that don't look related to `PYTHONPATH` at all. Clear it
+for the run instead of trying to reconcile it:
+
+```bash
+env -u PYTHONPATH .venv/bin/python -m pytest -q
+```
+
+If you don't have a display server available (headless CI, containers), also
+set `QT_QPA_PLATFORM=offscreen` before running anything that imports
+`PySide6.QtWidgets`.

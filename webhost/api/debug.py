@@ -21,6 +21,8 @@ import time
 
 from PySide6.QtCore import QThread, QTimer, Signal
 
+from process_runtime.cleanup import terminate_process_tree
+from process_runtime.errors import ProcessCleanupError
 from webhost import state
 from webhost.bridge import handler, BridgeError
 from webhost.jsonrpc import encode, FrameDecoder
@@ -213,6 +215,13 @@ def _on_event(event: str, body: dict) -> None:
         _emit("debug.continued", {})
     elif event == "exited":
         _dbg["exit_code"] = body.get("exitCode")
+    elif event == "terminated":
+        # debugpy'nin adapter alt-süreci (bizim Popen'ımızın DOĞRUDAN çocuğu
+        # DEĞİL — ppid zincirinden bulunamıyor, deneyle doğrulandı) DAP
+        # soketimiz açık kaldıkça debuggee'nin stdout borusunun kopyasını da
+        # açık tutuyor; kapatmazsak _OutReader read1()'de sonsuza dek bloke
+        # kalır (bkz. tests/test_dap.py — kapatınca adapter ~1s içinde çıkar).
+        _close_sock()
 
 
 def _on_sock_closed() -> None:
@@ -278,6 +287,18 @@ def _cleanup() -> None:
         out_reader.wait(1500)
 
 
+def _close_sock() -> None:
+    """DAP soketini kapat — adapter alt-sürecinin kendini kapatıp debuggee
+    stdout borusunun kopyasını serbest bırakması için (bkz. yukarıdaki not)."""
+    sock = _dbg.get("sock")
+    if sock is not None:
+        _dbg["sock"] = None
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
 def _kill_proc() -> None:
     proc = _dbg["proc"]
     if proc is not None and proc.poll() is None:
@@ -285,7 +306,13 @@ def _kill_proc() -> None:
             subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                            capture_output=True)
         else:
-            proc.terminate()
+            try:
+                terminate_process_tree(proc.pid)
+            except ProcessCleanupError:
+                pass
+    # Süreç zaten ölmüş olsa da (örn. terminated olayı zaten geldi) soketi
+    # kapatmak zararsız ve idempotent — adapter'ın kendini kapatabilmesi için şart.
+    _close_sock()
 
 
 def _free_port() -> int:
@@ -315,6 +342,7 @@ def _start(params, ctx):
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     script = os.path.normpath(os.path.join(proj.root, rel))
+    posix_kwargs = {"start_new_session": True} if os.name != "nt" else {}
     try:
         command = ([sys.executable, "--imece-debugpy"] if is_frozen()
                    else [sys.executable, "-m", "debugpy"])
@@ -322,6 +350,7 @@ def _start(params, ctx):
             command + ["--listen", f"127.0.0.1:{port}", "--wait-for-client", script],
             cwd=proj.root, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            **posix_kwargs,
         )
     except OSError as e:
         raise BridgeError("spawn_failed", f"debugpy başlatılamadı: {e}")

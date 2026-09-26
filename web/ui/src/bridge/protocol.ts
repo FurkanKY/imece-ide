@@ -91,7 +91,7 @@ export interface Api {
   // ---- terminal (P3, ConPTY) ----
   "terminal.create": {
     params: { cwd?: string; cols: number; rows: number };
-    result: { termId: string };
+    result: { termId: string; shell?: string };
   };
   "terminal.write": { params: { termId: string; data: string }; result: {} };
   "terminal.resize": { params: { termId: string; cols: number; rows: number }; result: {} };

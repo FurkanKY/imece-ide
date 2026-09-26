@@ -30,9 +30,9 @@ export const useTerminals = create<TerminalState>((set, get) => ({
     if (creating) return;
     creating = true;
     try {
-      const { termId } = await bridge.call("terminal.create", { cols: 120, rows: 30 });
+      const { termId, shell } = await bridge.call("terminal.create", { cols: 120, rows: 30 });
       set((s) => ({
-        terms: [...s.terms, { id: termId, title: `powershell ${s.terms.length + 1}` }],
+        terms: [...s.terms, { id: termId, title: `${shell || "terminal"} ${s.terms.length + 1}` }],
         activeId: termId,
       }));
     } catch (e) {

@@ -176,6 +176,12 @@ def test_dap_full_flow(debuggee):
     seq = cli.send("continue", {"threadId": tid})
     cli.wait_response(seq, "continue")
     cli.wait_event("terminated")
+    # debugpy'nin adapter alt-süreci (webhost/api/debug.py'deki üretim kodunun
+    # da çarptığı bir davranış) DAP soketimiz açık kaldıkça debuggee'nin
+    # stdout borusunun bir kopyasını da açık tutuyor — soketi kapatmazsak
+    # proc.stdout.read() Linux'ta sonsuza dek bloke olur (adapter, istemci
+    # bağlantısı kapanana dek kendi kendine çıkmıyor). Deneyle doğrulandı.
+    cli.sock.close()
     proc.wait(timeout=10)
     out = proc.stdout.read().decode("utf-8", errors="replace")
     assert "bas" in out and "son 5" in out

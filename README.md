@@ -1,6 +1,6 @@
 # Imece IDE
 
-> Public beta · `v0.4.0-beta.1` · source release, Windows-first · [Türkçe](README.tr.md)
+> Public beta · `v0.4.0-beta.1` · source release, Windows-first, Linux also supported from source · [Türkçe](README.tr.md)
 
 **Imece** is a local-first desktop coding workspace where a team of AI agents —
 a Planner, a Coder and a Reviewer, each backed by the model you choose —
@@ -30,8 +30,9 @@ checkpoints with undo, and a persistent change receipt for every AI run.
 ## Get started
 
 Imece IDE is currently distributed as **source only** — no prebuilt binaries
-yet. The desktop shell targets **Windows 10/11**; you need Python 3.14 and
-Node ≥ 20 (details in [SETUP.md](docs/SETUP.md)).
+yet. The desktop shell targets **Windows 10/11** first and is also usable
+from source on **Linux**; you need Python 3.14 and Node ≥ 20 (details,
+including Linux-specific notes, in [SETUP.md](docs/SETUP.md)).
 
 ```bash
 python -m venv .venv

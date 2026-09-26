@@ -38,7 +38,7 @@ export function BottomPanel() {
   const setView = useUi((s) => s.setBottomView);
   const exec = useExec();
 
-  // terminal görünümünde sekme yoksa bir tane aç (ÇIKTI için boşuna PowerShell açma)
+  // terminal görünümünde sekme yoksa bir tane aç (ÇIKTI için boşuna kabuk açma)
   useEffect(() => {
     if (view === "terminal" && terms.length === 0) void create();
     // eslint-disable-next-line react-hooks/exhaustive-deps
