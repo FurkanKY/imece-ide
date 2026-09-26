@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from context_runtime import render_context_pack
+from context_runtime import ProjectRules, render_bounded_rules_block, render_context_pack
 
 from planner_runtime.errors import PlannerInputError
 
@@ -105,7 +105,9 @@ def _bounded(text: str, limit: int) -> str:
     return text[: limit - len(_TRUNCATION_MARKER)] + _TRUNCATION_MARKER
 
 
-def render_initial_planner_input(*, task: str, context_pack: Any) -> str:
+def render_initial_planner_input(
+    *, task: str, context_pack: Any, rules: ProjectRules | None = None
+) -> str:
     """Render the initial Planner model input with explicit, bounded sections.
 
     Mathematical invariant (holds for every input this function accepts):
@@ -121,6 +123,13 @@ def render_initial_planner_input(*, task: str, context_pack: Any) -> str:
     than silently dropping any part of the task. A large repository context
     on its own never triggers that error — it is simply bounded down,
     deterministically, to its assigned share.
+
+    `rules` (optional, default None) is project-provided text (see
+    context_runtime.rules) rendered as its own clearly delimited, untrusted
+    DATA section, appended after the fixed sections below. It is bounded out
+    of whatever remains of the budget AFTER the mandatory sections and the
+    context section's own share — it is never allowed to shrink either.
+    Passing rules=None reproduces the exact prior (pre-rules) output.
     """
     headers_total = len(_TASK_HEADER) + len(_CONTEXT_HEADER) + len(_OUTPUT_CONTRACT_HEADER)
     separators_total = (_NUM_SECTIONS - 1) * len(_SEP)
@@ -135,7 +144,8 @@ def render_initial_planner_input(*, task: str, context_pack: Any) -> str:
         )
 
     remaining = MAX_INITIAL_PLANNER_INPUT_CHARS - required_len
-    ancillary_budget = remaining // _NUM_ANCILLARY_SECTIONS
+    rules_block = render_bounded_rules_block(rules, remaining)
+    ancillary_budget = max(0, remaining - len(rules_block)) // _NUM_ANCILLARY_SECTIONS
 
     context_text = render_context_pack(context_pack)
 
@@ -144,6 +154,6 @@ def render_initial_planner_input(*, task: str, context_pack: Any) -> str:
         _CONTEXT_HEADER + _bounded(context_text, ancillary_budget),
         _OUTPUT_CONTRACT_HEADER + _OUTPUT_CONTRACT_BODY,
     ]
-    rendered = _SEP.join(sections)
+    rendered = _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_INITIAL_PLANNER_INPUT_CHARS  # defensive: proven by construction above
     return rendered

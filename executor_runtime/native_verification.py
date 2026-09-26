@@ -5,6 +5,7 @@ VerificationRunner.
 
 from __future__ import annotations
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from process_runtime import ProcessRunner
 
 from run_runtime.service import RunRuntime
@@ -12,7 +13,11 @@ from run_runtime.verification import CanonicalVerificationEventSink
 from verification_runtime.models import VerificationPlan, VerificationReport
 from verification_runtime.runner import VerificationRunner
 
-from executor_runtime.errors import ExecutorAdapterExecutionError, ExecutorAdapterInputError
+from executor_runtime.errors import (
+    ExecutorAdapterCancelledError,
+    ExecutorAdapterExecutionError,
+    ExecutorAdapterInputError,
+)
 
 
 class NativeVerificationAttemptAdapter:
@@ -40,7 +45,8 @@ class NativeVerificationAttemptAdapter:
         return self._run_id
 
     def run(
-        self, workspace, plan: VerificationPlan, *, verification_id: str
+        self, workspace, plan: VerificationPlan, *, verification_id: str,
+        cancel_token: CancellationToken | None = None,
     ) -> VerificationReport:
         if not isinstance(plan, VerificationPlan):
             raise ExecutorAdapterInputError("NativeVerificationAttemptAdapter.run requires a VerificationPlan.")
@@ -52,7 +58,9 @@ class NativeVerificationAttemptAdapter:
 
         runner = VerificationRunner(self._process_runner, event_sink=sink)
         try:
-            report = runner.run(workspace, plan, verification_id=verification_id)
+            report = runner.run(workspace, plan, verification_id=verification_id, cancel_token=cancel_token)
+        except OperationCancelledError as exc:
+            raise ExecutorAdapterCancelledError(f"Verification port cancelled: {exc}") from exc
         except Exception as exc:
             raise ExecutorAdapterExecutionError(f"Verification port failed: {exc}") from exc
 

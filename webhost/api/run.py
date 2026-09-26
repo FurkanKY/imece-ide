@@ -519,6 +519,12 @@ def _start_legacy_run(proj, coordinator, task, *, emit_ui, finish, settle_canoni
 def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui, finish, settle_canonical_failure, ended):
     run_id = coordinator.run_id
     cancel_event = threading.Event()
+    # F7: this MUST be the same Event instance run.cancel()/shutdown() act
+    # on -- previously it was created here but never published to _active,
+    # so run.cancel() found _active["cancel_event"] still None and silently
+    # cancelled nothing. Stored here (before the QThread starts) so a
+    # cancel requested the instant after run.start() returns is never lost.
+    _active["cancel_event"] = cancel_event
     proj = _require_project()
     worker = _PipelineWorker(runtime, run_id, workspace, ports, task, cancel_event)
 
@@ -631,16 +637,23 @@ def _cancel(params, ctx):
     if w is None or not w.isRunning():
         return {}
     if _active.get("engine") == "pipeline":
-        # Kooperatif iptal: yalnızca aşama sınırlarında gözlemlenir (bkz.
-        # pipeline_runtime.PipelineRunner._check_cancel) — devam eden bir ajan
-        # oturumu ortasında kesilemez.
+        # F7 (gerçek iptal): cancel_token artık yalnızca aşama sınırlarında
+        # DEĞİL, devam eden bir Worker/Verification/Reviewer denemesinin
+        # İÇİNDEN de gözlemlenir (bkz. agent_runtime.session.AgentSession —
+        # her model turn'ünden ve tool çağrısından önce kontrol edilir;
+        # process_runtime.ProcessRunner — beklerken 150ms dilimlerle
+        # sorgular; acp_runtime.client.AcpClientRuntime — devam eden bir
+        # prompt sırasında token'ı izler ve session/cancel gönderir). Bu
+        # yüzden Durdur artık gerçekten "mevcut adımı" da kesintiye
+        # uğratabilir — yalnızca devam eden TEK bir model turn'ü/HTTP
+        # çağrısı istisnadır (bkz. AgentSession._check_cancel docstring).
         cancel_event = _active.get("cancel_event")
         if cancel_event is not None:
             cancel_event.set()
         ctx._bridge.emit_event(
             "run.event",
             {"runId": _active.get("run_id"), "ev": {
-                "type": "info", "text": "Mevcut adım bitince durdurulacak.",
+                "type": "info", "text": "Durduruluyor…",
             }},
         )
     else:

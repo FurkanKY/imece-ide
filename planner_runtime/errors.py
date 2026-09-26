@@ -19,3 +19,10 @@ class PlannerProtocolError(PlannerError):
 
 class PlannerRecordingError(PlannerError):
     """A required canonical planner lifecycle event could not be recorded."""
+
+
+from agent_runtime.cancellation import OperationCancelledError
+
+
+class PlannerCancelledError(PlannerExecutionError, OperationCancelledError):
+    """A CancellationToken was observed as cancelled mid-planning."""

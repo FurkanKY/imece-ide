@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import asyncio
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.events import ExecutionCompleted, ExecutionStarted
-from context_runtime import ContextEngine
+from context_runtime import ContextEngine, load_project_rules
 from context_runtime.ranking import MAX_QUERY_CHARS
 from review_runtime.errors import ReviewProtocolError
 from review_runtime.models import ReviewReport, ReviewRequest, validate_review_id
@@ -38,7 +39,11 @@ from run_runtime.service import RunRuntime
 from acp_runtime.models import AcpClientLimits
 from executor_runtime.acp_semantic import run_acp_semantic_prompt, wrap_system_instructions_for_acp_prompt
 from executor_runtime.acp_worker import AcpWorkerLaunchProfile, resolve_acp_worker_launch
-from executor_runtime.errors import ExecutorAdapterExecutionError, ExecutorAdapterInputError
+from executor_runtime.errors import (
+    ExecutorAdapterCancelledError,
+    ExecutorAdapterExecutionError,
+    ExecutorAdapterInputError,
+)
 
 
 class AcpReviewAttemptRunner:
@@ -77,13 +82,20 @@ class AcpReviewAttemptRunner:
     def run_id(self) -> str:
         return self._run_id
 
-    def run(self, workspace, request: ReviewRequest, *, review_id: str) -> ReviewReport:
+    def run(
+        self, workspace, request: ReviewRequest, *, review_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> ReviewReport:
         if not isinstance(request, ReviewRequest):
             raise ExecutorAdapterInputError("AcpReviewAttemptRunner.run requires a ReviewRequest.")
         review_id = validate_review_id(review_id)
 
+        rules = load_project_rules(workspace.root)
         try:
-            sink = CanonicalReviewEventSink(self._runtime, self._run_id, review_id=review_id)
+            sink = CanonicalReviewEventSink(
+                self._runtime, self._run_id, review_id=review_id,
+                rules_sha256=rules.sha256 if rules is not None else None,
+            )
         except ValueError as exc:
             raise ExecutorAdapterInputError(f"Cannot construct canonical Reviewer sink: {exc}") from exc
 
@@ -95,6 +107,7 @@ class AcpReviewAttemptRunner:
             diff=request.diff,
             verification_report=request.verification_report,
             context_pack=context_pack,
+            rules=rules,
         )
         acp_prompt = wrap_system_instructions_for_acp_prompt(REVIEWER_SYSTEM_INSTRUCTIONS, rendered_task_input)
 
@@ -119,7 +132,11 @@ class AcpReviewAttemptRunner:
                 workspace=workspace,
                 prompt=acp_prompt,
                 limits=self._limits,
+                cancel_token=cancel_token,
             )
+        except OperationCancelledError as cancellation:
+            self._fail(sink, review_id, cancellation)
+            raise ExecutorAdapterCancelledError("Reviewer ACP session cancelled.") from cancellation
         except Exception as original_failure:
             self._fail(sink, review_id, original_failure)
             raise ExecutorAdapterExecutionError("Reviewer ACP session failed.") from original_failure

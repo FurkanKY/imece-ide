@@ -1,5 +1,7 @@
 """Typed failures for the native provider-independent agent harness."""
 
+from agent_runtime.cancellation import OperationCancelledError
+
 
 class AgentRuntimeError(Exception):
     """Base class for expected native agent-runtime failures."""
@@ -43,3 +45,10 @@ class AgentLimitError(AgentRuntimeError):
 
 class AgentRecordingError(AgentRuntimeError):
     """A required canonical lifecycle event could not be recorded."""
+
+
+class AgentCancelledError(AgentRuntimeError, OperationCancelledError):
+    """A CancellationToken was observed as cancelled before a model turn or
+    a tool execution began. Cancellation is only ever honored at those
+    cooperative check points -- an in-flight model HTTP call or a running
+    tool cannot be interrupted mid-call."""

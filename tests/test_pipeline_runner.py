@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError  # noqa: E402
 from change_runtime.models import WorkspaceChangeSet  # noqa: E402
 from fix_runtime.models import InitialWorkerRequest  # noqa: E402
 from fix_runtime.ports import WorkerAttemptResult  # noqa: E402
@@ -48,7 +49,7 @@ class FakePlanAttemptRunner:
     def __init__(self):
         self.calls: list[str] = []
 
-    def run(self, workspace, task, *, plan_id):
+    def run(self, workspace, task, *, plan_id, cancel_token=None):
         self.calls.append(plan_id)
         return PlanReport(
             plan_id=plan_id, summary="Do the thing.",
@@ -68,7 +69,7 @@ class FakeWorkerAttemptRunner:
         self._record_completion = record_completion
         self.requests: list = []
 
-    def run(self, workspace: FakeWorkspace, request, *, execution_id: str) -> WorkerAttemptResult:
+    def run(self, workspace: FakeWorkspace, request, *, execution_id: str, cancel_token=None) -> WorkerAttemptResult:
         self.requests.append(request)
         self._runtime.record(
             run_id=self._run_id, type=RunEventType.EXECUTION_STARTED, payload={"task": request.task},
@@ -103,7 +104,7 @@ class FakeVerificationAttemptRunner:
         self._statuses = list(statuses)
         self.calls: list[str] = []
 
-    def run(self, workspace, plan, *, verification_id):
+    def run(self, workspace, plan, *, verification_id, cancel_token=None):
         self.calls.append(verification_id)
         status = self._statuses.pop(0)
         report = _verification_result(verification_id, status)
@@ -137,7 +138,7 @@ class FakeReviewAttemptRunner:
         self.calls: list[str] = []
         self.requests: list = []
 
-    def run(self, workspace, request, *, review_id):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
         self.calls.append(review_id)
         self.requests.append(request)
         verdict = self._verdicts.pop(0)
@@ -347,6 +348,85 @@ def test_cancel_before_planning_returns_cancelled_without_running_anything(tmp_p
     assert runtime.get_run(run.run_id).status is RunStatus.CANCELLED
 
 
+class _CancellingWorkerAttemptRunner(FakeWorkerAttemptRunner):
+    """Models a real adapter (native AgentSession / ProcessRunner /
+    AcpClientRuntime) that observed cancellation MID-EXECUTION and raised
+    OperationCancelledError instead of returning normally."""
+
+    def run(self, workspace, request, *, execution_id, cancel_token=None):
+        raise OperationCancelledError("worker cancelled mid-execution")
+
+
+class _CancellingVerificationAttemptRunner(FakeVerificationAttemptRunner):
+    def run(self, workspace, plan, *, verification_id, cancel_token=None):
+        raise OperationCancelledError("verification cancelled mid-execution")
+
+
+class _CancellingReviewAttemptRunner(FakeReviewAttemptRunner):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
+        raise OperationCancelledError("review cancelled mid-execution")
+
+
+def test_cancel_mid_worker_reports_cancelled_and_never_reaches_verification(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    cancelling_worker = _CancellingWorkerAttemptRunner(runtime, run.run_id)
+    runner, planner, worker, verification, reviewer = _make_runner(runtime, run, worker=cancelling_worker)
+
+    report = runner.run(run.run_id, workspace, "Implement X", cancel_event=threading.Event())
+
+    assert report.status is PipelineStatus.CANCELLED
+    assert not verification.calls
+    assert not reviewer.calls
+    assert runtime.get_run(run.run_id).status is RunStatus.CANCELLED
+    events = [e.type for e in runtime.events(run.run_id, after_seq=0, limit=200).events]
+    assert RunEventType.RUN_CANCELLED in events
+    assert events.count(RunEventType.RUN_CANCELLED) == 1
+
+
+def test_cancel_mid_verification_reports_cancelled_and_never_reaches_review(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    planner = FakePlanAttemptRunner()
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id)
+    verification = _CancellingVerificationAttemptRunner(runtime, run.run_id, [VerificationStatus.PASS])
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [ReviewVerdict.APPROVED])
+    change_provider = FakeChangeProvider()
+    runner = PipelineRunner(
+        runtime, planner=planner, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=change_provider,
+    )
+
+    report = runner.run(run.run_id, workspace, "Implement X")
+
+    assert report.status is PipelineStatus.CANCELLED
+    assert not reviewer.calls
+    assert runtime.get_run(run.run_id).status is RunStatus.CANCELLED
+
+
+def test_cancel_mid_review_reports_cancelled_and_never_settles_the_gate(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    reviewer = _CancellingReviewAttemptRunner(runtime, run.run_id, [ReviewVerdict.APPROVED])
+    runner, planner, worker, verification, _ = _make_runner(runtime, run)
+    runner = PipelineRunner(
+        runtime, planner=planner, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=FakeChangeProvider(),
+    )
+
+    report = runner.run(run.run_id, workspace, "Implement X")
+
+    assert report.status is PipelineStatus.CANCELLED
+    run_after = runtime.get_run(run.run_id)
+    assert run_after.status is RunStatus.CANCELLED
+
+
 def test_on_stage_callback_invoked_at_boundaries(tmp_path):
     (tmp_path / "tests").mkdir()
     workspace = FakeWorkspace(tmp_path)
@@ -371,7 +451,7 @@ def test_worker_port_failure_raises_pipeline_execution_error(tmp_path):
     runtime, run = setup_runtime(tmp_path)
 
     class ThrowingWorker:
-        def run(self, workspace, request, *, execution_id):
+        def run(self, workspace, request, *, execution_id, cancel_token=None):
             raise RuntimeError("boom")
 
     runner, planner, worker, verification, reviewer = _make_runner(runtime, run, worker=ThrowingWorker())

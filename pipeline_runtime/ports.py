@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from agent_runtime.cancellation import CancellationToken
 from planner_runtime.models import PlanReport
 
 
@@ -28,4 +29,6 @@ class PlanAttemptRunner(Protocol):
         by PipelineRunner using this port.
     """
 
-    def run(self, workspace, task: str, *, plan_id: str) -> PlanReport: ...
+    def run(
+        self, workspace, task: str, *, plan_id: str, cancel_token: CancellationToken | None = None,
+    ) -> PlanReport: ...

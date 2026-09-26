@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent_runtime import ModelStopReason, ModelToolCall, ModelTurn, ModelUsage  # noqa: E402
+from agent_runtime import ModelStopReason, ModelToolCall, ModelTurn, ModelUsage, UserInput  # noqa: E402
 from change_runtime import GitWorktreeChangeProvider  # noqa: E402
 from executor_runtime.native_reviewer import NativeReviewAttemptAdapter  # noqa: E402
 from executor_runtime.native_verification import NativeVerificationAttemptAdapter  # noqa: E402
@@ -31,8 +31,10 @@ pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not fou
 class ScriptedSession:
     def __init__(self, turns):
         self.turns = list(turns)
+        self.received_inputs = []
 
     def respond(self, input_items):
+        self.received_inputs.append(input_items)
         value = self.turns.pop(0)
         if isinstance(value, BaseException):
             raise value
@@ -46,12 +48,20 @@ class ScriptedBackend:
     def open_session(self, *, instructions, tools, allow_parallel_tool_calls):
         return self.session
 
+    @property
+    def first_user_input_text(self) -> str:
+        """The text of the very first UserInput this backend's session
+        received (i.e. the rendered prompt for its one attempt)."""
+        first_call_items = self.session.received_inputs[0]
+        first_user_input = next(item for item in first_call_items if isinstance(item, UserInput))
+        return first_user_input.text
+
 
 class FakeProcessRunner:
     def __init__(self, results):
         self._results = list(results)
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         return self._results.pop(0)
 
 
@@ -301,3 +311,51 @@ def test_pipeline_no_verification_plan_leaves_run_waiting_user(tmp_path):
         assert runtime.get_run(run.run_id).status.value == "waiting_user"
     finally:
         ws.dispose()
+
+
+def test_pipeline_project_rules_reach_planner_worker_and_reviewer(tmp_path, repo_workspace):
+    """An AGENTS.md committed in the repo must be discovered from the
+    isolated GitWorktreeWorkspace root and reach the Planner, the initial
+    Worker attempt, and the Reviewer -- proving the ScriptedBackend actually
+    received input containing the project rules text for all three roles."""
+    (repo_workspace.root / "AGENTS.md").write_text(
+        "PROJECT-SPECIFIC-RULE-MARKER: always call helper() for logging.",
+        encoding="utf-8",
+    )
+
+    runtime, run = setup_runtime(tmp_path)
+
+    planner_backend = ScriptedBackend([_completed_turn(_plan_json())])
+    planner = NativePlanAttemptRunner(runtime, run.run_id, planner_backend)
+
+    worker_backend = ScriptedBackend([
+        ModelTurn(
+            "", (ModelToolCall("c1", "write_file", {"path": "a.txt", "content": "fixed\n"}),),
+            ModelStopReason.TOOL_USE, ModelUsage(),
+        ),
+        _completed_turn("Fixed the bug."),
+    ])
+    worker = NativeWorkerAttemptAdapter(runtime, run.run_id, worker_backend)
+
+    verification = NativeVerificationAttemptAdapter(
+        runtime, run.run_id, process_runner=FakeProcessRunner([_process_result(0)]),
+    )
+
+    review_backend = ScriptedBackend([_completed_turn('{"verdict":"APPROVED","summary":"Good fix.","findings":[]}')])
+    reviewer = NativeReviewAttemptAdapter(runtime, run.run_id, ReviewerRunner(review_backend))
+
+    change_provider = GitWorktreeChangeProvider()
+
+    pipeline = PipelineRunner(
+        runtime, planner=planner, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=change_provider,
+    )
+
+    report = pipeline.run(run.run_id, repo_workspace, "Fix the bug in a.txt")
+    assert report.status is PipelineStatus.NEEDS_USER
+
+    marker = "PROJECT-SPECIFIC-RULE-MARKER: always call helper() for logging."
+    for backend, role in ((planner_backend, "planner"), (worker_backend, "worker"), (review_backend, "reviewer")):
+        text = backend.first_user_input_text
+        assert marker in text, f"{role} did not receive the project rules"
+        assert "untrusted" in text.lower(), f"{role}'s rules section was not labelled untrusted"

@@ -10,10 +10,11 @@ from __future__ import annotations
 import hashlib
 
 from agent_runtime.backend import ModelBackend
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.errors import AgentRuntimeError
 from agent_runtime.models import AgentLimits, ApprovalPause
 from agent_runtime.session import AgentSession
-from context_runtime import ContextEngine
+from context_runtime import ContextEngine, load_project_rules
 from context_runtime.models import ContextBudget
 from context_runtime.ranking import MAX_QUERY_CHARS
 from tool_runtime.models import PermissionEffect, ToolExecutionContext
@@ -22,7 +23,12 @@ from tool_runtime.registry import ToolRegistry
 from tool_runtime.tools.repository import register_repository_tools
 from tool_runtime.tools.workspace_files import register_workspace_read_tools
 
-from planner_runtime.errors import PlannerExecutionError, PlannerInputError, PlannerProtocolError
+from planner_runtime.errors import (
+    PlannerCancelledError,
+    PlannerExecutionError,
+    PlannerInputError,
+    PlannerProtocolError,
+)
 from planner_runtime.models import MAX_TASK_CHARS, PlanReport, new_plan_id, validate_plan_id
 from planner_runtime.parser import parse_plan_decision
 from planner_runtime.prompt import PLANNER_SYSTEM_INSTRUCTIONS, render_initial_planner_input
@@ -88,6 +94,7 @@ class PlannerRunner:
         *,
         recorder: PlanRecorder | None = None,
         plan_id: str | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> PlanReport:
         # A. Validate task before any Agent side effect.
         task = _validate_task(task)
@@ -100,8 +107,10 @@ class PlannerRunner:
         query = task[:MAX_QUERY_CHARS]
         context_pack = self._context_engine.build(workspace, query, _PLANNER_CONTEXT_BUDGET)
 
-        # D. Render bounded planner input.
-        rendered_input = render_initial_planner_input(task=task, context_pack=context_pack)
+        # D. Render bounded planner input (project rules, if any, are read
+        # from this same isolated workspace root -- see context_runtime.rules).
+        rules = load_project_rules(workspace.root)
+        rendered_input = render_initial_planner_input(task=task, context_pack=context_pack, rules=rules)
 
         # E. Build read-only registry/policy/context.
         registry = _planner_registry(self._context_engine)
@@ -119,11 +128,14 @@ class PlannerRunner:
             limits=self._limits,
             event_sink=recorder,
             execution_id=f"planner_exec_{plan_id}",
+            cancel_token=cancel_token,
         )
 
         # G. Start AgentSession with rendered planner input.
         try:
             outcome = session.start(rendered_input)
+        except OperationCancelledError as exc:
+            raise PlannerCancelledError(f"Planner AgentSession cancelled: {exc}") from exc
         except AgentRuntimeError as exc:
             raise PlannerExecutionError(f"Planner AgentSession failed: {exc}") from exc
 

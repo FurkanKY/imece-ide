@@ -19,8 +19,22 @@ Her adım bir olay (event) olarak yield edilir → arayüz canlı gösterir.
 
 import re
 
+from context_runtime import load_project_rules, render_bounded_rules_block
 from project import Project
 from agents import build_agents
+
+# Legacy engine has no fixed prompt character budget of its own (unlike the
+# pipeline engine's render_*_input functions); this is just a generous cap so
+# a pathological AGENTS.md can never dominate the user prompt.
+_LEGACY_RULES_BUDGET = 12_000
+
+
+def _rules_prefix(project_root) -> str:
+    """Bounded, clearly delimited, untrusted-data rules prefix for a legacy
+    user prompt -- "" when no project rules file is present (see
+    context_runtime.rules; same trust boundary as the pipeline engine)."""
+    rules = load_project_rules(project_root)
+    return render_bounded_rules_block(rules, _LEGACY_RULES_BUDGET)
 
 # Planner cevabındaki "FILES:" bölümünden dosya yollarını çıkar.
 _FILES_RE = re.compile(r"FILES:\s*(.+)", re.DOTALL | re.IGNORECASE)
@@ -68,6 +82,7 @@ def _parse_file_blocks(text: str) -> dict[str, str]:
 def run_project_task(project_root, task, routing=None):
     proj = Project(project_root)
     agents = build_agents(routing)
+    rules_prefix = _rules_prefix(proj.root)
     totals = {"cost_usd": 0.0, "latency_s": 0.0, "tokens": 0}
 
     def track(resp, stage):
@@ -87,6 +102,7 @@ def run_project_task(project_root, task, routing=None):
     # 1) PLAN + hangi dosyalar lazım?
     yield {"type": "stage", "stage": "plan", "provider": agents["planner"].provider}
     plan = agents["planner"].run(
+        rules_prefix +
         f"Görev: {task}\n\nProje dosyaları:\n{tree}\n\n"
         "Önce kısa bir plan yaz. EN SONDA 'FILES:' satırı koy ve altına, bu görev "
         "için okunması/düzenlenmesi gereken dosya yollarını (yukarıdaki listeden, "
@@ -110,6 +126,7 @@ def run_project_task(project_root, task, routing=None):
     # 3) CODER: değişen dosyaların tam içeriği
     yield {"type": "stage", "stage": "code", "provider": agents["coder"].provider}
     resp = agents["coder"].run(
+        rules_prefix +
         f"Görev: {task}\n\nPlan:\n{plan.text}\n\nMevcut dosyalar:\n{context}\n\n"
         "Değiştirilmesi veya oluşturulması gereken HER dosya için TAM yeni içeriği "
         "şu formatta ver (kısmi değil, dosyanın tamamı):\n"
@@ -142,6 +159,7 @@ def run_project_task(project_root, task, routing=None):
         all_diffs = "\n\n".join(p["diff"] for p in proposals)
         yield {"type": "stage", "stage": "review", "provider": agents["reviewer"].provider}
         review = agents["reviewer"].run(
+            rules_prefix +
             f"Görev: {task}\n\nÖnerilen değişiklikler (diff):\n{all_diffs}\n\n"
             "Bu değişiklikleri incele; sorun yoksa 'VERDICT: APPROVED', varsa "
             "'VERDICT: NEEDS_FIX' yazıp kısaca açıkla."

@@ -113,7 +113,7 @@ class _FakeAcpClient:
         self.error = error
         self.emit_permission = emit_permission
 
-    async def run(self, launch, request, *, limits=None, event_sink=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
         self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
         if self.mutate_relative_path is not None:
             Path(request.cwd, self.mutate_relative_path).write_text("mutated\n", encoding="utf-8")

@@ -600,7 +600,7 @@ class _FakeAcpClient:
         self.calls = []
         self.result = result or _acp_result()
 
-    async def run(self, launch, request, *, limits=None, event_sink=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
         self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
         return self.result
 
@@ -610,7 +610,7 @@ class _RaisingAcpClient(_FakeAcpClient):
         super().__init__()
         self.error = error
 
-    async def run(self, launch, request, *, limits=None, event_sink=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
         self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
         raise self.error
 
@@ -1125,7 +1125,7 @@ def test_completion_sequence_conflict_skips_execution_failed_append(tmp_path, mo
             self._runtime = runtime
             self._run_id = run_id
 
-        async def run(self, launch, request, *, limits=None, event_sink=None):
+        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
             self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
             # Simulate a concurrent external canonical writer advancing the
             # Run's event sequence before this attempt's sink can complete.
@@ -1169,7 +1169,7 @@ def test_streaming_persistence_failure_does_not_attempt_terminal_append(tmp_path
     underlying = RuntimeError("canonical append failed")
 
     class _EmitFailingAcpClient(_FakeAcpClient):
-        async def run(self, launch, request, *, limits=None, event_sink=None):
+        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
             self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
             try:
                 event_sink.emit(AcpSessionUpdateObserved("session-1", _sdk_update(), 10))

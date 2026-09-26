@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from acp_runtime.client import AcpClientRuntime as _AcpClientRuntime  # noqa: E402
 from acp_runtime.errors import (  # noqa: E402
     AcpAuthenticationRequiredError,
+    AcpCancelledError,
     AcpCleanupError,
     AcpEventSinkError,
     AcpInputError,
@@ -26,6 +27,7 @@ from acp_runtime.errors import (  # noqa: E402
     AcpProtocolError,
     AcpTimeoutError,
 )
+from agent_runtime.cancellation import CancellationToken  # noqa: E402
 from acp_runtime.events import (  # noqa: E402
     AcpPermissionRequested,
     AcpPermissionResolved,
@@ -1534,6 +1536,67 @@ def test_cleanup_survivor_alone_preserves_process_cleanup_error_cause(tmp_path):
     with pytest.raises(AcpCleanupError) as excinfo:
         asyncio.run(runtime.run(_valid_launch(), _valid_request(tmp_path)))
     assert excinfo.value.__cause__ is underlying
+
+
+# ---------------- cancellation (F7) ----------------
+
+
+async def _hang_until_cancelled(conn):
+    """Simulates a real ACP agent's prompt(): never resolves on its own, but
+    responds to conn.cancel(session_id) exactly like a well-behaved agent
+    would -- ends the prompt with stop_reason "cancelled"."""
+    while not conn.cancel_called:
+        await asyncio.sleep(0.01)
+    return _PromptResult(stop_reason="cancelled")
+
+
+def test_cancel_token_set_before_prompt_starts_sends_session_cancel_and_raises(tmp_path):
+    token = CancellationToken()
+    token.cancel()
+    conn_holder: dict = {}
+
+    def build(client):
+        conn = _FakeConnection(client, prompt_behavior=_hang_until_cancelled)
+        conn_holder["conn"] = conn
+        return conn
+
+    runtime = AcpClientRuntime(_connect=_make_connect(build))
+    with pytest.raises(AcpCancelledError):
+        asyncio.run(runtime.run(_valid_launch(), _valid_request(tmp_path), cancel_token=token))
+    assert conn_holder["conn"].cancel_called is True
+
+
+def test_cancel_token_set_mid_prompt_sends_session_cancel_promptly(tmp_path):
+    token = CancellationToken()
+    conn_holder: dict = {}
+
+    def build(client):
+        conn = _FakeConnection(client, prompt_behavior=_hang_until_cancelled)
+        conn_holder["conn"] = conn
+        return conn
+
+    async def _driver():
+        async def _cancel_soon():
+            await asyncio.sleep(0.05)
+            token.cancel()
+
+        cancel_task = asyncio.ensure_future(_cancel_soon())
+        runtime = AcpClientRuntime(_connect=_make_connect(build))
+        try:
+            with pytest.raises(AcpCancelledError):
+                await runtime.run(_valid_launch(), _valid_request(tmp_path), cancel_token=token)
+        finally:
+            await cancel_task
+
+    asyncio.run(_driver())
+    assert conn_holder["conn"].cancel_called is True
+
+
+def test_cancel_token_none_never_creates_a_watch_task(tmp_path):
+    """No cancel_token supplied: the ordinary success path is unaffected."""
+    runtime = AcpClientRuntime(_connect=_make_connect(lambda c: _FakeConnection(c, prompt_behavior=_echo_prompt)))
+    result = asyncio.run(runtime.run(_valid_launch(), _valid_request(tmp_path)))
+    assert result.stop_reason == "end_turn"
 
 
 def test_no_run_sync_or_asyncio_run_inside_module():

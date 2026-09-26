@@ -23,6 +23,7 @@ from process_runtime.errors import ProcessCleanupError
 
 from acp_runtime.errors import (
     AcpAuthenticationRequiredError,
+    AcpCancelledError,
     AcpCleanupError,
     AcpEventSinkError,
     AcpInputError,
@@ -187,7 +188,16 @@ class AcpClientRuntime:
         *,
         limits: AcpClientLimits | None = None,
         event_sink: AcpEventSink | None = None,
+        cancel_token=None,
     ) -> AcpRunResult:
+        """`cancel_token` is duck-typed (only `.cancelled`/`.wait(timeout)`
+        are used) so acp_runtime never needs to import agent_runtime -- pass
+        an agent_runtime.cancellation.CancellationToken or anything exposing
+        the same interface. When set before/during the prompt, `session/
+        cancel` is sent for the active session (mirrors the existing fatal-
+        abort path in _run_prompt: `_cancel_and_settle` already sends
+        `conn.cancel(...)` and bounds the grace wait), then the usual
+        connection/process teardown in the outer `finally` runs unchanged."""
         if not isinstance(launch, AcpLaunchSpec):
             raise AcpInputError("AcpClientRuntime.run requires an AcpLaunchSpec.")
         if not isinstance(request, AcpPromptRequest):
@@ -246,7 +256,9 @@ class AcpClientRuntime:
                 raise AcpProtocolError("Agent returned an empty session_id from new_session.")
             client.bind_session(session_id)
 
-            stop_reason = await self._run_prompt(conn, session_id, request, limits, fatal, owned_tasks)
+            stop_reason = await self._run_prompt(
+                conn, session_id, request, limits, fatal, owned_tasks, cancel_token,
+            )
             result = AcpRunResult(
                 session_id=session_id,
                 stop_reason=stop_reason,
@@ -346,7 +358,7 @@ class AcpClientRuntime:
 
     async def _run_prompt(
         self, conn, session_id: str, request: AcpPromptRequest, limits: AcpClientLimits,
-        fatal: _FatalSignal, owned_tasks: set[asyncio.Task],
+        fatal: _FatalSignal, owned_tasks: set[asyncio.Task], cancel_token=None,
     ) -> str:
         prompt_task = asyncio.ensure_future(conn.prompt(session_id, [acp.text_block(request.prompt)]))
         fatal_task = asyncio.ensure_future(fatal.event.wait())
@@ -354,8 +366,26 @@ class AcpClientRuntime:
         owned_tasks.add(fatal_task)
         cancel_grace_s = limits.cancel_grace_ms / 1000
 
+        wait_set = {prompt_task, fatal_task}
+        cancel_task: asyncio.Task | None = None
+        if cancel_token is not None:
+            # A periodic (100ms) asyncio-native check rather than a thread
+            # blocked in Event.wait(): a run_in_executor thread cannot be
+            # forcibly stopped once started, so it would leak a live OS
+            # thread for the remainder of prompt_timeout_ms whenever the
+            # prompt finishes on its own (the common case) before any
+            # cancellation ever happens. This task, in contrast, is plain
+            # asyncio and cancels instantly and cleanly either way.
+            async def _watch_cancel() -> None:
+                while not cancel_token.cancelled:
+                    await asyncio.sleep(0.1)
+
+            cancel_task = asyncio.ensure_future(_watch_cancel())
+            owned_tasks.add(cancel_task)
+            wait_set.add(cancel_task)
+
         done, _pending = await asyncio.wait(
-            {prompt_task, fatal_task}, timeout=limits.prompt_timeout_ms / 1000, return_when=asyncio.FIRST_COMPLETED,
+            wait_set, timeout=limits.prompt_timeout_ms / 1000, return_when=asyncio.FIRST_COMPLETED,
         )
 
         # Authoritative check: fatal.error is written synchronously by
@@ -365,21 +395,38 @@ class AcpClientRuntime:
         if fatal.error is not None:
             await self._cancel_and_settle(conn, session_id, prompt_task, cancel_grace_s, owned_tasks)
             self._retire_if_done(fatal_task, owned_tasks)
+            if cancel_task is not None:
+                self._retire_if_done(cancel_task, owned_tasks)
             raise fatal.error
+
+        if cancel_token is not None and cancel_token.cancelled:
+            await self._cancel_and_settle(conn, session_id, prompt_task, cancel_grace_s, owned_tasks)
+            self._retire_if_done(fatal_task, owned_tasks)
+            self._retire_if_done(cancel_task, owned_tasks)
+            raise AcpCancelledError("ACP prompt was cancelled.")
 
         if prompt_task not in done:
             await self._cancel_and_settle(conn, session_id, prompt_task, cancel_grace_s, owned_tasks)
             self._retire_if_done(fatal_task, owned_tasks)
+            if cancel_task is not None:
+                self._retire_if_done(cancel_task, owned_tasks)
             raise AcpTimeoutError(f"ACP prompt did not complete within {limits.prompt_timeout_ms}ms.")
 
-        # prompt_task genuinely completed within the bound: fatal_task is no
-        # longer useful, cancel it (bounded -- it is a plain Event.wait()).
+        # prompt_task genuinely completed within the bound: fatal_task/
+        # cancel_task are no longer useful, cancel them (both bounded --
+        # plain Event.wait()s).
         if not fatal_task.done():
             fatal_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await fatal_task
         owned_tasks.discard(fatal_task)
         owned_tasks.discard(prompt_task)
+        if cancel_task is not None:
+            if not cancel_task.done():
+                cancel_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_task
+            owned_tasks.discard(cancel_task)
 
         exc = prompt_task.exception()
         if exc is not None:

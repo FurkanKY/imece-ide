@@ -87,15 +87,18 @@ class CanonicalPlannerEventSink:
     """Maps one transient AgentSession planning attempt to canonical plan.* events."""
 
     def __init__(
-        self, runtime: RunRuntime, run_id: str, *, plan_id: str,
+        self, runtime: RunRuntime, run_id: str, *, plan_id: str, rules_sha256: str | None = None,
     ) -> None:
         plan_id = validate_plan_id(plan_id)
+        if rules_sha256 is not None and not isinstance(rules_sha256, str):
+            raise ValueError("rules_sha256 must be a string or None")
         run = runtime.get_run(run_id)
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"Planner sink requires RUNNING run, got {run.status}")
         self._runtime = runtime
         self._run_id = run_id
         self._plan_id = plan_id
+        self._rules_sha256 = rules_sha256
         self._expected_seq = run.last_event_seq
         self._transient_execution_id: str | None = None
         self._terminal_recorded = False
@@ -138,9 +141,15 @@ class CanonicalPlannerEventSink:
 
         if isinstance(event, ExecutionStarted):
             self._reject_reused_plan_id()
-            self._commit([self._spec(event, RunEventType.PLAN_STARTED, {
-                "plan_id": self._plan_id,
-            })])
+            started_payload: dict[str, Any] = {"plan_id": self._plan_id}
+            if self._rules_sha256 is not None:
+                # Additive provenance field: omitted entirely (rather than
+                # None) when no project rules were supplied, so a sink
+                # constructed without rules_sha256 keeps emitting the exact
+                # same plan.started payload shape as before this field
+                # existed.
+                started_payload["rules_sha256"] = self._rules_sha256
+            self._commit([self._spec(event, RunEventType.PLAN_STARTED, started_payload)])
             self._started_persisted = True
             return
         if isinstance(event, ExecutionCompleted):

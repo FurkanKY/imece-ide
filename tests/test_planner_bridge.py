@@ -595,3 +595,24 @@ def test_planner_never_emits_canonical_execution_events(tmp_path):
     }
     types = event_types(runtime, run)
     assert not (execution_lifecycle_types & set(types))
+
+
+# ---------------- rules_sha256 provenance (additive plan.started field) ----------------
+
+
+def test_plan_started_omits_rules_sha256_when_not_supplied(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    sink = CanonicalPlannerEventSink(runtime, run.run_id, plan_id="plan-no-rules")
+    sink.emit(ExecutionStarted("planner_exec_plan-no-rules", "task"))
+    events = runtime.events(run.run_id, limit=200).events
+    started = next(e for e in events if e.type == RunEventType.PLAN_STARTED)
+    assert "rules_sha256" not in started.payload
+
+
+def test_plan_started_carries_rules_sha256_when_supplied(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    sink = CanonicalPlannerEventSink(runtime, run.run_id, plan_id="plan-with-rules", rules_sha256="f" * 64)
+    sink.emit(ExecutionStarted("planner_exec_plan-with-rules", "task"))
+    events = runtime.events(run.run_id, limit=200).events
+    started = next(e for e in events if e.type == RunEventType.PLAN_STARTED)
+    assert started.payload["rules_sha256"] == "f" * 64

@@ -44,6 +44,7 @@ from typing import Protocol
 
 import acp
 
+from agent_runtime.cancellation import OperationCancelledError
 from acp_runtime.events import AcpEventSink, AcpPermissionRequested, AcpPermissionResolved, AcpSessionUpdateObserved
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest, AcpRunResult
 from change_runtime.git import GitWorktreeChangeProvider
@@ -179,6 +180,7 @@ def run_acp_semantic_prompt(
     workspace,
     prompt: str,
     limits: AcpClientLimits | None = None,
+    cancel_token=None,
 ) -> tuple[str, AcpRunResult]:
     """Run one fresh, read-only ACP session and return (final_text, result).
 
@@ -218,8 +220,12 @@ def run_acp_semantic_prompt(
     sink = _AgentMessageTextSink()
     try:
         result = asyncio.run(
-            acp_client.run(launch_spec, prompt_request, limits=limits, event_sink=sink)
+            acp_client.run(
+                launch_spec, prompt_request, limits=limits, event_sink=sink, cancel_token=cancel_token,
+            )
         )
+    except OperationCancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001 - any acp_runtime failure is infrastructure here
         raise AcpSemanticExecutionError(f"ACP semantic session failed: {exc}") from exc
 

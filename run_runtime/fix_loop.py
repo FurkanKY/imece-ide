@@ -207,6 +207,16 @@ class CanonicalFixLoopRecorder:
         payload.update(extra)
         self._append_terminal(RunEventType.FIX_LOOP_FAILED, payload)
 
+    def interrupted(self, *, reason: str, **extra: Any) -> None:
+        """Terminal for a fix loop cancelled via a CancellationToken (never
+        via an infrastructure error -- that remains `failed()`). Any active
+        attempt must already have been settled with `attempt_interrupted()`
+        before this is called (see `_append_terminal`'s active-attempt
+        guard)."""
+        payload = {"fix_loop_id": self._fix_loop_id, "reason": reason}
+        payload.update(extra)
+        self._append_terminal(RunEventType.FIX_LOOP_INTERRUPTED, payload)
+
     # ---------------- internals ----------------
 
     def _require_started(self) -> None:

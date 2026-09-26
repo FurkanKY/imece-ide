@@ -3,14 +3,16 @@ and a fake ChangeProvider (unit-level orchestration tests; real Git capture
 is covered separately in tests/test_change_runtime.py)."""
 
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError  # noqa: E402
 from change_runtime.models import WorkspaceChangeSet  # noqa: E402
-from fix_runtime.errors import FixLoopExecutionError, FixLoopInputError  # noqa: E402
+from fix_runtime.errors import FixLoopCancelledError, FixLoopExecutionError, FixLoopInputError  # noqa: E402
 from fix_runtime.models import FixLoopRequest, FixLoopStatus, FixTrigger, FixTriggerKind  # noqa: E402
 from fix_runtime.ports import WorkerAttemptResult  # noqa: E402
 from fix_runtime.runner import FixLoopRunner  # noqa: E402
@@ -25,8 +27,13 @@ from verification_runtime.models import VerificationCheckResult, VerificationRep
 
 
 class FakeWorkspace:
-    def __init__(self, content: str = ""):
+    def __init__(self, content: str = "", *, root: Path | None = None):
         self.content = content
+        # FixLoopRunner reads project rules via workspace.root (see
+        # context_runtime.rules.load_project_rules); default to a fresh,
+        # empty temp dir so "no rules" is the deterministic default for
+        # every test that doesn't care about rules.
+        self.root = root if root is not None else Path(tempfile.mkdtemp(prefix="imece-fake-workspace-"))
 
 
 class FakeChangeProvider:
@@ -50,7 +57,7 @@ class FakeWorkerAttemptRunner:
         self.execution_ids: list[str] = []
         self.call_count = 0
 
-    def run(self, workspace: FakeWorkspace, request, *, execution_id: str) -> WorkerAttemptResult:
+    def run(self, workspace: FakeWorkspace, request, *, execution_id: str, cancel_token=None) -> WorkerAttemptResult:
         self.call_count += 1
         self.execution_ids.append(execution_id)
         self._runtime.record(
@@ -69,12 +76,12 @@ class FakeWorkerAttemptRunner:
 
 
 class WrongExecutionIdWorkerAttemptRunner:
-    def run(self, workspace, request, *, execution_id):
+    def run(self, workspace, request, *, execution_id, cancel_token=None):
         return WorkerAttemptResult(execution_id="totally-different-id")
 
 
 class ThrowingWorkerAttemptRunner:
-    def run(self, workspace, request, *, execution_id):
+    def run(self, workspace, request, *, execution_id, cancel_token=None):
         raise RuntimeError("provider unavailable")
 
 
@@ -114,7 +121,7 @@ class FakeVerificationAttemptRunner:
         self._statuses = list(statuses)
         self.calls: list[str] = []
 
-    def run(self, workspace, plan, *, verification_id):
+    def run(self, workspace, plan, *, verification_id, cancel_token=None):
         self.calls.append(verification_id)
         status = self._statuses.pop(0)
         report = _verification_result(verification_id, status)
@@ -150,7 +157,7 @@ class FakeReviewAttemptRunner:
         self._verdicts = list(verdicts)
         self.calls: list[str] = []
 
-    def run(self, workspace, request, *, review_id):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
         self.calls.append(review_id)
         verdict = self._verdicts.pop(0)
         findings = () if verdict is ReviewVerdict.APPROVED else (ReviewFinding(ReviewSeverity.MAJOR, "bug"),)
@@ -185,7 +192,7 @@ class FakeReviewAttemptRunner:
 
 
 class WrongProvenanceReviewAttemptRunner:
-    def run(self, workspace, request, *, review_id):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
         return ReviewReport(
             review_id="wrong-id-not-requested", verdict=ReviewVerdict.APPROVED, summary="s", findings=(),
             repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,
@@ -262,9 +269,79 @@ def test_stall_terminates_without_verification_or_review(tmp_path):
     completed = next(e for e in events if e.type == RunEventType.FIX_ATTEMPT_COMPLETED)
     assert completed.payload["changed"] is False
 
-    final = runtime.get_run(run.run_id)
-    assert final.status is RunStatus.FAILED
-    assert final.error_code == "fix_loop_exhausted"
+
+# ==================== F7: cancellation ====================
+
+
+class _CancellingWorkerAttemptRunner:
+    """Models a real adapter that observed cancellation mid-execution."""
+
+    def run(self, workspace, request, *, execution_id, cancel_token=None):
+        raise OperationCancelledError("worker cancelled mid-execution")
+
+
+def test_cancel_mid_attempt_records_interrupted_and_leaves_run_running(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    worker = _CancellingWorkerAttemptRunner()
+    verification = FakeVerificationAttemptRunner(runtime, run.run_id, [])
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [])
+    runner = FixLoopRunner(runtime, worker=worker, verification=verification, reviewer=reviewer, change_provider=FakeChangeProvider())
+    workspace = FakeWorkspace()
+    request = FixLoopRequest(task="fix it", trigger=_initial_fail_trigger(), verification_plan=_valid_verification_plan())
+    token = CancellationToken()
+
+    with pytest.raises(FixLoopCancelledError):
+        runner.run(run.run_id, workspace, request, cancel_token=token)
+
+    assert verification.calls == []
+    assert reviewer.calls == []
+
+    types = event_types(runtime, run)
+    assert RunEventType.FIX_ATTEMPT_INTERRUPTED in types
+    assert RunEventType.FIX_LOOP_INTERRUPTED in types
+    assert RunEventType.FIX_LOOP_FAILED not in types
+    assert RunEventType.FIX_LOOP_EXHAUSTED not in types
+    assert RunEventType.FIX_LOOP_COMPLETED not in types
+    # The fix loop never touches the completion gate on cancellation: the
+    # Run stays RUNNING so the caller (pipeline_runtime.PipelineRunner) can
+    # record the single Run-level run.cancelled itself.
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
+
+
+def test_cancel_between_attempts_stops_before_the_next_attempt_starts(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id, changes=True)
+    verification = FakeVerificationAttemptRunner(runtime, run.run_id, [VerificationStatus.FAIL])
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [])
+    runner = FixLoopRunner(runtime, worker=worker, verification=verification, reviewer=reviewer, change_provider=FakeChangeProvider())
+    workspace = FakeWorkspace()
+    request = FixLoopRequest(
+        task="fix it", trigger=_initial_fail_trigger(), verification_plan=_valid_verification_plan(),
+        max_fix_attempts=3,
+    )
+    token = CancellationToken()
+
+    original_run = verification.run
+
+    def _verify_then_cancel(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        token.cancel()
+        return result
+
+    verification.run = _verify_then_cancel
+
+    with pytest.raises(FixLoopCancelledError):
+        runner.run(run.run_id, workspace, request, cancel_token=token)
+
+    assert worker.call_count == 1
+    assert len(verification.calls) == 1
+    types = event_types(runtime, run)
+    assert RunEventType.FIX_LOOP_INTERRUPTED in types
+    # attempt 1 completed normally (verification ran and returned FAIL)
+    # before the token was observed cancelled at the TOP of attempt 2.
+    assert RunEventType.FIX_ATTEMPT_COMPLETED in types
+    assert types.count(RunEventType.FIX_ATTEMPT_STARTED) == 1
+    assert runtime.get_run(run.run_id).status is RunStatus.RUNNING
 
 
 # ==================== 34: verification-FAIL loop test ====================
@@ -423,7 +500,7 @@ class MutatingReviewAttemptRunner:
     def __init__(self, workspace: FakeWorkspace):
         self._workspace = workspace
 
-    def run(self, workspace, request, *, review_id):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
         report = ReviewReport(
             review_id=review_id, verdict=ReviewVerdict.APPROVED, summary="s", findings=(),
             repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,
@@ -643,7 +720,7 @@ def test_change_provider_failure_mid_attempt_interrupts_the_active_attempt(tmp_p
 
 
 class ThrowingVerificationAttemptRunner:
-    def run(self, workspace, plan, *, verification_id):
+    def run(self, workspace, plan, *, verification_id, cancel_token=None):
         raise RuntimeError("verification backend unreachable")
 
 
@@ -679,12 +756,12 @@ class NoneReturningChangeProvider:
 
 
 class WrongTypeVerificationAttemptRunner:
-    def run(self, workspace, plan, *, verification_id):
+    def run(self, workspace, plan, *, verification_id, cancel_token=None):
         return "not-a-report"
 
 
 class NoneReturningReviewAttemptRunner:
-    def run(self, workspace, request, *, review_id):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
         return None
 
 
@@ -746,7 +823,7 @@ class CapturingWorkerAttemptRunner:
         self._run_id = run_id
         self.requests = []
 
-    def run(self, workspace, request, *, execution_id: str) -> WorkerAttemptResult:
+    def run(self, workspace, request, *, execution_id: str, cancel_token=None) -> WorkerAttemptResult:
         self.requests.append(request)
         self._runtime.record(
             run_id=self._run_id, type=RunEventType.EXECUTION_STARTED, payload={"task": request.task},

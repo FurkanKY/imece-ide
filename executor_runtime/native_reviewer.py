@@ -7,13 +7,19 @@ never duplicated here; the caller builds a ReviewerRunner and hands it in.
 
 from __future__ import annotations
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
+from context_runtime import load_project_rules
 from review_runtime.models import ReviewReport, ReviewRequest
 from review_runtime.runner import ReviewerRunner
 
 from run_runtime.reviewer import CanonicalReviewEventSink
 from run_runtime.service import RunRuntime
 
-from executor_runtime.errors import ExecutorAdapterExecutionError, ExecutorAdapterInputError
+from executor_runtime.errors import (
+    ExecutorAdapterCancelledError,
+    ExecutorAdapterExecutionError,
+    ExecutorAdapterInputError,
+)
 
 
 class NativeReviewAttemptAdapter:
@@ -35,17 +41,32 @@ class NativeReviewAttemptAdapter:
     def run_id(self) -> str:
         return self._run_id
 
-    def run(self, workspace, request: ReviewRequest, *, review_id: str) -> ReviewReport:
+    def run(
+        self, workspace, request: ReviewRequest, *, review_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> ReviewReport:
         if not isinstance(request, ReviewRequest):
             raise ExecutorAdapterInputError("NativeReviewAttemptAdapter.run requires a ReviewRequest.")
 
+        # Reading rules here (in addition to ReviewerRunner.run()'s own read
+        # of the same workspace root) only costs a cheap, read-only file
+        # check; it lets the canonical sink attach provenance (rules_sha256)
+        # to review.started without ReviewerRunner needing to report it back.
+        rules = load_project_rules(workspace.root)
         try:
-            sink = CanonicalReviewEventSink(self._runtime, self._run_id, review_id=review_id)
+            sink = CanonicalReviewEventSink(
+                self._runtime, self._run_id, review_id=review_id,
+                rules_sha256=rules.sha256 if rules is not None else None,
+            )
         except Exception as exc:
             raise ExecutorAdapterInputError(f"Cannot construct canonical Reviewer sink: {exc}") from exc
 
         try:
-            report = self._reviewer.run(workspace, request, recorder=sink, review_id=review_id)
+            report = self._reviewer.run(
+                workspace, request, recorder=sink, review_id=review_id, cancel_token=cancel_token,
+            )
+        except OperationCancelledError as exc:
+            raise ExecutorAdapterCancelledError(f"Reviewer port cancelled: {exc}") from exc
         except Exception as exc:
             raise ExecutorAdapterExecutionError(f"Reviewer port failed: {exc}") from exc
 

@@ -16,3 +16,12 @@ class FixLoopExecutionError(FixLoopRuntimeError):
 
 class FixLoopRecordingError(FixLoopRuntimeError):
     """A required canonical fix-loop lifecycle event could not be recorded."""
+
+
+from agent_runtime.cancellation import OperationCancelledError
+
+
+class FixLoopCancelledError(FixLoopExecutionError, OperationCancelledError):
+    """The fix loop was cancelled via a CancellationToken mid-attempt or
+    between attempts; the active attempt (if any) has already been recorded
+    as fix_attempt.interrupted and the loop as fix_loop.interrupted."""

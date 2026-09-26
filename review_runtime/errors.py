@@ -19,3 +19,10 @@ class ReviewExecutionError(ReviewRuntimeError):
 
 class ReviewRecordingError(ReviewRuntimeError):
     """A required canonical review lifecycle event could not be recorded."""
+
+
+from agent_runtime.cancellation import OperationCancelledError
+
+
+class ReviewCancelledError(ReviewExecutionError, OperationCancelledError):
+    """A CancellationToken was observed as cancelled mid-review."""

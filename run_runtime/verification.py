@@ -13,6 +13,7 @@ from verification_runtime.events import (
     VerificationCheckStarted,
     VerificationCompleted,
     VerificationEvent,
+    VerificationInterrupted,
     VerificationStarted,
 )
 
@@ -176,6 +177,12 @@ class CanonicalVerificationEventSink:
                     "error": report.errors,
                     "total": report.total,
                 },
+            })]
+        if isinstance(event, VerificationInterrupted):
+            return [self._spec(event, RunEventType.VERIFICATION_INTERRUPTED, {
+                "verification_id": event.verification_id,
+                "plan_id": event.plan_id,
+                "reason": event.reason,
             })]
         raise ValueError(f"Unsupported verification event: {type(event).__name__}")
 

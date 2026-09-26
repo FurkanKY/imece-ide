@@ -73,8 +73,10 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from change_runtime.models import WorkspaceChangeSet
 from change_runtime.provider import ChangeProvider
+from context_runtime import load_project_rules
 from fix_runtime.models import (
     DEFAULT_MAX_FIX_ATTEMPTS,
     FixLoopRequest,
@@ -161,29 +163,51 @@ class PipelineRunner:
         if not isinstance(task, str) or not task.strip():
             raise PipelineInputError("PipelineRunner.run requires a non-empty task.")
         on_stage = on_stage or _noop_on_stage
+        # A CancellationToken wraps `cancel_event` (or is None if no event was
+        # supplied) so it can be forwarded, unchanged in meaning, down to
+        # every port call (Planner/Worker/Verification/Reviewer/FixLoop) --
+        # see agent_runtime.cancellation. Every `cancel_event.set()` call
+        # from an existing caller (webhost/api/run.py) is observed exactly
+        # as before; this is purely additive plumbing.
+        cancel_token = CancellationToken.from_event(cancel_event)
 
-        cancelled = self._check_cancel(run_id, "planning", cancel_event)
-        if cancelled is not None:
-            return cancelled
+        try:
+            return self._run(run_id, workspace, task, cancel_token, on_stage)
+        except OperationCancelledError:
+            # Cancellation may now be observed EITHER between stages (see
+            # _check_cancel) or from inside an in-progress Worker/
+            # Verification/Reviewer/FixLoop port call (see agent_runtime.
+            # session.AgentSession, process_runtime.ProcessRunner,
+            # acp_runtime.client.AcpClientRuntime) -- either way, the
+            # pipeline-level outcome is the same: never run the next stage
+            # (reviewer/fix loop), record exactly one run.cancelled, and
+            # report PipelineStatus.CANCELLED.
+            CanonicalPipelineRecorder(self._runtime, run_id).cancelled()
+            on_stage("done", {"status": PipelineStatus.CANCELLED.value})
+            return PipelineReport(run_id=run_id, status=PipelineStatus.CANCELLED, reason="cancelled")
+
+    def _run(
+        self, run_id: str, workspace, task: str,
+        cancel_token: CancellationToken | None, on_stage: OnStage,
+    ) -> PipelineReport:
+        self._check_cancel(cancel_token)
 
         # ---------------- 1. plan ----------------
         on_stage("planning", {})
         plan_id = new_plan_id()
-        plan_report = self._run_planner(workspace, task, plan_id)
+        plan_report = self._run_planner(workspace, task, plan_id, cancel_token)
 
         # ---------------- 2. detect verification plan ----------------
         verification_plan = detect_verification_plan(workspace.root)
 
-        cancelled = self._check_cancel(run_id, "working", cancel_event)
-        if cancelled is not None:
-            return cancelled
+        self._check_cancel(cancel_token)
 
         # ---------------- 3. initial worker attempt ----------------
         on_stage("working", {"plan_id": plan_id})
         execution_id = new_fix_execution_id()
-        rendered_input = self._render_initial_input(task, plan_report, verification_plan)
+        rendered_input = self._render_initial_input(workspace, task, plan_report, verification_plan)
         worker_request = InitialWorkerRequest(task=task, rendered_input=rendered_input, plan=plan_report.summary)
-        worker_result = self._run_worker(workspace, worker_request, execution_id)
+        worker_result = self._run_worker(workspace, worker_request, execution_id, cancel_token)
         self._require_execution_completed(run_id, worker_result.execution_id)
 
         # ---------------- 4. capture the change set ----------------
@@ -198,34 +222,30 @@ class PipelineRunner:
 
         if verification_plan is None:
             return self._run_needs_user_path(
-                run_id, workspace, task, plan_report, change_set, on_stage, cancel_event,
+                run_id, workspace, task, plan_report, change_set, on_stage, cancel_token,
             )
 
-        cancelled = self._check_cancel(run_id, "verifying", cancel_event)
-        if cancelled is not None:
-            return cancelled
+        self._check_cancel(cancel_token)
 
         # ---------------- 5. verification ----------------
         on_stage("verifying", {})
         verification_id = new_verification_id()
-        verification_report = self._run_verification(workspace, verification_plan, verification_id)
+        verification_report = self._run_verification(workspace, verification_plan, verification_id, cancel_token)
 
         if verification_report.status is not VerificationStatus.PASS:
             trigger = FixTrigger(kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=verification_report)
             return self._run_fix_loop(
-                run_id, workspace, task, plan_report, verification_plan, trigger, on_stage,
+                run_id, workspace, task, plan_report, verification_plan, trigger, on_stage, cancel_token,
             )
 
-        cancelled = self._check_cancel(run_id, "reviewing", cancel_event)
-        if cancelled is not None:
-            return cancelled
+        self._check_cancel(cancel_token)
 
         # ---------------- 6. review ----------------
         on_stage("reviewing", {})
         review_changes = self._capture(workspace)
         review_request = self._build_review_request(task, plan_report, review_changes, verification_report)
         review_id = new_review_id()
-        review_report = self._run_reviewer(workspace, review_request, review_id)
+        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token)
 
         if review_report.verdict is ReviewVerdict.NEEDS_FIX:
             trigger = FixTrigger(
@@ -233,7 +253,7 @@ class PipelineRunner:
                 verification_report=verification_report, review_report=review_report,
             )
             return self._run_fix_loop(
-                run_id, workspace, task, plan_report, verification_plan, trigger, on_stage,
+                run_id, workspace, task, plan_report, verification_plan, trigger, on_stage, cancel_token,
             )
 
         if review_report.verdict is not ReviewVerdict.APPROVED:  # pragma: no cover - exhaustive above
@@ -264,16 +284,14 @@ class PipelineRunner:
     # ---------------- no-verification-plan path ----------------
 
     def _run_needs_user_path(
-        self, run_id, workspace, task, plan_report, change_set, on_stage, cancel_event,
+        self, run_id, workspace, task, plan_report, change_set, on_stage, cancel_token,
     ) -> PipelineReport:
-        cancelled = self._check_cancel(run_id, "reviewing", cancel_event)
-        if cancelled is not None:
-            return cancelled
+        self._check_cancel(cancel_token)
 
         on_stage("reviewing", {"advisory": True})
         review_request = self._build_review_request(task, plan_report, change_set, None)
         review_id = new_review_id()
-        review_report = self._run_reviewer(workspace, review_request, review_id)
+        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token)
 
         CanonicalPipelineRecorder(self._runtime, run_id).needs_user(payload={
             "reason": "review_advisory",
@@ -290,7 +308,7 @@ class PipelineRunner:
     # ---------------- fix-loop hand-off ----------------
 
     def _run_fix_loop(
-        self, run_id, workspace, task, plan_report, verification_plan, trigger, on_stage,
+        self, run_id, workspace, task, plan_report, verification_plan, trigger, on_stage, cancel_token,
     ) -> PipelineReport:
         on_stage("fixing", {"trigger_kind": trigger.kind.value})
         request = FixLoopRequest(
@@ -298,7 +316,14 @@ class PipelineRunner:
             plan=plan_report.summary, max_fix_attempts=self._max_fix_attempts,
         )
         try:
-            fix_loop_report = self._fix_loop.run(run_id, workspace, request)
+            fix_loop_report = self._fix_loop.run(run_id, workspace, request, cancel_token=cancel_token)
+        except OperationCancelledError:
+            # Never wrapped: the fix loop has already recorded its own
+            # fix_attempt.interrupted/fix_loop.interrupted trail (see
+            # FixLoopRunner._best_effort_interrupt) and deliberately left the
+            # Run RUNNING so PipelineRunner.run's own OperationCancelledError
+            # handler records the single Run-level run.cancelled.
+            raise
         except Exception as exc:
             raise PipelineExecutionError(f"Fix loop failed: {exc}") from exc
 
@@ -332,45 +357,56 @@ class PipelineRunner:
 
     # ---------------- cancellation ----------------
 
-    def _check_cancel(self, run_id: str, stage: str, cancel_event: threading.Event | None) -> PipelineReport | None:
-        """Cooperative cancellation checked only BETWEEN stages.
+    def _check_cancel(self, cancel_token: CancellationToken | None) -> None:
+        """Cooperative cancellation checked between stages -- raises
+        OperationCancelledError, caught once at the top of `run()`.
 
-        AgentSession offers no mid-execution interrupt hook that
-        PipelineRunner can safely call into (a running Worker/Planner/
-        Reviewer attempt is never interrupted mid-flight) — cancellation is
-        therefore only ever observed at a stage boundary, exactly like
-        FixLoopRunner's own infrastructure-failure handling never tries to
-        abort an in-flight port call.
+        This is now only ONE of two ways cancellation is observed: a
+        Worker/Verification/Reviewer port call may ALSO raise
+        OperationCancelledError from mid-execution (native AgentSession
+        checks before each model turn/tool call; ProcessRunner polls while
+        waiting; AcpClientRuntime watches the token during an in-flight
+        prompt) -- see agent_runtime.cancellation, agent_runtime.session,
+        process_runtime.runner, acp_runtime.client. Both paths converge on
+        the same `run()`-level handler.
         """
-        if cancel_event is None or not cancel_event.is_set():
-            return None
-        CanonicalPipelineRecorder(self._runtime, run_id).cancelled()
-        return PipelineReport(
-            run_id=run_id, status=PipelineStatus.CANCELLED, reason=f"cancelled_before_{stage}",
-        )
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
 
     # ---------------- port call wrappers ----------------
 
-    def _run_planner(self, workspace, task: str, plan_id: str) -> PlanReport:
+    def _run_planner(
+        self, workspace, task: str, plan_id: str, cancel_token: CancellationToken | None = None,
+    ) -> PlanReport:
         try:
-            report = self._planner.run(workspace, task, plan_id=plan_id)
+            report = self._planner.run(workspace, task, plan_id=plan_id, cancel_token=cancel_token)
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise PipelineExecutionError(f"Planner port failed: {exc}") from exc
         if not isinstance(report, PlanReport) or report.plan_id != plan_id:
             raise PipelineExecutionError("Planner port did not return the requested plan_id.")
         return report
 
-    def _render_initial_input(self, task: str, plan_report: PlanReport, verification_plan) -> str:
+    def _render_initial_input(self, workspace, task: str, plan_report: PlanReport, verification_plan) -> str:
         try:
+            rules = load_project_rules(workspace.root)
             return render_initial_worker_input(
-                task=task, plan=plan_report.summary, verification_plan=verification_plan,
+                task=task, plan=plan_report.summary, verification_plan=verification_plan, rules=rules,
             )
         except Exception as exc:
             raise PipelineExecutionError(f"Initial worker input could not be rendered: {exc}") from exc
 
-    def _run_worker(self, workspace, worker_request: InitialWorkerRequest, execution_id: str):
+    def _run_worker(
+        self, workspace, worker_request: InitialWorkerRequest, execution_id: str,
+        cancel_token: CancellationToken | None = None,
+    ):
         try:
-            result = self._worker.run(workspace, worker_request, execution_id=execution_id)
+            result = self._worker.run(
+                workspace, worker_request, execution_id=execution_id, cancel_token=cancel_token,
+            )
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise PipelineExecutionError(f"Worker port failed: {exc}") from exc
         if result.execution_id != execution_id:
@@ -415,9 +451,16 @@ class PipelineRunner:
         except PipelineExecutionError:
             return None
 
-    def _run_verification(self, workspace, verification_plan: VerificationPlan, verification_id: str) -> VerificationReport:
+    def _run_verification(
+        self, workspace, verification_plan: VerificationPlan, verification_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> VerificationReport:
         try:
-            report = self._verification.run(workspace, verification_plan, verification_id=verification_id)
+            report = self._verification.run(
+                workspace, verification_plan, verification_id=verification_id, cancel_token=cancel_token,
+            )
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise PipelineExecutionError(f"Verification port failed: {exc}") from exc
         if not isinstance(report, VerificationReport) or report.verification_id != verification_id:
@@ -436,9 +479,16 @@ class PipelineRunner:
         except ReviewInputError as exc:
             raise PipelineExecutionError(f"Change set could not be reviewed: {exc}") from exc
 
-    def _run_reviewer(self, workspace, review_request: ReviewRequest, review_id: str) -> ReviewReport:
+    def _run_reviewer(
+        self, workspace, review_request: ReviewRequest, review_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> ReviewReport:
         try:
-            result = self._reviewer.run(workspace, review_request, review_id=review_id)
+            result = self._reviewer.run(
+                workspace, review_request, review_id=review_id, cancel_token=cancel_token,
+            )
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise PipelineExecutionError(f"Reviewer port failed: {exc}") from exc
         if not isinstance(result, ReviewReport):

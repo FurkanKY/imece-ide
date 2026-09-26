@@ -19,9 +19,11 @@ from agent_runtime import (  # noqa: E402
     ToolResultInput,
     UserInput,
 )
+from agent_runtime.cancellation import CancellationToken  # noqa: E402
 from agent_runtime.errors import (  # noqa: E402
     AgentApprovalError,
     AgentBackendError,
+    AgentCancelledError,
     AgentIncompleteError,
     AgentLifecycleError,
     AgentLimitError,
@@ -118,7 +120,7 @@ def fake_registry(executor=None):
     return registry, executor
 
 
-def session_with(backend, registry, policy=None, workspace=None, limits=None):
+def session_with(backend, registry, policy=None, workspace=None, limits=None, cancel_token=None):
     workspace = workspace or LocalWorkspace(Path.cwd())
     policy = policy or PolicyEvaluator([PermissionRule("*", "*", PermissionEffect.ALLOW)])
     return AgentSession(
@@ -128,7 +130,16 @@ def session_with(backend, registry, policy=None, workspace=None, limits=None):
         context=ToolExecutionContext(workspace=workspace),
         instructions="system instructions",
         limits=limits,
+        cancel_token=cancel_token,
     )
+
+
+class _RecordingEventSink:
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event):
+        self.events.append(event)
 
 
 def tool_call(call_id="tool-1", name="echo", value="x"):
@@ -566,3 +577,133 @@ def test_sessions_have_independent_dispatchers_and_approval_tokens(tmp_path):
     assert session_a.state is AgentSessionState.COMPLETED
     assert session_b.state is AgentSessionState.WAITING_APPROVAL
     session_b.resume(_decision(pause_b, False))
+
+
+# ---------------- cancellation (F7) ----------------
+
+
+def test_cancel_before_start_fails_with_execution_started_and_failed_recorded():
+    registry, _ = fake_registry()
+    backend = ScriptedBackend([turn("would have answered")])
+    token = CancellationToken()
+    token.cancel()
+    sink = _RecordingEventSink()
+    workspace = LocalWorkspace(Path.cwd())
+    session = AgentSession(
+        backend=backend,
+        registry=registry,
+        policy=PolicyEvaluator([PermissionRule("*", "*", PermissionEffect.ALLOW)]),
+        context=ToolExecutionContext(workspace=workspace),
+        instructions="system instructions",
+        event_sink=sink,
+        cancel_token=token,
+    )
+    with pytest.raises(AgentCancelledError):
+        session.start("do the task")
+    assert session.state is AgentSessionState.FAILED
+    # backend.respond() was never actually called -- cancellation is honored
+    # BEFORE the model call, not after it.
+    assert backend.session.received == []
+    event_types = [type(event).__name__ for event in sink.events]
+    assert event_types == ["ExecutionStarted", "ExecutionFailed"]
+
+
+def test_cancel_between_model_turns_stops_before_the_next_respond_call():
+    registry, _ = fake_registry()
+    token = CancellationToken()
+
+    class CancellingSession:
+        """Cancels the token right after the FIRST respond() call returns a
+        tool call, so the SECOND respond() (continuing after the tool
+        result) must never happen."""
+
+        def __init__(self):
+            self.calls = 0
+
+        def respond(self, input_items):
+            self.calls += 1
+            if self.calls == 1:
+                return turn(calls=[tool_call()], reason=ModelStopReason.TOOL_USE)
+            raise AssertionError("respond() must not be called again after cancellation")
+
+    class CancellingBackend:
+        def __init__(self):
+            self.session = CancellingSession()
+
+        def open_session(self, *, instructions, tools, allow_parallel_tool_calls):
+            return self.session
+
+    backend = CancellingBackend()
+    workspace = LocalWorkspace(Path.cwd())
+    session = AgentSession(
+        backend=backend,
+        registry=registry,
+        policy=PolicyEvaluator([PermissionRule("*", "*", PermissionEffect.ALLOW)]),
+        context=ToolExecutionContext(workspace=workspace),
+        instructions="system instructions",
+        cancel_token=token,
+    )
+    # Cancel once the FIRST tool call is about to be dispatched -- this
+    # models "the token fires while a tool is executing," checked before the
+    # SECOND cooperative check point (the follow-up model turn).
+    real_execute = session._execute_prepared
+
+    def _execute_and_then_cancel(*args, **kwargs):
+        result = real_execute(*args, **kwargs)
+        token.cancel()
+        return result
+
+    session._execute_prepared = _execute_and_then_cancel
+
+    with pytest.raises(AgentCancelledError):
+        session.start("do the task")
+    assert session.state is AgentSessionState.FAILED
+    assert backend.session.calls == 1
+
+
+def test_cancel_before_second_tool_call_stops_before_executing_it():
+    registry, _ = fake_registry()
+    token = CancellationToken()
+    calls = [
+        turn(
+            calls=[tool_call("tool-1"), tool_call("tool-2")],
+            reason=ModelStopReason.TOOL_USE,
+        ),
+        turn("final"),
+    ]
+    backend = ScriptedBackend(calls)
+    workspace = LocalWorkspace(Path.cwd())
+    session = AgentSession(
+        backend=backend,
+        registry=registry,
+        policy=PolicyEvaluator([PermissionRule("*", "*", PermissionEffect.ALLOW)]),
+        context=ToolExecutionContext(workspace=workspace),
+        instructions="system instructions",
+        cancel_token=token,
+    )
+    real_execute = session._execute_prepared
+    executed_call_ids = []
+
+    def _execute_and_maybe_cancel(model_call, prepared, *, grant):
+        executed_call_ids.append(model_call.call_id)
+        if model_call.call_id == "tool-1":
+            token.cancel()
+        return real_execute(model_call, prepared, grant=grant)
+
+    session._execute_prepared = _execute_and_maybe_cancel
+
+    with pytest.raises(AgentCancelledError):
+        session.start("do the task")
+    # tool-1 ran (cancellation was requested only AFTER it started); tool-2
+    # must never have been dispatched.
+    assert executed_call_ids == ["tool-1"]
+
+
+def test_uncancelled_token_does_not_affect_normal_completion():
+    registry, _ = fake_registry()
+    backend = ScriptedBackend([turn("final answer")])
+    token = CancellationToken()
+    session = session_with(backend, registry, cancel_token=token)
+    outcome = session.start("do the task")
+    assert outcome.final_text == "final answer"
+    assert session.state is AgentSessionState.COMPLETED

@@ -71,14 +71,19 @@ def _error_payload(event: ModelFailed | ToolFailed) -> dict[str, Any]:
 class CanonicalReviewEventSink:
     """Maps one transient AgentSession review attempt to canonical review.* events."""
 
-    def __init__(self, runtime: RunRuntime, run_id: str, *, review_id: str) -> None:
+    def __init__(
+        self, runtime: RunRuntime, run_id: str, *, review_id: str, rules_sha256: str | None = None,
+    ) -> None:
         review_id = validate_review_id(review_id)
+        if rules_sha256 is not None and not isinstance(rules_sha256, str):
+            raise ValueError("rules_sha256 must be a string or None")
         run = runtime.get_run(run_id)
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"Review sink requires RUNNING run, got {run.status}")
         self._runtime = runtime
         self._run_id = run_id
         self._review_id = review_id
+        self._rules_sha256 = rules_sha256
         self._expected_seq = run.last_event_seq
         self._transient_execution_id: str | None = None
         self._terminal_recorded = False
@@ -122,7 +127,15 @@ class CanonicalReviewEventSink:
 
         if isinstance(event, ExecutionStarted):
             self._reject_reused_review_id()
-            self._commit([self._spec(event, RunEventType.REVIEW_STARTED, {"review_id": self._review_id})])
+            started_payload: dict[str, Any] = {"review_id": self._review_id}
+            if self._rules_sha256 is not None:
+                # Additive provenance field: omitted entirely (rather than
+                # None) when no project rules were supplied, so a sink
+                # constructed without rules_sha256 keeps emitting the exact
+                # same review.started payload shape as before this field
+                # existed.
+                started_payload["rules_sha256"] = self._rules_sha256
+            self._commit([self._spec(event, RunEventType.REVIEW_STARTED, started_payload)])
             self._started_persisted = True
             return
         if isinstance(event, ExecutionCompleted):

@@ -186,3 +186,36 @@ def test_system_instructions_forbid_routing_and_executable_output():
 def test_system_instructions_require_exact_json_and_no_markdown():
     assert "Markdown" in PLANNER_SYSTEM_INSTRUCTIONS
     assert "JSON object" in PLANNER_SYSTEM_INSTRUCTIONS
+
+
+# ---------------- rules (project rules section) ----------------
+
+
+from context_runtime.rules import ProjectRules  # noqa: E402
+
+
+def _fake_rules(text="Prefer composition over inheritance.") -> ProjectRules:
+    return ProjectRules(text=text, sha256="a" * 64, truncated=False, sources=("AGENTS.md",))
+
+
+def test_render_initial_planner_input_without_rules_is_unchanged():
+    task, context = "do the thing", _fake_context("repo context")
+    without = render_initial_planner_input(task=task, context_pack=context)
+    without_explicit_none = render_initial_planner_input(task=task, context_pack=context, rules=None)
+    assert without == without_explicit_none
+
+
+def test_render_initial_planner_input_with_rules_adds_delimited_untrusted_section():
+    rendered = render_initial_planner_input(task="do the thing", context_pack=_fake_context("c"), rules=_fake_rules())
+    assert "Prefer composition over inheritance." in rendered
+    assert "untrusted" in rendered.lower()
+    assert len(rendered) <= MAX_INITIAL_PLANNER_INPUT_CHARS
+
+
+def test_render_initial_planner_input_huge_rules_never_exceed_budget():
+    task = "Add a rate limiter to the API gateway."
+    rendered = render_initial_planner_input(
+        task=task, context_pack=_fake_context("C" * 500_000), rules=_fake_rules("R" * 500_000),
+    )
+    assert len(rendered) <= MAX_INITIAL_PLANNER_INPUT_CHARS
+    assert task in rendered

@@ -55,7 +55,7 @@ class FakeProcessRunner:
         self._results = list(results)
         self.calls = 0
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         self.calls += 1
         return self._results.pop(0)
 

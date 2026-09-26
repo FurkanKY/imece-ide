@@ -15,3 +15,11 @@ class VerificationRecordingError(VerificationRuntimeError):
 
 class VerificationExecutionError(VerificationRuntimeError):
     """An unexpected verification runtime failure occurred."""
+
+
+from agent_runtime.cancellation import OperationCancelledError
+
+
+class VerificationCancelledError(VerificationExecutionError, OperationCancelledError):
+    """A CancellationToken was observed as cancelled mid-verification; the
+    in-flight check's process tree has already been terminated."""

@@ -12,8 +12,13 @@ from typing import Protocol
 
 from acp_runtime.errors import AcpInputError
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 
-from executor_runtime.errors import ExecutorAdapterExecutionError, ExecutorAdapterInputError
+from executor_runtime.errors import (
+    ExecutorAdapterCancelledError,
+    ExecutorAdapterExecutionError,
+    ExecutorAdapterInputError,
+)
 from fix_runtime.errors import FixLoopInputError
 from fix_runtime.models import FixWorkerRequest, InitialWorkerRequest
 from fix_runtime.ports import WorkerAttemptResult
@@ -180,7 +185,8 @@ class AcpWorkerAttemptAdapter:
         return self._run_id
 
     def run(
-        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str
+        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str,
+        cancel_token: CancellationToken | None = None,
     ) -> WorkerAttemptResult:
         if not isinstance(request, (FixWorkerRequest, InitialWorkerRequest)):
             raise ExecutorAdapterInputError(
@@ -240,9 +246,27 @@ class AcpWorkerAttemptAdapter:
                     prompt_request,
                     limits=self._limits,
                     event_sink=sink,
+                    cancel_token=cancel_token,
                 )
             )
             sink.complete(acp_result)
+        except OperationCancelledError as cancellation:
+            if sink.persistence_error is not None:
+                raise ExecutorAdapterExecutionError(
+                    "ACP Worker canonical persistence is unavailable or sequence-conflicted; "
+                    "not attempting execution.failed."
+                ) from sink.persistence_error
+            try:
+                sink.fail(
+                    cancellation,
+                    error_type=type(cancellation).__name__,
+                    message="ACP Worker execution was cancelled.",
+                )
+            except Exception as terminal_failure:
+                raise ExecutorAdapterExecutionError(
+                    "ACP Worker execution and terminal failure recording both failed."
+                ) from terminal_failure
+            raise ExecutorAdapterCancelledError("ACP Worker execution was cancelled.") from cancellation
         except Exception as original_failure:
             if sink.persistence_error is not None:
                 # Canonical persistence has already been proven

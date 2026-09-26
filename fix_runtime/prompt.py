@@ -14,6 +14,8 @@ rather than being handed the (potentially large) cumulative diff by default.
 
 from __future__ import annotations
 
+from context_runtime import ProjectRules, render_bounded_rules_block
+
 from fix_runtime.errors import FixLoopInputError
 from fix_runtime.models import FixTrigger, FixTriggerKind
 
@@ -49,7 +51,7 @@ def _render_verification_preview(plan) -> str:
 
 
 def render_initial_worker_input(
-    *, task: str, plan: str | None, verification_plan=None,
+    *, task: str, plan: str | None, verification_plan=None, rules: ProjectRules | None = None,
 ) -> str:
     """Render bounded input for the FIRST Worker attempt of a Run.
 
@@ -59,6 +61,12 @@ def render_initial_worker_input(
     Planner's advisory plan (if any), and a preview of the deterministic
     verification commands that will be run afterward (so the Worker knows
     how its work will be judged) are included.
+
+    `rules` (optional, default None) is project-provided text rendered as
+    its own clearly delimited, untrusted DATA section appended at the end,
+    bounded out of whatever remains after the mandatory sections and the
+    other ancillary sections' own share. Passing rules=None reproduces the
+    exact prior (pre-rules) output.
     """
     headers_total = (
         len(_INITIAL_TRUST_NOTE) + len(_INITIAL_TASK_HEADER)
@@ -76,7 +84,8 @@ def render_initial_worker_input(
         )
 
     remaining = MAX_FIX_INPUT_CHARS - required_len
-    ancillary_budget = remaining // _INITIAL_NUM_ANCILLARY_SECTIONS
+    rules_block = render_bounded_rules_block(rules, remaining)
+    ancillary_budget = max(0, remaining - len(rules_block)) // _INITIAL_NUM_ANCILLARY_SECTIONS
 
     plan_text = plan if plan else "(not provided)"
     verification_text = _render_verification_preview(verification_plan)
@@ -86,7 +95,7 @@ def render_initial_worker_input(
         _INITIAL_PLAN_HEADER + _bounded(plan_text, ancillary_budget),
         _INITIAL_VERIFICATION_HEADER + _bounded(verification_text, ancillary_budget),
     ]
-    rendered = _INITIAL_TRUST_NOTE + _SEP.join(sections)
+    rendered = _INITIAL_TRUST_NOTE + _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_FIX_INPUT_CHARS  # defensive: proven by construction above
     return rendered
 
@@ -166,7 +175,13 @@ def _render_feedback(trigger: FixTrigger) -> str:
 
 
 def render_fix_worker_input(
-    *, task: str, plan: str | None, trigger: FixTrigger, attempt_index: int, max_fix_attempts: int
+    *,
+    task: str,
+    plan: str | None,
+    trigger: FixTrigger,
+    attempt_index: int,
+    max_fix_attempts: int,
+    rules: ProjectRules | None = None,
 ) -> str:
     """Render bounded fix-worker input with an explicit, provable budget.
 
@@ -178,6 +193,12 @@ def render_fix_worker_input(
     runtime-generated, deterministic metadata and is also never truncated.
     Only GENERATED PLAN and FIX FEEDBACK may be bounded, each to an exact,
     deterministic share of whatever remains.
+
+    `rules` (optional, default None) is project-provided text rendered as
+    its own clearly delimited, untrusted DATA section appended at the end,
+    bounded out of whatever remains after the mandatory sections and the
+    other ancillary sections' own share. Passing rules=None reproduces the
+    exact prior (pre-rules) output.
     """
     attempt_body = (
         f"attempt_index: {attempt_index}\n"
@@ -201,7 +222,8 @@ def render_fix_worker_input(
         )
 
     remaining = MAX_FIX_INPUT_CHARS - required_len
-    ancillary_budget = remaining // _NUM_ANCILLARY_SECTIONS
+    rules_block = render_bounded_rules_block(rules, remaining)
+    ancillary_budget = max(0, remaining - len(rules_block)) // _NUM_ANCILLARY_SECTIONS
 
     plan_text = plan if plan else "(not provided)"
     feedback_text = _render_feedback(trigger)
@@ -212,6 +234,6 @@ def render_fix_worker_input(
         _PLAN_HEADER + _bounded(plan_text, ancillary_budget),
         _FEEDBACK_HEADER + _bounded(feedback_text, ancillary_budget),
     ]
-    rendered = _TRUST_NOTE + _SEP.join(sections)
+    rendered = _TRUST_NOTE + _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_FIX_INPUT_CHARS  # defensive: proven by construction above
     return rendered

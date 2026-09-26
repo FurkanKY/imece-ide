@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from context_runtime import render_context_pack
+from context_runtime import ProjectRules, render_bounded_rules_block, render_context_pack
 from verification_runtime.models import VerificationReport
 
 from review_runtime.errors import ReviewInputError
@@ -119,6 +119,7 @@ def render_initial_review_input(
     diff: str,
     verification_report: VerificationReport | None,
     context_pack: Any,
+    rules: ProjectRules | None = None,
 ) -> str:
     """Render the initial Reviewer model input with explicit, bounded sections.
 
@@ -136,6 +137,12 @@ def render_initial_review_input(
     rather than silently dropping any part of them. A large optional
     plan/verification/context on its own never triggers that error — it is
     simply bounded down, deterministically, to its assigned share.
+
+    `rules` (optional, default None) is project-provided text rendered as
+    its own clearly delimited, untrusted DATA section appended after the
+    fixed sections below, bounded out of whatever remains after the
+    mandatory sections and the other ancillary sections' own share. Passing
+    rules=None reproduces the exact prior (pre-rules) output.
     """
     headers_total = (
         len(_TASK_HEADER) + len(_PLAN_HEADER) + len(_DIFF_HEADER)
@@ -153,7 +160,8 @@ def render_initial_review_input(
         )
 
     remaining = MAX_INITIAL_INPUT_CHARS - required_len
-    ancillary_budget = remaining // _NUM_ANCILLARY_SECTIONS
+    rules_block = render_bounded_rules_block(rules, remaining)
+    ancillary_budget = max(0, remaining - len(rules_block)) // _NUM_ANCILLARY_SECTIONS
 
     plan_text = plan if plan else "(not provided)"
     verification_text = _render_verification(verification_report)
@@ -166,6 +174,6 @@ def render_initial_review_input(
         _VERIFICATION_HEADER + _bounded(verification_text, ancillary_budget),
         _CONTEXT_HEADER + _bounded(context_text, ancillary_budget),
     ]
-    rendered = _SEP.join(sections)
+    rendered = _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_INITIAL_INPUT_CHARS  # defensive: proven by construction above
     return rendered

@@ -43,7 +43,7 @@ class FakeRunner:
         self.outcomes = list(outcomes)
         self.calls = []
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         self.calls.append(request)
         return self.outcomes.pop(0)
 
@@ -108,7 +108,7 @@ def test_canonical_process_error_is_check_error_and_later_check_runs(tmp_path):
     from process_runtime.errors import ProcessSpawnError  # noqa: E402
 
     class ErrorRunner(FakeRunner):
-        def run(self, workspace, request):
+        def run(self, workspace, request, *, cancel_token=None):
             self.calls.append(request)
             if len(self.calls) == 1:
                 raise ProcessSpawnError("missing executable")

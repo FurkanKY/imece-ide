@@ -5,10 +5,15 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from agent_runtime.cancellation import OperationCancelledError
 from process_runtime import ProcessRunner
 from process_runtime.errors import ProcessRuntimeError
 from process_runtime.models import ProcessResult
-from verification_runtime.errors import VerificationExecutionError, VerificationRecordingError
+from verification_runtime.errors import (
+    VerificationCancelledError,
+    VerificationExecutionError,
+    VerificationRecordingError,
+)
 from verification_runtime.events import (
     NullVerificationEventSink,
     VerificationCheckCompleted,
@@ -16,6 +21,7 @@ from verification_runtime.events import (
     VerificationCheckStarted,
     VerificationCompleted,
     VerificationEventSink,
+    VerificationInterrupted,
     VerificationStarted,
 )
 from verification_runtime.models import (
@@ -70,6 +76,7 @@ class VerificationRunner:
         plan: VerificationPlan,
         *,
         verification_id: str | None = None,
+        cancel_token=None,
     ) -> VerificationReport:
         if not isinstance(plan, VerificationPlan):
             raise VerificationExecutionError("VerificationRunner requires VerificationPlan")
@@ -85,7 +92,12 @@ class VerificationRunner:
         for check in plan.checks:
             self._emit(VerificationCheckStarted(verification_id, check))
             try:
-                process_result = self._process_runner.run(workspace, check.request)
+                process_result = self._process_runner.run(workspace, check.request, cancel_token=cancel_token)
+            except OperationCancelledError as exc:
+                self._emit(VerificationInterrupted(verification_id, plan.plan_id, "cancelled"))
+                raise VerificationCancelledError(
+                    f"Verification cancelled during check {check.check_id!r}: {exc}"
+                ) from exc
             except ProcessRuntimeError as exc:
                 result = VerificationCheckResult(
                     check_id=check.check_id,

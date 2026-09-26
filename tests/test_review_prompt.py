@@ -182,3 +182,40 @@ def test_ancillary_sections_never_individually_exceed_their_assigned_budget():
     # Each ancillary section body cannot exceed its header + assigned budget.
     assert len(rendered) <= MAX_INITIAL_INPUT_CHARS
     assert len(rendered) <= overhead + len(task) + len(diff) + 3 * ancillary_budget
+
+
+# ---------------- rules (project rules section) ----------------
+
+
+from context_runtime.rules import ProjectRules  # noqa: E402
+
+
+def _fake_rules(text="Never log secrets.") -> ProjectRules:
+    return ProjectRules(text=text, sha256="a" * 64, truncated=False, sources=("AGENTS.md",))
+
+
+def test_render_initial_review_input_without_rules_is_unchanged():
+    kwargs = dict(task="t", plan=None, diff="diff", verification_report=None, context_pack=FakePack("c"))
+    without = render_initial_review_input(**kwargs)
+    without_explicit_none = render_initial_review_input(**kwargs, rules=None)
+    assert without == without_explicit_none
+
+
+def test_render_initial_review_input_with_rules_adds_delimited_untrusted_section():
+    rendered = render_initial_review_input(
+        task="t", plan=None, diff="diff", verification_report=None, context_pack=FakePack("c"), rules=_fake_rules(),
+    )
+    assert "Never log secrets." in rendered
+    assert "untrusted" in rendered.lower()
+    assert len(rendered) <= MAX_INITIAL_INPUT_CHARS
+
+
+def test_render_initial_review_input_huge_rules_never_exceed_budget():
+    task, diff = "Add a rate limiter.", "D" * 5_000
+    rendered = render_initial_review_input(
+        task=task, plan="P" * 500_000, diff=diff, verification_report=None,
+        context_pack=FakePack("C" * 500_000), rules=_fake_rules("R" * 500_000),
+    )
+    assert len(rendered) <= MAX_INITIAL_INPUT_CHARS
+    assert task in rendered
+    assert diff in rendered

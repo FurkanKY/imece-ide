@@ -133,9 +133,9 @@ def test_canonical_review_recorder_used_as_sink(tmp_path):
     captured = {}
     original_init = CanonicalReviewEventSink.__init__
 
-    def _capturing_init(self, runtime, run_id, *, review_id):
+    def _capturing_init(self, runtime, run_id, *, review_id, rules_sha256=None):
         captured["review_id"] = review_id
-        return original_init(self, runtime, run_id, review_id=review_id)
+        return original_init(self, runtime, run_id, review_id=review_id, rules_sha256=rules_sha256)
 
     runtime, run = setup_runtime(tmp_path)
     reviewer = ReviewerRunner(ScriptedBackend([_completed_turn(_review_json("APPROVED"))]))

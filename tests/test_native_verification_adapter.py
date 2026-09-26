@@ -45,7 +45,7 @@ class FakeProcessRunner:
         self._results = list(results)
         self.calls: list[tuple[object, ProcessRequest]] = []
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         self.calls.append((workspace, request))
         result = self._results.pop(0)
         if isinstance(result, BaseException):

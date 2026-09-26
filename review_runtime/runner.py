@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from agent_runtime.backend import ModelBackend
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.errors import AgentRuntimeError
 from agent_runtime.models import AgentLimits, ApprovalPause
 from agent_runtime.session import AgentSession
-from context_runtime import ContextEngine
+from context_runtime import ContextEngine, load_project_rules
 from context_runtime.models import ContextBudget
 from context_runtime.ranking import MAX_QUERY_CHARS
 from tool_runtime.models import ToolExecutionContext
@@ -16,7 +17,12 @@ from tool_runtime.registry import ToolRegistry
 from tool_runtime.tools.repository import register_repository_tools
 from tool_runtime.tools.workspace_files import register_workspace_read_tools
 
-from review_runtime.errors import ReviewExecutionError, ReviewInputError, ReviewProtocolError
+from review_runtime.errors import (
+    ReviewCancelledError,
+    ReviewExecutionError,
+    ReviewInputError,
+    ReviewProtocolError,
+)
 from review_runtime.models import ReviewReport, ReviewRequest, new_review_id, validate_review_id
 from review_runtime.parser import parse_review_decision
 from review_runtime.prompt import REVIEWER_SYSTEM_INSTRUCTIONS, render_initial_review_input
@@ -70,6 +76,7 @@ class ReviewerRunner:
         *,
         recorder: ReviewRecorder | None = None,
         review_id: str | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> ReviewReport:
         if not isinstance(request, ReviewRequest):
             raise ReviewInputError("ReviewerRunner.run requires a ReviewRequest.")
@@ -79,12 +86,14 @@ class ReviewerRunner:
         query = request.task[:MAX_QUERY_CHARS]
         context_pack = self._context_engine.build(workspace, query, _REVIEW_CONTEXT_BUDGET)
 
+        rules = load_project_rules(workspace.root)
         rendered_input = render_initial_review_input(
             task=request.task,
             plan=request.plan,
             diff=request.diff,
             verification_report=request.verification_report,
             context_pack=context_pack,
+            rules=rules,
         )
 
         registry = _reviewer_registry(self._context_engine)
@@ -100,10 +109,13 @@ class ReviewerRunner:
             limits=self._limits,
             event_sink=recorder,
             execution_id=f"review_exec_{review_id}",
+            cancel_token=cancel_token,
         )
 
         try:
             outcome = session.start(rendered_input)
+        except OperationCancelledError as exc:
+            raise ReviewCancelledError(f"Reviewer AgentSession cancelled: {exc}") from exc
         except AgentRuntimeError as exc:
             raise ReviewExecutionError(f"Reviewer AgentSession failed: {exc}") from exc
 

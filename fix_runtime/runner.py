@@ -10,8 +10,10 @@ construction, or ProcessRunner internals directly.
 
 from __future__ import annotations
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from change_runtime.models import WorkspaceChangeSet
 from change_runtime.provider import ChangeProvider
+from context_runtime import load_project_rules
 from review_runtime.errors import ReviewInputError
 from review_runtime.models import ReviewReport, ReviewRequest, ReviewVerdict, new_review_id
 from run_runtime.completion import RunCompletionGate
@@ -21,7 +23,7 @@ from run_runtime.fix_loop import CanonicalFixLoopRecorder
 from run_runtime.service import RunRuntime
 from verification_runtime.models import VerificationReport, VerificationStatus, new_verification_id
 
-from fix_runtime.errors import FixLoopExecutionError, FixLoopInputError
+from fix_runtime.errors import FixLoopCancelledError, FixLoopExecutionError, FixLoopInputError
 from fix_runtime.models import (
     FixLoopReport,
     FixLoopRequest,
@@ -69,6 +71,7 @@ class FixLoopRunner:
         request: FixLoopRequest,
         *,
         fix_loop_id: str | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> FixLoopReport:
         if not isinstance(request, FixLoopRequest):
             raise FixLoopInputError("FixLoopRunner.run requires a FixLoopRequest.")
@@ -92,7 +95,12 @@ class FixLoopRunner:
         recorder.start()
 
         try:
-            return self._run_attempts(run_id, workspace, request, fix_loop_id, recorder, trigger)
+            return self._run_attempts(run_id, workspace, request, fix_loop_id, recorder, trigger, cancel_token)
+        except OperationCancelledError as exc:
+            self._best_effort_interrupt(fix_loop_id, recorder, exc)
+            if isinstance(exc, FixLoopCancelledError):
+                raise
+            raise FixLoopCancelledError(f"Fix loop cancelled: {exc}") from exc
         except FixLoopExecutionError as exc:
             self._best_effort_fail(run_id, fix_loop_id, recorder, exc)
             raise
@@ -102,6 +110,7 @@ class FixLoopRunner:
     def _run_attempts(
         self, run_id, workspace, request: FixLoopRequest, fix_loop_id: str,
         recorder: CanonicalFixLoopRecorder, trigger: FixTrigger,
+        cancel_token: CancellationToken | None,
     ) -> FixLoopReport:
         current_trigger = trigger
         attempts_used = 0
@@ -110,6 +119,8 @@ class FixLoopRunner:
         last_review_report = None
 
         for attempt_index in range(1, request.max_fix_attempts + 1):
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
             attempts_used = attempt_index
             before = self._capture(workspace)
 
@@ -126,12 +137,12 @@ class FixLoopRunner:
                 before_diff_sha256=before.diff_sha256,
             )
 
-            rendered_input = self._render_worker_input(request, current_trigger, attempt_index)
+            rendered_input = self._render_worker_input(workspace, request, current_trigger, attempt_index)
             worker_request = FixWorkerRequest(
                 task=request.task, trigger=current_trigger, attempt_index=attempt_index, plan=request.plan,
                 rendered_input=rendered_input,
             )
-            worker_result = self._run_worker(workspace, worker_request, worker_execution_id)
+            worker_result = self._run_worker(workspace, worker_request, worker_execution_id, cancel_token)
             self._require_execution_completed(run_id, worker_result.execution_id)
 
             after = self._capture(workspace)
@@ -158,7 +169,9 @@ class FixLoopRunner:
                 )
 
             verification_id = new_verification_id()
-            verification_report = self._run_verification(workspace, request.verification_plan, verification_id)
+            verification_report = self._run_verification(
+                workspace, request.verification_plan, verification_id, cancel_token,
+            )
             last_verification_report = verification_report
             status = verification_report.status
 
@@ -203,7 +216,7 @@ class FixLoopRunner:
             review_changes = self._capture(workspace)
             review_request = self._build_review_request(request, review_changes, verification_report)
             review_id = new_review_id()
-            review_report = self._run_reviewer(workspace, review_request, review_id)
+            review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token)
             self._validate_review_provenance(review_report, review_id, verification_id, review_changes)
             last_review_report = review_report
 
@@ -277,18 +290,27 @@ class FixLoopRunner:
             )
         return result
 
-    def _render_worker_input(self, request: FixLoopRequest, trigger: FixTrigger, attempt_index: int) -> str:
+    def _render_worker_input(
+        self, workspace, request: FixLoopRequest, trigger: FixTrigger, attempt_index: int
+    ) -> str:
         try:
+            rules = load_project_rules(workspace.root)
             return render_fix_worker_input(
                 task=request.task, plan=request.plan, trigger=trigger,
                 attempt_index=attempt_index, max_fix_attempts=request.max_fix_attempts,
+                rules=rules,
             )
         except Exception as exc:
             raise FixLoopExecutionError(f"Fix worker input could not be rendered: {exc}") from exc
 
-    def _run_worker(self, workspace, worker_request: FixWorkerRequest, execution_id: str) -> WorkerAttemptResult:
+    def _run_worker(
+        self, workspace, worker_request: FixWorkerRequest, execution_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> WorkerAttemptResult:
         try:
-            result = self._worker.run(workspace, worker_request, execution_id=execution_id)
+            result = self._worker.run(workspace, worker_request, execution_id=execution_id, cancel_token=cancel_token)
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise FixLoopExecutionError(f"Worker port failed: {exc}") from exc
         if not isinstance(result, WorkerAttemptResult) or result.execution_id != execution_id:
@@ -319,9 +341,16 @@ class FixLoopRunner:
                 f"(found {matching[-1].type!r})."
             )
 
-    def _run_verification(self, workspace, verification_plan, verification_id: str):
+    def _run_verification(
+        self, workspace, verification_plan, verification_id: str,
+        cancel_token: CancellationToken | None = None,
+    ):
         try:
-            report = self._verification.run(workspace, verification_plan, verification_id=verification_id)
+            report = self._verification.run(
+                workspace, verification_plan, verification_id=verification_id, cancel_token=cancel_token,
+            )
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise FixLoopExecutionError(f"Verification port failed: {exc}") from exc
         if not isinstance(report, VerificationReport):
@@ -341,9 +370,14 @@ class FixLoopRunner:
         except ReviewInputError as exc:
             raise FixLoopExecutionError(f"Cumulative change set could not be reviewed: {exc}") from exc
 
-    def _run_reviewer(self, workspace, review_request: ReviewRequest, review_id: str):
+    def _run_reviewer(
+        self, workspace, review_request: ReviewRequest, review_id: str,
+        cancel_token: CancellationToken | None = None,
+    ):
         try:
-            result = self._reviewer.run(workspace, review_request, review_id=review_id)
+            result = self._reviewer.run(workspace, review_request, review_id=review_id, cancel_token=cancel_token)
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise FixLoopExecutionError(f"Reviewer port failed: {exc}") from exc
         if not isinstance(result, ReviewReport):
@@ -363,6 +397,31 @@ class FixLoopRunner:
             raise FixLoopExecutionError(
                 "Reviewer port returned evidence that violates the fix loop's provenance contract."
             )
+
+    # ---------------- cancellation best effort ----------------
+
+    def _best_effort_interrupt(
+        self, fix_loop_id: str, recorder: CanonicalFixLoopRecorder, exc: Exception,
+    ) -> None:
+        """Settle the fix loop's own canonical trail on cancellation, WITHOUT
+        touching the completion gate: the Run itself is deliberately left
+        RUNNING here so pipeline_runtime.PipelineRunner (the only caller that
+        hands FixLoopRunner a cancel_token) can record the Run-level
+        run.cancelled outcome itself -- recording fail_fix_loop() here would
+        settle RUN_FAILED and make that subsequent run.cancelled impossible."""
+        try:
+            if recorder.has_active_attempt:
+                recorder.attempt_interrupted(reason="cancelled", error_type=type(exc).__name__)
+        except EventSequenceError:
+            raise
+        except Exception:
+            return
+        try:
+            recorder.interrupted(reason="cancelled")
+        except EventSequenceError:
+            raise
+        except Exception:
+            return
 
     # ---------------- infrastructure-failure best effort ----------------
 

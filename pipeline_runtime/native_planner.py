@@ -7,14 +7,15 @@ Reviewer adapters (see tests/test_native_attempt_adapters_integration.py).
 from __future__ import annotations
 
 from agent_runtime.backend import ModelBackend
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.models import AgentLimits
-from context_runtime import ContextEngine
+from context_runtime import ContextEngine, load_project_rules
 from planner_runtime.models import PlanReport
 from planner_runtime.runner import PlannerRunner
 from run_runtime.planner import CanonicalPlannerEventSink
 from run_runtime.service import RunRuntime
 
-from pipeline_runtime.errors import PipelineExecutionError, PipelineInputError
+from pipeline_runtime.errors import PipelineCancelledError, PipelineExecutionError, PipelineInputError
 
 
 class NativePlanAttemptRunner:
@@ -42,14 +43,26 @@ class NativePlanAttemptRunner:
     def run_id(self) -> str:
         return self._run_id
 
-    def run(self, workspace, task: str, *, plan_id: str) -> PlanReport:
+    def run(
+        self, workspace, task: str, *, plan_id: str, cancel_token: CancellationToken | None = None,
+    ) -> PlanReport:
+        # Reading rules here (in addition to PlannerRunner.run()'s own read
+        # of the same workspace root) only costs a cheap, read-only file
+        # check; it lets the canonical sink attach provenance (rules_sha256)
+        # to plan.started without PlannerRunner needing to report it back.
+        rules = load_project_rules(workspace.root)
         try:
-            sink = CanonicalPlannerEventSink(self._runtime, self._run_id, plan_id=plan_id)
+            sink = CanonicalPlannerEventSink(
+                self._runtime, self._run_id, plan_id=plan_id,
+                rules_sha256=rules.sha256 if rules is not None else None,
+            )
         except ValueError as exc:
             raise PipelineInputError(f"Cannot construct canonical Planner sink: {exc}") from exc
 
         try:
-            report = self._planner.run(workspace, task, recorder=sink, plan_id=plan_id)
+            report = self._planner.run(workspace, task, recorder=sink, plan_id=plan_id, cancel_token=cancel_token)
+        except OperationCancelledError as exc:
+            raise PipelineCancelledError(f"Planner port cancelled: {exc}") from exc
         except Exception as exc:
             raise PipelineExecutionError(f"Planner port failed: {exc}") from exc
 

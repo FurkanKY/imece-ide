@@ -81,7 +81,7 @@ class _AcpClient:
         self.error = error
         self.calls = []
 
-    async def run(self, launch, request, *, limits=None, event_sink=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
         self.calls.append((launch, request, limits, event_sink))
         if self.error is not None:
             raise self.error
@@ -98,7 +98,7 @@ class _Verification:
         self.runtime = runtime
         self.run_id = run_id
 
-    def run(self, workspace, plan, *, verification_id):
+    def run(self, workspace, plan, *, verification_id, cancel_token=None):
         report = VerificationReport(
             verification_id=verification_id, plan_id=plan.plan_id,
             results=(VerificationCheckResult("check-1", "Check", VerificationStatus.PASS, _process(0)),),
@@ -131,7 +131,7 @@ class _Reviewer:
         self.runtime = runtime
         self.run_id = run_id
 
-    def run(self, workspace, request, *, review_id):
+    def run(self, workspace, request, *, review_id, cancel_token=None):
         report = ReviewReport(
             review_id=review_id, verdict=ReviewVerdict.APPROVED, summary="approved", findings=(),
             repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,

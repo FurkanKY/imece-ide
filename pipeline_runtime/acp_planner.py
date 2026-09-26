@@ -42,8 +42,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.events import ExecutionCompleted, ExecutionStarted
-from context_runtime import ContextEngine
+from context_runtime import ContextEngine, load_project_rules
 from context_runtime.ranking import MAX_QUERY_CHARS
 from planner_runtime.errors import PlannerProtocolError
 from planner_runtime.models import PlanReport, validate_plan_id
@@ -57,7 +58,7 @@ from acp_runtime.models import AcpClientLimits
 from executor_runtime.acp_semantic import run_acp_semantic_prompt, wrap_system_instructions_for_acp_prompt
 from executor_runtime.acp_worker import AcpWorkerLaunchProfile, resolve_acp_worker_launch
 
-from pipeline_runtime.errors import PipelineExecutionError, PipelineInputError
+from pipeline_runtime.errors import PipelineCancelledError, PipelineExecutionError, PipelineInputError
 
 
 class AcpPlanAttemptRunner:
@@ -95,12 +96,18 @@ class AcpPlanAttemptRunner:
     def run_id(self) -> str:
         return self._run_id
 
-    def run(self, workspace, task: str, *, plan_id: str) -> PlanReport:
+    def run(
+        self, workspace, task: str, *, plan_id: str, cancel_token: CancellationToken | None = None,
+    ) -> PlanReport:
         task = _validate_task(task)
         plan_id = validate_plan_id(plan_id)
 
+        rules = load_project_rules(workspace.root)
         try:
-            sink = CanonicalPlannerEventSink(self._runtime, self._run_id, plan_id=plan_id)
+            sink = CanonicalPlannerEventSink(
+                self._runtime, self._run_id, plan_id=plan_id,
+                rules_sha256=rules.sha256 if rules is not None else None,
+            )
         except ValueError as exc:
             raise PipelineInputError(f"Cannot construct canonical Planner sink: {exc}") from exc
 
@@ -108,7 +115,7 @@ class AcpPlanAttemptRunner:
 
         query = task[:MAX_QUERY_CHARS]
         context_pack = self._context_engine.build(workspace, query, _PLANNER_CONTEXT_BUDGET)
-        rendered_task_input = render_initial_planner_input(task=task, context_pack=context_pack)
+        rendered_task_input = render_initial_planner_input(task=task, context_pack=context_pack, rules=rules)
         acp_prompt = wrap_system_instructions_for_acp_prompt(PLANNER_SYSTEM_INSTRUCTIONS, rendered_task_input)
 
         launch_spec = resolve_acp_worker_launch(self._launch_profile)
@@ -130,7 +137,11 @@ class AcpPlanAttemptRunner:
                 workspace=workspace,
                 prompt=acp_prompt,
                 limits=self._limits,
+                cancel_token=cancel_token,
             )
+        except OperationCancelledError as cancellation:
+            self._fail(sink, plan_id, cancellation)
+            raise PipelineCancelledError("Planner ACP session cancelled.") from cancellation
         except Exception as original_failure:
             self._fail(sink, plan_id, original_failure)
             raise PipelineExecutionError("Planner ACP session failed.") from original_failure

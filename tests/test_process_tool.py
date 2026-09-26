@@ -52,7 +52,7 @@ class CountingRunner:
         self.result = result
         self.calls = []
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         self.calls.append((workspace, request))
         return self.result
 
@@ -198,7 +198,7 @@ def test_run_process_ask_approval_wrong_then_approve_executes_once_and_propagate
 
 def test_run_process_infrastructure_failure_translates_at_dispatcher_and_agent_boundaries(tmp_path):
     class FailingRunner:
-        def run(self, workspace, request):
+        def run(self, workspace, request, *, cancel_token=None):
             raise ProcessSpawnError("executable unavailable")
 
     registry = registry_with_process(FailingRunner())

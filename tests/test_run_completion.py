@@ -58,7 +58,7 @@ class FakeProcessRunner:
         self.exit_code = exit_code
         self.calls = []
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         self.calls.append(request)
         return ProcessResult(
             argv=request.argv,

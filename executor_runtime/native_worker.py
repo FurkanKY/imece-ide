@@ -11,6 +11,7 @@ FixLoopRunner/RunCompletionGate responsibilities.
 from __future__ import annotations
 
 from agent_runtime.backend import ModelBackend
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.errors import AgentRuntimeError
 from agent_runtime.models import AgentLimits, ApprovalPause
 from agent_runtime.session import AgentSession
@@ -28,7 +29,11 @@ from fix_runtime.ports import WorkerAttemptResult
 from run_runtime.native_agent import CanonicalAgentEventSink
 from run_runtime.service import RunRuntime
 
-from executor_runtime.errors import ExecutorAdapterExecutionError, ExecutorAdapterInputError
+from executor_runtime.errors import (
+    ExecutorAdapterCancelledError,
+    ExecutorAdapterExecutionError,
+    ExecutorAdapterInputError,
+)
 
 _DEFAULT_WORKER_LIMITS = AgentLimits(
     max_model_turns=20,
@@ -108,7 +113,8 @@ class NativeWorkerAttemptAdapter:
         return self._run_id
 
     def run(
-        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str
+        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str,
+        cancel_token: CancellationToken | None = None,
     ) -> WorkerAttemptResult:
         if not isinstance(request, (FixWorkerRequest, InitialWorkerRequest)):
             raise ExecutorAdapterInputError(
@@ -141,10 +147,13 @@ class NativeWorkerAttemptAdapter:
             limits=self._limits,
             event_sink=sink,
             execution_id=execution_id,
+            cancel_token=cancel_token,
         )
 
         try:
             outcome = session.start(request.rendered_input)
+        except OperationCancelledError as exc:
+            raise ExecutorAdapterCancelledError(f"Worker AgentSession cancelled: {exc}") from exc
         except AgentRuntimeError as exc:
             raise ExecutorAdapterExecutionError(f"Worker AgentSession failed: {exc}") from exc
 

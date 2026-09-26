@@ -11,9 +11,11 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -33,7 +35,7 @@ from executor_runtime.native_worker import NativeWorkerAttemptAdapter  # noqa: E
 from pipeline_runtime.native_planner import NativePlanAttemptRunner  # noqa: E402
 from process_runtime.models import ProcessResult  # noqa: E402
 from review_runtime.runner import ReviewerRunner  # noqa: E402
-from run_runtime import RunRuntime, RunStore  # noqa: E402
+from run_runtime import RunRuntime, RunStatus, RunStore  # noqa: E402
 from webhost import state  # noqa: E402
 from webhost.bridge import HostBridge  # noqa: E402
 
@@ -126,7 +128,7 @@ class FakeProcessRunner:
     def __init__(self, results):
         self._results = list(results)
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         return self._results.pop(0)
 
 
@@ -447,6 +449,112 @@ def test_pipeline_cancel_before_start_stops_run(bridge, qapp, monkeypatch, git_r
     assert finished["status"] in ("cancelled", "done", "failed")
     from webhost.api import run as run_api
     assert run_api._active["workspace"] is None
+
+
+class _BlockingThenToolUseSession:
+    """First respond() blocks (simulating an in-flight model HTTP call)
+    until told to proceed, then returns a TOOL_USE turn; a second respond()
+    would return the completion turn, but must NEVER be reached once the
+    caller cancels while the tool call is pending (see AgentSession's
+    per-tool-call cooperative check)."""
+
+    def __init__(self, release: threading.Event, entered: threading.Event):
+        self._release = release
+        self._entered = entered
+        self._calls = 0
+
+    def respond(self, input_items):
+        self._calls += 1
+        if self._calls == 1:
+            self._entered.set()
+            self._release.wait(timeout=5)
+            return ModelTurn(
+                "", (ModelToolCall("c1", "write_file", {"path": "a.txt", "content": "fixed\n"}),),
+                ModelStopReason.TOOL_USE, ModelUsage(),
+            )
+        raise AssertionError("respond() must not be called again after cancellation")
+
+
+def test_pipeline_cancel_mid_native_worker_stops_promptly_and_leaves_no_children(bridge, qapp, monkeypatch, git_repo):
+    """F7: run.cancel during a blocking native Worker turn stops the run
+    promptly (well under the fake turn's own unblocking + a couple of
+    Qt event-loop ticks), settles CANCELLED, disposes the worktree, and
+    leaves no leftover child processes."""
+    release = threading.Event()
+    entered = threading.Event()
+
+    class _BlockingBackend:
+        def __init__(self):
+            self.session = _BlockingThenToolUseSession(release, entered)
+
+        def open_session(self, *, instructions, tools, allow_parallel_tool_calls):
+            return self.session
+
+    def factory(runtime, run_id, routing, **kwargs):
+        planner = NativePlanAttemptRunner(runtime, run_id, ScriptedBackend([_completed_turn(_plan_json())]))
+        worker = NativeWorkerAttemptAdapter(runtime, run_id, _BlockingBackend())
+        reviewer = NativeReviewAttemptAdapter(
+            runtime, run_id, ReviewerRunner(ScriptedBackend([_completed_turn(
+                '{"verdict":"APPROVED","summary":"iyi","findings":[]}'
+            )])),
+        )
+        verification = NativeVerificationAttemptAdapter(
+            runtime, run_id, process_runner=FakeProcessRunner([ProcessResult(
+                argv=("true",), cwd=".", exit_code=0, timed_out=False, duration_ms=1,
+                stdout="", stderr="", stdout_truncated=False, stderr_truncated=False,
+                stdout_bytes=0, stderr_bytes=0,
+            )]),
+        )
+        return PipelinePorts(
+            planner=planner, worker=worker, reviewer=reviewer,
+            verification=verification, change_provider=GitWorktreeChangeProvider(),
+        )
+
+    monkeypatch.setattr(engine_factory, "build_pipeline_ports", factory)
+    events = []
+    bridge.event.connect(lambda raw: events.append(json.loads(raw)))
+    r = rpc(bridge, "run.start", {"task": "a.txt'yi düzelt", "routing": _all_native_routing()})
+    assert r["ok"], r
+    run_id = r["result"]["runId"]
+
+    this_process = psutil.Process()
+    children_before = set(p.pid for p in this_process.children(recursive=True))
+
+    # Wait until the fake Worker turn is actually in flight before cancelling
+    # -- this is the "blocking native worker" moment the spec asks for.
+    assert entered.wait(timeout=5.0), "worker turn hiç başlamadı"
+    cancel_started = time.monotonic()
+    rpc(bridge, "run.cancel", {}, call_id=2)
+    # Unblock the in-flight "model call" only AFTER cancel was requested --
+    # cancellation must be observed at the NEXT cooperative check point
+    # (before the tool call this turn requested), not mid-call.
+    release.set()
+
+    def is_finished():
+        return any(e["channel"] == "run.finished" for e in events)
+
+    assert _wait_until(is_finished, qapp, timeout=10.0), f"olaylar: {events}"
+    elapsed = time.monotonic() - cancel_started
+    assert elapsed < 2.0, f"iptal çok geç sonuçlandı: {elapsed:.2f}s"
+
+    finished = _finished_payload(events, run_id)
+    assert finished["status"] == "cancelled"
+
+    from webhost.api import run as run_api
+    assert run_api._active["workspace"] is None
+
+    runtime = state.get_run_runtime()
+    assert runtime.get_run(run_id).status is RunStatus.CANCELLED
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        children_after = set(p.pid for p in this_process.children(recursive=True))
+        if children_after <= children_before:
+            break
+        time.sleep(0.05)
+    else:
+        children_after = set(p.pid for p in this_process.children(recursive=True))
+    assert children_after <= children_before, f"artık (leftover) alt süreçler: {children_after - children_before}"
 
 
 def _fake_legacy_generator(root, task, routing):

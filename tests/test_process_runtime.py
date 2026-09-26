@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from process_runtime import ProcessInputError, ProcessRequest, ProcessResult, ProcessRunner  # noqa: E402
 from process_runtime.capture import BoundedCapture, CAPTURE_LIMIT  # noqa: E402
-from process_runtime.errors import ProcessSpawnError  # noqa: E402
+from process_runtime.errors import ProcessCancelledError, ProcessSpawnError  # noqa: E402
+from agent_runtime.cancellation import CancellationToken  # noqa: E402
 from workspace.local import LocalWorkspace  # noqa: E402
 
 
@@ -83,6 +84,53 @@ def test_timeout_terminates_process_tree(workspace, tmp_path):
     while psutil.pid_exists(child_pid) and time.monotonic() < deadline:
         time.sleep(0.01)
     assert not psutil.pid_exists(child_pid)
+
+
+def test_cancel_token_terminates_process_tree(workspace, tmp_path):
+    """F7: cancelling a CancellationToken mid-wait kills the process tree
+    exactly like a timeout, and raises ProcessCancelledError (never a
+    ProcessResult -- callers must not mistake this for an ordinary FAIL)."""
+    child_pid_file = tmp_path / "child.pid"
+    code = (
+        "import pathlib, subprocess, sys, time; "
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(30)"
+    )
+    token = CancellationToken()
+
+    import threading
+
+    def _cancel_soon():
+        deadline = time.monotonic() + 2
+        while not child_pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        token.cancel()
+
+    canceller = threading.Thread(target=_cancel_soon)
+    canceller.start()
+    try:
+        with pytest.raises(ProcessCancelledError):
+            ProcessRunner().run(
+                workspace,
+                ProcessRequest(py(code, str(child_pid_file)), timeout_ms=30_000),
+                cancel_token=token,
+            )
+    finally:
+        canceller.join(timeout=5)
+
+    assert child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text())
+    deadline = time.monotonic() + 2
+    while psutil.pid_exists(child_pid) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not psutil.pid_exists(child_pid)
+
+
+def test_cancel_token_never_cancelled_runs_normally(workspace):
+    token = CancellationToken()
+    result = ProcessRunner().run(workspace, ProcessRequest(py("print('hi')")), cancel_token=token)
+    assert result.exit_code == 0
+    assert "hi" in result.stdout
 
 
 def test_safe_environment_filters_parent_secret_and_allows_explicit_value(workspace, monkeypatch):

@@ -12,10 +12,17 @@ from typing import Mapping
 
 from process_runtime.capture import BoundedCapture
 from process_runtime.cleanup import terminate_process_tree
-from process_runtime.errors import ProcessCleanupError, ProcessRuntimeError, ProcessSpawnError
+from process_runtime.errors import (
+    ProcessCancelledError,
+    ProcessCleanupError,
+    ProcessRuntimeError,
+    ProcessSpawnError,
+)
 from process_runtime.models import ProcessRequest, ProcessResult
 from workspace.base import resolve_within_workspace
 from workspace.errors import WorkspaceBoundaryError
+
+_CANCEL_POLL_S = 0.15
 
 _SAFE_ENV_KEYS = {
     "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR",
@@ -68,7 +75,14 @@ def _resolve_executable(executable: str, workspace, environment: Mapping[str, st
 
 
 class ProcessRunner:
-    def run(self, workspace, request: ProcessRequest) -> ProcessResult:
+    def run(self, workspace, request: ProcessRequest, *, cancel_token=None) -> ProcessResult:
+        """`cancel_token` is duck-typed (only `.cancelled` is read) so
+        process_runtime never needs to import agent_runtime -- pass an
+        agent_runtime.cancellation.CancellationToken or anything exposing
+        the same boolean property. Checked in bounded polling slices
+        (`_CANCEL_POLL_S`) while waiting on the process; on cancellation the
+        process tree is killed exactly like a timeout and
+        ProcessCancelledError is raised instead of a ProcessResult."""
         if not isinstance(request, ProcessRequest):
             raise ProcessRuntimeError("ProcessRunner requires ProcessRequest")
         cwd = _cwd_path(workspace, request.cwd)
@@ -106,25 +120,42 @@ class ProcessRunner:
         stdout_thread.start()
         stderr_thread.start()
         timed_out = False
+        cancelled = False
+        deadline = started + request.timeout_ms / 1000
         try:
-            process.wait(timeout=request.timeout_ms / 1000)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            cleanup_error = None
-            try:
-                terminate_process_tree(process.pid)
-            except ProcessCleanupError as exc:
-                cleanup_error = exc
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired as exc:
-                if cleanup_error is None:
-                    cleanup_error = ProcessCleanupError(
-                        "Timed-out process did not terminate after cleanup"
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                if cancel_token is not None and cancel_token.cancelled:
+                    cancelled = True
+                    break
+                try:
+                    process.wait(timeout=min(_CANCEL_POLL_S, remaining))
+                    break  # process exited on its own
+                except subprocess.TimeoutExpired:
+                    continue
+            if timed_out or cancelled:
+                cleanup_error = None
+                try:
+                    terminate_process_tree(process.pid)
+                except ProcessCleanupError as exc:
+                    cleanup_error = exc
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired as exc:
+                    if cleanup_error is None:
+                        cleanup_error = ProcessCleanupError(
+                            "Process did not terminate after cleanup"
+                        )
+                        cleanup_error.__cause__ = exc
+                if cleanup_error is not None:
+                    raise cleanup_error
+                if cancelled:
+                    raise ProcessCancelledError(
+                        f"Process cancelled while waiting: {request.argv[0]!r}"
                     )
-                    cleanup_error.__cause__ = exc
-            if cleanup_error is not None:
-                raise cleanup_error
         finally:
             stdout_thread.join(timeout=3)
             stderr_thread.join(timeout=3)

@@ -39,3 +39,12 @@ class AcpEventSinkError(AcpRuntimeError):
 
 class AcpCleanupError(AcpRuntimeError):
     """The ACP subprocess tree could not be fully terminated."""
+
+
+from agent_runtime.cancellation import OperationCancelledError
+
+
+class AcpCancelledError(AcpRuntimeError, OperationCancelledError):
+    """A CancellationToken was observed as cancelled while a prompt was in
+    flight; session/cancel was sent and the subprocess tree torn down
+    before this was raised."""

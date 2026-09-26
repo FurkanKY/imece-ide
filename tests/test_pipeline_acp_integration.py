@@ -70,7 +70,7 @@ class FakeProcessRunner:
     def __init__(self, results):
         self._results = list(results)
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         return self._results.pop(0)
 
 

@@ -9,6 +9,7 @@ from enum import StrEnum
 from typing import Any
 
 from agent_runtime.backend import ModelBackend, ModelSession
+from agent_runtime.cancellation import CancellationToken
 from agent_runtime.events import (
     AgentEventSink,
     ApprovalRequested,
@@ -31,6 +32,7 @@ from agent_runtime.errors import (
     AgentRuntimeError,
     AgentApprovalError,
     AgentBackendError,
+    AgentCancelledError,
     AgentIncompleteError,
     AgentInputError,
     AgentLifecycleError,
@@ -145,9 +147,13 @@ class AgentSession:
         limits: AgentLimits | None = None,
         event_sink: AgentEventSink | None = None,
         execution_id: str | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> None:
         if not isinstance(instructions, str):
             raise AgentInputError("AgentSession.instructions string olmalı.")
+        if cancel_token is not None and not isinstance(cancel_token, CancellationToken):
+            raise AgentInputError("AgentSession.cancel_token must be a CancellationToken.")
+        self._cancel_token = cancel_token
         self._backend = backend
         self._registry = registry
         self._policy = policy
@@ -243,6 +249,7 @@ class AgentSession:
     def resume(self, decision: ApprovalDecision) -> AgentOutcome | ApprovalPause:
         if self._state is not AgentSessionState.WAITING_APPROVAL or self._pending is None:
             raise AgentLifecycleError("Session şu anda approval beklemiyor.")
+        self._check_cancel()
         pending = self._pending
         pause = self._approval_pause(pending.prepared)
         if (
@@ -307,9 +314,22 @@ class AgentSession:
         pending.next_index += 1
         return self._continue_tool_batch(pending)
 
+    def _check_cancel(self) -> None:
+        """Cooperative cancellation check point (before a model turn, before
+        a tool execution). Honored only between such discrete steps: an
+        in-flight model HTTP call or a running tool cannot be interrupted
+        mid-call by this token alone (see agent_runtime.cancellation)."""
+        if self._cancel_token is None or not self._cancel_token.cancelled:
+            return
+        self._state = AgentSessionState.FAILED
+        error = AgentCancelledError("Agent session cancelled before it could continue.")
+        self._record_execution_failure(error)
+        raise error
+
     def _respond(self, inputs: tuple[ModelInputItem, ...]) -> AgentOutcome | ApprovalPause:
         if self._model is None:  # pragma: no cover - lifecycle invariant
             raise AgentBackendError("Model session başlatılmamış.")
+        self._check_cancel()
         if self._model_turns >= self._limits.max_model_turns:
             self._fail_limit("max_model_turns")
         self._model_turns += 1
@@ -446,6 +466,7 @@ class AgentSession:
 
     def _continue_tool_batch(self, pending: _PendingApproval) -> AgentOutcome | ApprovalPause:
         while pending.next_index < len(pending.tool_calls):
+            self._check_cancel()
             model_call = pending.tool_calls[pending.next_index]
             turn_index, turn_id, item_id = self._tool_event_context(model_call)
             if pending.prepared is None:

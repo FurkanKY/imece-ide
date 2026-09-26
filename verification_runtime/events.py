@@ -46,12 +46,25 @@ class VerificationCompleted(VerificationEvent):
     report: VerificationReport
 
 
+@dataclass(frozen=True, slots=True)
+class VerificationInterrupted(VerificationEvent):
+    """A cancellation was observed mid-verification (between or during a
+    check, via a CancellationToken); the in-flight check's process tree has
+    already been terminated by the time this is emitted. Terminal for this
+    verification attempt, exactly like VerificationCompleted -- this is the
+    "the run was cancelled, not that verification failed" outcome."""
+
+    plan_id: str
+    reason: str
+
+
 VerificationLifecycleEvent: TypeAlias = (
     VerificationStarted
     | VerificationCheckStarted
     | VerificationCheckCompleted
     | VerificationCheckFailed
     | VerificationCompleted
+    | VerificationInterrupted
 )
 
 

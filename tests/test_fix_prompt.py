@@ -152,3 +152,64 @@ def test_attempt_info_present():
     assert "attempt_index: 2" in rendered
     assert "max_fix_attempts: 2" in rendered
     assert "trigger_kind: verification_fail" in rendered
+
+
+# ---------------- rules (project rules section) ----------------
+
+
+from context_runtime.rules import ProjectRules  # noqa: E402
+from fix_runtime.prompt import render_initial_worker_input  # noqa: E402
+
+
+def _fake_rules(text="Always add tests.") -> ProjectRules:
+    return ProjectRules(text=text, sha256="a" * 64, truncated=False, sources=("AGENTS.md",))
+
+
+def test_render_fix_worker_input_without_rules_is_unchanged():
+    trigger = _verification_fail_trigger()
+    without = render_fix_worker_input(task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2)
+    without_explicit_none = render_fix_worker_input(
+        task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2, rules=None,
+    )
+    assert without == without_explicit_none
+
+
+def test_render_fix_worker_input_with_rules_adds_delimited_untrusted_section():
+    trigger = _verification_fail_trigger()
+    rendered = render_fix_worker_input(
+        task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2, rules=_fake_rules(),
+    )
+    assert "Always add tests." in rendered
+    assert "untrusted" in rendered.lower()
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+
+
+def test_render_fix_worker_input_huge_rules_never_exceed_budget():
+    trigger = _verification_fail_trigger()
+    rendered = render_fix_worker_input(
+        task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2,
+        rules=_fake_rules("R" * 200_000),
+    )
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+    assert "task" in rendered
+
+
+def test_render_initial_worker_input_without_rules_is_unchanged():
+    without = render_initial_worker_input(task="task", plan=None, verification_plan=None)
+    without_explicit_none = render_initial_worker_input(task="task", plan=None, verification_plan=None, rules=None)
+    assert without == without_explicit_none
+
+
+def test_render_initial_worker_input_with_rules_adds_delimited_untrusted_section():
+    rendered = render_initial_worker_input(task="task", plan=None, verification_plan=None, rules=_fake_rules())
+    assert "Always add tests." in rendered
+    assert "untrusted" in rendered.lower()
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+
+
+def test_render_initial_worker_input_huge_rules_never_exceed_budget():
+    rendered = render_initial_worker_input(
+        task="task", plan="P" * 200_000, verification_plan=None, rules=_fake_rules("R" * 200_000),
+    )
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+    assert "task" in rendered

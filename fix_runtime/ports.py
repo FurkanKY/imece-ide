@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from agent_runtime.cancellation import CancellationToken
 from review_runtime.models import ReviewReport, ReviewRequest
 from verification_runtime.models import VerificationPlan, VerificationReport
 
@@ -64,7 +65,8 @@ class WorkerAttemptRunner(Protocol):
     """
 
     def run(
-        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str
+        self, workspace, request: FixWorkerRequest | InitialWorkerRequest, *, execution_id: str,
+        cancel_token: CancellationToken | None = None,
     ) -> WorkerAttemptResult: ...
 
 
@@ -77,7 +79,8 @@ class VerificationAttemptRunner(Protocol):
     """
 
     def run(
-        self, workspace, plan: VerificationPlan, *, verification_id: str
+        self, workspace, plan: VerificationPlan, *, verification_id: str,
+        cancel_token: CancellationToken | None = None,
     ) -> VerificationReport: ...
 
 
@@ -90,4 +93,7 @@ class ReviewAttemptRunner(Protocol):
     the existing ReviewerRunner.
     """
 
-    def run(self, workspace, request: ReviewRequest, *, review_id: str) -> ReviewReport: ...
+    def run(
+        self, workspace, request: ReviewRequest, *, review_id: str,
+        cancel_token: CancellationToken | None = None,
+    ) -> ReviewReport: ...

@@ -48,7 +48,7 @@ class FakeRunner:
         self.outcomes = list(outcomes)
         self.calls = []
 
-    def run(self, workspace, request):
+    def run(self, workspace, request, *, cancel_token=None):
         self.calls.append(request)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):

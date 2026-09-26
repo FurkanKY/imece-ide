@@ -585,3 +585,24 @@ def test_normal_happy_path_lifecycle_ordering_unaffected(tmp_path):
     sink.emit(ExecutionCompleted("review_exec_1", "{}", 1, 0, 0, 1, 1, None))
     sink.complete(_report())
     assert event_types(runtime, run)[-1] == RunEventType.REVIEW_COMPLETED
+
+
+# ---------------- rules_sha256 provenance (additive review.started field) ----------------
+
+
+def test_review_started_omits_rules_sha256_when_not_supplied(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    sink = CanonicalReviewEventSink(runtime, run.run_id, review_id="rev-no-rules")
+    sink.emit(ExecutionStarted("review_exec_rev-no-rules", "task"))
+    events = runtime.events(run.run_id, limit=200).events
+    started = next(e for e in events if e.type == RunEventType.REVIEW_STARTED)
+    assert "rules_sha256" not in started.payload
+
+
+def test_review_started_carries_rules_sha256_when_supplied(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    sink = CanonicalReviewEventSink(runtime, run.run_id, review_id="rev-with-rules", rules_sha256="e" * 64)
+    sink.emit(ExecutionStarted("review_exec_rev-with-rules", "task"))
+    events = runtime.events(run.run_id, limit=200).events
+    started = next(e for e in events if e.type == RunEventType.REVIEW_STARTED)
+    assert started.payload["rules_sha256"] == "e" * 64
