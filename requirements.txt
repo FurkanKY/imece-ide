@@ -8,5 +8,6 @@ basedpyright>=1.21
 debugpy>=1.8
 jsonschema>=4.23
 openai>=3.0,<4
+anthropic>=1,<2
 psutil>=7.2,<8
 agent-client-protocol>=0.12.1,<0.13
