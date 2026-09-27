@@ -20,6 +20,7 @@ const DEFAULT_PREFS: Prefs = {
   enterToSend: true,
   animations: true,
   aiEngine: "auto",
+  decisionLayer: "off",
   routing: null,
   lastProject: null,
   recentProjects: [

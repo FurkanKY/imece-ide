@@ -643,6 +643,42 @@ def test_ai_engine_pref_legacy_skips_pipeline(bridge, qapp, monkeypatch, git_rep
     assert called["n"] == 0
 
 
+# ---------------- karar katmanı (decision_layer) kapı inşası ----------------
+
+def test_decision_layer_off_builds_no_gate(bridge, qapp, monkeypatch, git_repo):
+    """decision_layer="off" (varsayılan) -- run.py bir VerificationFailureGate
+    İNŞA ETMEMELİ; PipelineRunner'a decision_gate=None geçmelidir (bugünkü
+    davranış bayt-bayt korunur, bkz. engine_factory.build_verification_failure_gate)."""
+    from webhost.api import run as run_api
+
+    monkeypatch.setattr(ui_prefs, "load", lambda: {**ui_prefs.DEFAULTS, "ai_engine": "auto", "decision_layer": "off"})
+    ports_factory = _make_ports_factory(
+        worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}',
+    )
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    assert run_api._active["engine"] == "pipeline"
+    assert run_api._active["decision_gate"] is None
+
+
+def test_decision_layer_rules_builds_gate(bridge, qapp, monkeypatch, git_repo):
+    """decision_layer="rules" -- run.py, engine_factory.build_verification_
+    failure_gate aracılığıyla GERÇEK bir VerificationFailureGate inşa edip
+    _active'e koymalı (PipelineRunner'a decision_gate=... olarak geçirilen
+    AYNI nesne)."""
+    from decision_runtime.gate import VerificationFailureGate
+    from webhost.api import run as run_api
+
+    monkeypatch.setattr(ui_prefs, "load", lambda: {**ui_prefs.DEFAULTS, "ai_engine": "auto", "decision_layer": "rules"})
+    ports_factory = _make_ports_factory(
+        worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}',
+    )
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    assert run_api._active["engine"] == "pipeline"
+    assert isinstance(run_api._active["decision_gate"], VerificationFailureGate)
+
+
 # ---------------- legacy motor: "stale apply" koruması ----------------
 
 def _fake_legacy_generator_with_stale_guard(root, task, routing, mentions=None):

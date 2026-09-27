@@ -199,6 +199,24 @@ def test_settings_routing_and_ai_engine_persist_roundtrip(bridge, tmp_path, monk
     assert r["result"]["aiEngine"] == "legacy"
 
 
+def test_settings_decision_layer_persists_roundtrip(bridge, tmp_path, monkeypatch):
+    """"Karar katmanı" tercihi (off | rules | jev) de aynı ui_prefs.json'a
+    yazılıp geri okunmalı (bkz. ui_prefs.DEFAULTS: 'decision_layer')."""
+    import ui_prefs
+    import webhost.api.settings  # noqa: F401 — handler kaydı
+    monkeypatch.setattr(ui_prefs, "_PATH", str(tmp_path / "prefs.json"))
+    monkeypatch.setattr(ui_prefs, "_DIR", str(tmp_path))
+
+    r = rpc(bridge, "settings.get")
+    assert r["result"]["decisionLayer"] == "off"
+
+    r = rpc(bridge, "settings.set", {**r["result"], "decisionLayer": "rules"})
+    assert r["ok"]
+
+    r = rpc(bridge, "settings.get")
+    assert r["result"]["decisionLayer"] == "rules"
+
+
 def test_run_and_history_require_project(bridge):
     import webhost.api.run      # noqa: F401
     import webhost.api.history  # noqa: F401

@@ -21,6 +21,12 @@ export interface Prefs {
   /** Kullanıcının Composer'dan seçtiği rol->sağlayıcı ataması; null ->
       run.providers'ın recommendedRouting'i kullanılır (bkz. state/run.ts). */
   routing: Routing | null;
+  /** Jev System One karar katmanı (deneysel, bkz. decision_runtime/,
+      engine_factory.py): "off" (varsayılan, davranış bugünküyle bayt-bayt
+      aynı) | "rules" (belirlenimci triage kuralları, hiçbir şey makineden
+      çıkmaz) | "jev" (şimdilik "rules" davranışına düşer — gerçek bir
+      TypeSafe/Jev API arka ucu henüz yok). */
+  decisionLayer: "off" | "rules" | "jev";
 }
 
 export interface RunEvent {

@@ -19,3 +19,12 @@ detected on `PATH`.
 Running a project command and exporting a change receipt both require explicit
 user action. A receipt is stored under the opened project's ignored `.imece/`
 directory; Markdown export writes only to a folder chosen by the user.
+
+The optional decision layer ("Karar katmanı" in Settings) triages a failed
+verification step before an automatic fix attempt. Its default, "Kapalı", and
+its "Kurallar" option both run entirely offline — nothing about the failure
+leaves the machine. A future "Jev" option would send only a filtered failure
+summary (the failing command, a short error excerpt, and the paths changed by
+the run — never full file contents, API keys, or unrelated project data) to
+TypeSafe to help classify the failure; until that backend exists, "Jev" falls
+back to the same offline "Kurallar" behavior and sends nothing anywhere.

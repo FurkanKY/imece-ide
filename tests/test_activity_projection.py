@@ -248,6 +248,23 @@ def test_agent_activity_with_malformed_payload_is_skipped_not_raised():
 
 # ---------------- out-of-scope types ----------------
 
+def test_decision_made_is_a_one_line_note():
+    ev = _ev(RunEventType.DECISION_MADE, {
+        "decision_id": "verification_failure_triage", "answers": {
+            "failure_kind": {"kind": "choice", "choice": "missing_dependency", "probabilities": {}, "confidence": 0.87},
+        },
+    })
+    item = project_event(ev)
+    assert item["role"] == "system"
+    assert item["kind"] == "note"
+    assert item["title"] == "Karar: missing_dependency (güven %87)"
+
+
+def test_decision_made_with_malformed_payload_is_skipped_not_raised():
+    assert project_event(_ev(RunEventType.DECISION_MADE, {})) is None
+    assert project_event(_ev(RunEventType.DECISION_MADE, {"answers": {}})) is None
+
+
 def test_unknown_event_type_returns_none():
     ev = _ev(RunEventType.RUN_CREATED, {})
     assert project_event(ev) is None

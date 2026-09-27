@@ -81,6 +81,11 @@ _active: dict = {
     # continuation'ı KENDİ planını üretmez, bu yüzden önceki plan metni
     # sonraki takip isteklerinde de KORUNUR (bkz. on_pipeline_finished).
     "pipeline_ports": None, "task": None, "plan_text": None, "pinned_paths": [],
+    # Jev System One karar katmanı (bkz. decision_runtime/, engine_factory.
+    # build_verification_failure_gate): run.start sırasında bir kez kurulan
+    # VerificationFailureGate | None -- run.followUp AYNI kapıyı yeniden
+    # kullanır (bkz. _follow_up).
+    "decision_gate": None,
 }
 
 # F6 (@-mentions): backend cap independent of (and enforced regardless of)
@@ -247,7 +252,8 @@ class _PipelineWorker(QThread):
     finished_ok = Signal(object)  # PipelineReport
     failed = Signal(str)
 
-    def __init__(self, runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=None):
+    def __init__(self, runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=None,
+                 decision_gate=None):
         super().__init__()
         self.runtime = runtime
         self.run_id = run_id
@@ -256,6 +262,7 @@ class _PipelineWorker(QThread):
         self.task = task
         self.cancel_event = cancel_event
         self.pinned_paths = pinned_paths or []
+        self.decision_gate = decision_gate
 
     def run(self):
         try:
@@ -264,6 +271,7 @@ class _PipelineWorker(QThread):
                 planner=self.ports.planner, worker=self.ports.worker,
                 verification=self.ports.verification, reviewer=self.ports.reviewer,
                 change_provider=self.ports.change_provider,
+                decision_gate=self.decision_gate,
             )
             report = pipeline.run(
                 self.run_id, self.workspace, self.task,
@@ -287,7 +295,7 @@ class _FollowUpWorker(QThread):
 
     def __init__(
         self, runtime, run_id, workspace, ports, task, feedback, plan_text, cancel_event,
-        pinned_paths=None, max_fix_attempts=None,
+        pinned_paths=None, max_fix_attempts=None, decision_gate=None,
     ):
         super().__init__()
         self.runtime = runtime
@@ -300,6 +308,7 @@ class _FollowUpWorker(QThread):
         self.cancel_event = cancel_event
         self.pinned_paths = pinned_paths or []
         self.max_fix_attempts = max_fix_attempts
+        self.decision_gate = decision_gate
 
     def run(self):
         try:
@@ -308,6 +317,7 @@ class _FollowUpWorker(QThread):
                 planner=self.ports.planner, worker=self.ports.worker,
                 verification=self.ports.verification, reviewer=self.ports.reviewer,
                 change_provider=self.ports.change_provider,
+                decision_gate=self.decision_gate,
             )
             kwargs = {}
             if self.max_fix_attempts is not None:
@@ -593,6 +603,34 @@ def _last_worker_final_message(runtime, run_id: str) -> str | None:
     return _bounded_text(joined) if joined else None
 
 
+def _decision_gate_needs_user_message(runtime, run_id: str) -> str | None:
+    """Jev System One karar katmanı (bkz. decision_runtime.gate.
+    VerificationFailureGate) bir NEEDS_USER kararı verdiğinde, pipeline_
+    runtime.runner._settle_decision_needs_user bunu CanonicalPipelineRecorder.
+    needs_user() ile proposal.ready olayının payload'ına "message" anahtarıyla
+    yazar (bkz. decision_runtime.triage._NEEDS_USER_MESSAGES -- Türkçe,
+    kullanıcıya gösterilecek metin). Bu fonksiyon SON proposal.ready olayının
+    bu anahtarını okur; ne karar katmanı devrede ne de bu koşuda bir
+    proposal.ready varsa None döner ("no verification plan" gibi karar
+    katmanıyla İLGİSİZ NEEDS_USER yolları hiç "message" yazmaz)."""
+    try:
+        events = []
+        page = runtime.events(run_id, limit=500)
+        events.extend(page.events)
+        while page.has_more:
+            page = runtime.events(run_id, after_seq=events[-1].seq, limit=500)
+            events.extend(page.events)
+    except Exception:
+        return None
+
+    last_message: str | None = None
+    for event in events:
+        if event.type == RunEventType.PROPOSAL_READY:
+            message = event.payload.get("message")
+            last_message = message if isinstance(message, str) and message.strip() else None
+    return last_message
+
+
 def _full_plan_text(plan_report) -> str:
     """F2 (takip isteği) düzeltmesi: PipelineRunner.continue_with_feedback'e
     yalnızca `plan_report.summary` (tek cümlelik özet) DEĞİL, Planner'ın
@@ -651,6 +689,17 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=
     _active["proposals"] = proposals
     verdict = report.review_report.verdict.value if report.review_report is not None else None
     if proposals:
+        # Jev System One karar katmanı NEEDS_USER kararı verdiyse (bkz.
+        # decision_runtime.gate.VerificationFailureGate), kullanıcıya
+        # gösterilecek Türkçe gerekçe (ör. "eksik bağımlılık" / "ortam
+        # sorunu") proposal.ready olayının kanonik payload'ında "message"
+        # anahtarıyla saklanır -- burada okunup önerinin HEMEN ÜSTÜNDE bir
+        # bilgi satırı olarak gösterilir, aksi halde kullanıcı yalnızca bir
+        # öneri kartı görür ve NEDEN durdurulduğunu asla öğrenemez.
+        if runtime is not None and run_id is not None:
+            decision_message = _decision_gate_needs_user_message(runtime, run_id)
+            if decision_message:
+                emit_ui({"type": "info", "text": decision_message})
         emit_ui({
             "type": "proposal", "proposals": proposals,
             "totals": {"latency_s": 0, "tokens": 0, "cost_usd": 0}, "verdict": verdict,
@@ -700,6 +749,7 @@ def _start(params, ctx):
     # ASLA sızmaz (bkz. run.followUp'ın kendi run_id/coordinator kontrolü de
     # buna ek bir bağımsız koruma sağlar).
     _active["pipeline_ports"] = None
+    _active["decision_gate"] = None
     _active["task"] = task
     _active["plan_text"] = None
     _active["pinned_paths"] = list(mentions)
@@ -739,15 +789,24 @@ def _start(params, ctx):
         bridge.emit_event("run.finished", payload)
 
     # ---------------- motor seçimi (T1.2) ----------------
-    ai_engine_pref = ui_prefs.load().get("ai_engine", "auto")
+    prefs = ui_prefs.load()
+    ai_engine_pref = prefs.get("ai_engine", "auto")
     selection = engine_factory.select_engine(proj.root, coordinator.routing, ai_engine_pref=ai_engine_pref)
     fallback_reason = selection.reason
     pipeline_ports = None
     workspace = None
+    # Jev System One karar katmanı (bkz. decision_runtime/, engine_factory.py
+    # build_verification_failure_gate): "off" -> None, pipeline/fix-loop
+    # davranışı bugünküyle bayt-bayt aynı kalır. Yalnızca yeni motor
+    # kullanılıyorsa anlamlıdır -- klasik motorun kendi fix akışı YOKTUR.
+    decision_gate = None
     if selection.engine == "pipeline" and PipelineRunner is not None:
         try:
             workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
             pipeline_ports = engine_factory.build_pipeline_ports(runtime, run_id, coordinator.routing)
+            decision_gate = engine_factory.build_verification_failure_gate(
+                engine_factory.decision_layer_preference(prefs), runtime=runtime, run_id=run_id,
+            )
         except Exception as exc:
             if workspace is not None:
                 try:
@@ -756,8 +815,10 @@ def _start(params, ctx):
                     pass
                 workspace = None
             pipeline_ports = None
+            decision_gate = None
             fallback_reason = f"Yeni motor kullanılamadı ({exc}); klasik motor kullanılıyor."
     _active["pipeline_ports"] = pipeline_ports
+    _active["decision_gate"] = decision_gate
     # F2 (takip isteği) sırasında bir GERÇEK bug fark edildi ve BURADA
     # düzeltildi: `_active["workspace"]` başarılı bir pipeline koşusunda
     # daha önce HİÇBİR ZAMAN gerçek workspace nesnesine atanmıyordu --
@@ -777,7 +838,7 @@ def _start(params, ctx):
             worker = _start_pipeline_run(
                 runtime, coordinator, workspace, pipeline_ports, task,
                 emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
-                ended=ended, bridge=bridge, pinned_paths=mentions,
+                ended=ended, bridge=bridge, pinned_paths=mentions, decision_gate=decision_gate,
             )
         else:
             _active["engine"] = "legacy"
@@ -808,6 +869,7 @@ def _start(params, ctx):
         _active["proposals"] = []
         _active["workspace"] = None
         _active["cancel_event"] = None
+        _active["decision_gate"] = None
         raise BridgeError("worker_start_failed", f"Koşu başlatılamadı: {exc}")
 
     _active["worker"] = worker
@@ -893,7 +955,7 @@ def _start_legacy_run(proj, coordinator, task, *, emit_ui, finish, settle_canoni
 
 
 def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui, finish, settle_canonical_failure,
-                         ended, bridge, pinned_paths=None):
+                         ended, bridge, pinned_paths=None, decision_gate=None):
     run_id = coordinator.run_id
     cancel_event = threading.Event()
     # F7: this MUST be the same Event instance run.cancel()/shutdown() act
@@ -903,7 +965,10 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     # cancel requested the instant after run.start() returns is never lost.
     _active["cancel_event"] = cancel_event
     proj = _require_project()
-    worker = _PipelineWorker(runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=pinned_paths)
+    worker = _PipelineWorker(
+        runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=pinned_paths,
+        decision_gate=decision_gate,
+    )
     _wire_pipeline_worker(
         worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,
         emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
@@ -1195,9 +1260,11 @@ def _follow_up(params, ctx):
         bridge.emit_event("run.finished", payload)
 
     activity_after_seq = current.last_event_seq
+    # F2: AYNI karar kapısı (varsa) devam ettirilir -- decision_layer tercihi
+    # bir koşu ORTASINDA değişemez, run.start sırasında bir kez kurulur.
     worker = _FollowUpWorker(
         runtime, run_id, workspace, ports, task, feedback, plan_text, cancel_event,
-        pinned_paths=pinned_paths,
+        pinned_paths=pinned_paths, decision_gate=_active.get("decision_gate"),
     )
     _wire_pipeline_worker(
         worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,

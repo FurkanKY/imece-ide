@@ -8,7 +8,7 @@ _TO_JS = {
     "accent": "accent", "density": "density", "enter_to_send": "enterToSend",
     "animations": "animations", "last_project": "lastProject",
     "recent_projects": "recentProjects", "ai_engine": "aiEngine",
-    "routing": "routing",
+    "routing": "routing", "decision_layer": "decisionLayer",
 }
 _TO_PY = {v: k for k, v in _TO_JS.items()}
 

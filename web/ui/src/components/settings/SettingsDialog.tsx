@@ -484,6 +484,27 @@ export function SettingsDialog() {
                 />
               </Row>
 
+              <Row
+                label="Karar katmanı (deneysel)"
+                hint={
+                  prefs.decisionLayer === "jev"
+                    ? "Jev (TypeSafe): şimdilik Kurallar davranışına düşer — henüz bir API anahtarı arka ucu yok."
+                    : prefs.decisionLayer === "rules"
+                      ? "Kurallar: bir doğrulama başarısız olunca ortam/eksik bağımlılık, önceden var olan hata ve kararsız (flaky) durumları belirlenimci kurallarla ayırt eder; hiçbir şey makineden çıkmaz."
+                      : "Kapalı: doğrulama hataları doğrudan düzeltme döngüsüne gider (bugünkü davranış)."
+                }
+              >
+                <Segmented
+                  value={prefs.decisionLayer}
+                  options={[
+                    { id: "off", label: "Kapalı" },
+                    { id: "rules", label: "Kurallar" },
+                    { id: "jev", label: "Jev (TypeSafe)" },
+                  ]}
+                  onChange={(v) => void update({ decisionLayer: v })}
+                />
+              </Row>
+
               <ProvidersSection />
             </div>
           </motion.div>

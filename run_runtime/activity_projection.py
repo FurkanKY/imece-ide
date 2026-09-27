@@ -337,6 +337,28 @@ def _project_agent_activity(event: RunEvent) -> dict[str, Any] | None:
                  detail=detail if isinstance(detail, str) else None)
 
 
+def _project_decision(event: RunEvent) -> dict[str, Any] | None:
+    """decision.made (bkz. decision_runtime.recorder.CanonicalDecisionRecorder)
+    -- Jev System One karar katmanının bir doğrulama FAIL'ini nasıl
+    sınıflandırdığını Etkinlik akışında tek satırla özetler. Yalnızca
+    "failure_kind" cevabını taşır: decide_triage_action'ın SEÇTİĞİ eylem bu
+    olayın payload'ında YOKTUR -- decision.made, eylem belirlenmeden ÖNCE
+    kaydedilir (bkz. decision_runtime.gate.VerificationFailureGate.evaluate)."""
+    answers = event.payload.get("answers")
+    answer = answers.get("failure_kind") if isinstance(answers, dict) else None
+    if not isinstance(answer, dict):
+        return None
+    kind = answer.get("choice")
+    if not isinstance(kind, str):
+        return None
+    confidence = answer.get("confidence")
+    title = f"Karar: {kind}"
+    if isinstance(confidence, (int, float)):
+        title += f" (güven %{confidence * 100:.0f})"
+    return _base(event, item_id=f"decision:{event.event_id}", role="system", kind="note",
+                 status="info", title=title)
+
+
 _PROJECTORS: dict[str, Any] = {
     RunEventType.TOOL_REQUESTED: _project_tool,
     RunEventType.TOOL_STARTED: _project_tool,
@@ -365,6 +387,7 @@ _PROJECTORS: dict[str, Any] = {
     RunEventType.USAGE_RECORDED: _project_usage,
     RunEventType.EXECUTION_OUTPUT: _project_acp_output,
     RunEventType.AGENT_ACTIVITY: _project_agent_activity,
+    RunEventType.DECISION_MADE: _project_decision,
 }
 
 
