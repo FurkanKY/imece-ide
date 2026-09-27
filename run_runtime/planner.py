@@ -35,6 +35,7 @@ required or introduced here.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from agent_runtime.events import (
@@ -88,6 +89,7 @@ class CanonicalPlannerEventSink:
 
     def __init__(
         self, runtime: RunRuntime, run_id: str, *, plan_id: str, rules_sha256: str | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> None:
         plan_id = validate_plan_id(plan_id)
         if rules_sha256 is not None and not isinstance(rules_sha256, str):
@@ -99,6 +101,11 @@ class CanonicalPlannerEventSink:
         self._run_id = run_id
         self._plan_id = plan_id
         self._rules_sha256 = rules_sha256
+        # F6 (@-mentions): recorded on plan.started as additive provenance,
+        # exactly like rules_sha256 above -- omitted entirely (not an empty
+        # list) when no mention was pinned, so a sink built without this
+        # argument keeps emitting the exact same payload shape as before.
+        self._pinned_paths = tuple(pinned_paths) if pinned_paths else ()
         self._expected_seq = run.last_event_seq
         self._transient_execution_id: str | None = None
         self._terminal_recorded = False
@@ -117,6 +124,25 @@ class CanonicalPlannerEventSink:
     @property
     def expected_last_event_seq(self) -> int:
         return self._expected_seq
+
+    def note_external_append(self, seq: int) -> None:
+        """F1 (live agent activity): advance this sink's remembered
+        optimistic cursor when the CALLER (not this sink) has appended
+        another event to the same run in between plan.started and this
+        sink's own next commit -- e.g. an interleaved agent.activity notice
+        recorded via run_runtime.agent_activity while an ACP Planner session
+        is mid-flight (see pipeline_runtime.acp_planner.AcpPlanAttemptRunner).
+
+        Without this, the sink's next _commit() would use a stale
+        expected_last_event_seq and raise EventSequenceError even though
+        nothing is actually wrong -- this sink is still the only writer of
+        plan.* events, it just isn't the only writer of the RUN anymore.
+        Monotonic and defensive: a seq lower than what this sink already
+        knows about is silently ignored."""
+        if isinstance(seq, bool) or not isinstance(seq, int):
+            raise ValueError("note_external_append seq must be an integer")
+        if seq > self._expected_seq:
+            self._expected_seq = seq
 
     # ---------------- AgentEventSink protocol ----------------
 
@@ -149,6 +175,8 @@ class CanonicalPlannerEventSink:
                 # same plan.started payload shape as before this field
                 # existed.
                 started_payload["rules_sha256"] = self._rules_sha256
+            if self._pinned_paths:
+                started_payload["pinned_paths"] = list(self._pinned_paths)
             self._commit([self._spec(event, RunEventType.PLAN_STARTED, started_payload)])
             self._started_persisted = True
             return

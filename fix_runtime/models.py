@@ -187,6 +187,11 @@ class FixLoopRequest:
     verification_plan: VerificationPlan
     plan: str | None = None
     max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS
+    # F6 (@-mentions): ordered, workspace-relative paths the user explicitly
+    # pinned for this run -- threaded verbatim into render_fix_worker_input's
+    # "USER-REFERENCED FILES" section for every fix attempt. Purely additive:
+    # the default () reproduces the exact prior (pre-@-mentions) behavior.
+    pinned_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task", _bounded_text(self.task, "FixLoopRequest.task", max_chars=_MAX_TASK_CHARS))
@@ -194,6 +199,11 @@ class FixLoopRequest:
             raise FixLoopInputError("FixLoopRequest.trigger must be a FixTrigger.")
         if not isinstance(self.verification_plan, VerificationPlan):
             raise FixLoopInputError("FixLoopRequest.verification_plan must be a VerificationPlan.")
+        if not isinstance(self.pinned_paths, (tuple, list)) or not all(
+            isinstance(item, str) for item in self.pinned_paths
+        ):
+            raise FixLoopInputError("FixLoopRequest.pinned_paths must be a sequence of strings.")
+        object.__setattr__(self, "pinned_paths", tuple(self.pinned_paths))
         if self.plan is not None:
             object.__setattr__(
                 self, "plan",

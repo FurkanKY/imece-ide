@@ -131,7 +131,7 @@ class _Reviewer:
         self.runtime = runtime
         self.run_id = run_id
 
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         report = ReviewReport(
             review_id=review_id, verdict=ReviewVerdict.APPROVED, summary="approved", findings=(),
             repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,

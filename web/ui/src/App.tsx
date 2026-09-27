@@ -221,6 +221,8 @@ export default function App() {
       useDebug.getState().install(); // P8.2: debug.stopped/output/terminated
       useRun.getState().install();
       void useRun.getState().loadProviders();
+      const { useActivity } = await import("@/state/activity");
+      useActivity.getState().install(); // F1: run.activity abonelikleri
       await loadSettings();
       // mock senaryoları: otomatik proje aç (+ koşu) — webshot/geliştirme
       const runScenarios = ["running", "result", "error"];

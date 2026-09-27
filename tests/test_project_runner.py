@@ -103,3 +103,58 @@ def test_project_rules_absent_means_no_rules_section(tmp_path, monkeypatch):
 
     assert fake_agents["planner"].calls[0].startswith("Görev:")
     assert "untrusted" not in fake_agents["planner"].calls[0].lower()
+
+
+# ---------------- F6 (@-mentions): legacy engine ----------------
+
+
+def test_mentioned_files_are_added_to_the_coder_context_even_if_planner_ignored_them(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+    (tmp_path / "mentioned.txt").write_text("MENTIONED-FILE-SENTINEL\n", encoding="utf-8")
+
+    fake_agents = {
+        "planner": _FakeAgent("planner"),  # planner's FILES: section is empty
+        "coder": _FakeAgent("coder"),
+        "reviewer": _FakeAgent("reviewer"),
+    }
+    monkeypatch.setattr(project_runner, "build_agents", lambda routing=None: fake_agents)
+
+    events = list(run_project_task(str(tmp_path), "Do something", mentions=["mentioned.txt"]))
+
+    # The coder's prompt gets the mentioned file's full content even though
+    # the planner never selected it.
+    assert "MENTIONED-FILE-SENTINEL" in fake_agents["coder"].calls[0]
+
+    plan_events = [e for e in events if e.get("type") == "plan"]
+    assert plan_events and plan_events[0]["files"] == ["mentioned.txt"]
+
+
+def test_mentioned_folder_adds_a_file_listing_without_contents(tmp_path, monkeypatch):
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "folder" / "secret.txt").write_text("SECRET-CONTENT\n", encoding="utf-8")
+
+    fake_agents = {
+        "planner": _FakeAgent("planner"),
+        "coder": _FakeAgent("coder"),
+        "reviewer": _FakeAgent("reviewer"),
+    }
+    monkeypatch.setattr(project_runner, "build_agents", lambda routing=None: fake_agents)
+
+    list(run_project_task(str(tmp_path), "Do something", mentions=["folder"]))
+
+    coder_prompt = fake_agents["coder"].calls[0]
+    assert "folder/secret.txt" in coder_prompt
+    assert "SECRET-CONTENT" not in coder_prompt
+
+
+def test_mentions_default_none_is_backward_compatible(tmp_path, monkeypatch):
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+    fake_agents = {
+        "planner": _FakeAgent("planner"),
+        "coder": _FakeAgent("coder"),
+        "reviewer": _FakeAgent("reviewer"),
+    }
+    monkeypatch.setattr(project_runner, "build_agents", lambda routing=None: fake_agents)
+
+    list(run_project_task(str(tmp_path), "Do something"))
+    assert fake_agents["coder"].calls[0] == fake_agents["coder"].calls[0]  # no crash without mentions

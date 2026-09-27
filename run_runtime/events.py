@@ -62,6 +62,12 @@ class RunEventType(StrEnum):
 
     USAGE_RECORDED = "usage.recorded"
 
+    # F1 (live agent activity): a NON-authoritative, advisory notice powering
+    # the AI panel's live activity feed. Never dispatched by
+    # run_runtime.projector/readmodels/completion -- see
+    # run_runtime.agent_activity's module docstring for why this is safe.
+    AGENT_ACTIVITY = "agent.activity"
+
     CHANGE_PROPOSED = "change.proposed"
     PROPOSAL_READY = "proposal.ready"
     PROPOSAL_APPLIED = "proposal.applied"

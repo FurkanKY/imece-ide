@@ -4,6 +4,7 @@
 import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ProviderInfo, ScmChange } from "../protocol";
 import * as vfs from "./vfs";
 import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
+import { ACTIVITY_FEED } from "./fixtures/activity";
 
 interface MockCheckpoint {
   id: string;
@@ -384,7 +385,20 @@ export class MockBridge implements Bridge {
       }
       case "run.start": {
         this.runCancelled = false;
+        // F6 (@-mentions): backend'in run.start doğrulamasını taklit eder —
+        // var olmayan bahisler sessizce düşürülür + bir "info" olayı yayar
+        // (bkz. webhost/api/run.py _validate_mentions).
+        const mentions = (params as { mentions?: string[] }).mentions ?? [];
+        for (const m of mentions) {
+          if (!vfs.pathExists(m)) {
+            this.emit("run.event", {
+              runId: "mock-1",
+              ev: { type: "info", text: `Bahsedilen dosya bulunamadı: ${m}` },
+            });
+          }
+        }
         void this.streamRun();
+        void this.streamActivity(); // F1: run.activity mock akışı
         return { runId: "mock-1" } as R;
       }
       case "run.cancel":
@@ -585,6 +599,18 @@ export class MockBridge implements Bridge {
     }
     if (this.scenario !== "running") {
       this.emit("run.finished", { runId: "mock-1", status: "done" });
+    }
+  }
+
+  /** F1: run.activity kanalını ayrı bir zaman çizelgesiyle akıtır (running
+      senaryosu yarıda durur; diğerleri tam akış gösterir). */
+  private async streamActivity() {
+    const feed = this.scenario === "running" ? ACTIVITY_FEED.slice(0, 9) : ACTIVITY_FEED;
+    let seq = 1;
+    for (const [delay, item] of feed) {
+      await new Promise((r) => setTimeout(r, delay));
+      if (this.runCancelled) return;
+      this.emit("run.activity", { ...item, runId: "mock-1", seq: seq++, ts: new Date().toISOString() });
     }
   }
 

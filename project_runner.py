@@ -79,11 +79,20 @@ def _parse_file_blocks(text: str) -> dict[str, str]:
     return changes
 
 
-def run_project_task(project_root, task, routing=None):
+def run_project_task(project_root, task, routing=None, mentions=None):
+    """`mentions` (F6, @-mentions; optional): project-relative paths the
+    user explicitly pinned in the composer, ALREADY validated by the caller
+    (webhost/api/run.py's run.start handler) to exist inside the project.
+    File mentions are always read and handed to the Coder alongside the
+    Planner's own selected files; folder mentions contribute a bounded file
+    listing only (no contents) -- see decision 4 of the F6 plan."""
     proj = Project(project_root)
     agents = build_agents(routing)
     rules_prefix = _rules_prefix(proj.root)
     totals = {"cost_usd": 0.0, "latency_s": 0.0, "tokens": 0}
+    mentions = list(mentions or [])
+    mention_files = [m for m in mentions if proj.exists(m)]
+    mention_dirs = [m for m in mentions if proj.is_dir(m)]
 
     def track(resp, stage):
         totals["cost_usd"] += resp.cost_usd
@@ -112,6 +121,12 @@ def run_project_task(project_root, task, routing=None):
     yield {"type": "output", "stage": "plan", "text": plan.text}
 
     wanted = _parse_requested_files(plan.text, valid)
+    # F6 (@-mentions): dosya bahisleri, planner'ın seçtiği listeye EKLENİR
+    # (öncelik kullanıcı bahsindedir) — her ikisi de Coder'a aynı şekilde
+    # tam içerikle verilir.
+    for m in mention_files:
+        if m not in wanted:
+            wanted.append(m)
     # UI bunu opsiyonel, yapılandırılmış bir plan olarak kullanır. Eski istemciler
     # olayı görmezden geldiğinde output + info akışı aynı biçimde devam eder.
     yield {"type": "plan", "summary": _plan_summary(plan.text), "files": wanted}
@@ -121,6 +136,14 @@ def run_project_task(project_root, task, routing=None):
     context_parts = []
     for rel in wanted:
         context_parts.append(f"### FILE: {rel}\n```\n{proj.read_file(rel)}\n```")
+    # F6 (@-mentions): klasör bahisleri yalnızca bir dosya listesi olarak
+    # eklenir (içerik yok) — "buraya odaklan" anlamına gelir.
+    for d in mention_dirs:
+        prefix = d + "/"
+        listing = sorted(f for f in files if f == d or f.startswith(prefix))[:200]
+        context_parts.append(
+            f"### FOLDER: {d} (dosya listesi, içerik yok)\n" + ("\n".join(listing) or "(boş)")
+        )
     context = "\n\n".join(context_parts) if context_parts else "(dosya seçilmedi)"
 
     # 3) CODER: değişen dosyaların tam içeriği

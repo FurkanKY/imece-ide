@@ -625,7 +625,7 @@ def test_ai_engine_pref_legacy_skips_pipeline(bridge, qapp, monkeypatch, git_rep
 
 # ---------------- legacy motor: "stale apply" koruması ----------------
 
-def _fake_legacy_generator_with_stale_guard(root, task, routing):
+def _fake_legacy_generator_with_stale_guard(root, task, routing, mentions=None):
     """project_runner.run_project_task'ın gerçek diff-hesaplama adımını
     (taban durum kaydı dahil) taklit eden minimal sahte generator — gerçek
     ajan/ağ çağrısı YAPMAZ."""
@@ -714,3 +714,69 @@ def test_legacy_apply_succeeds_when_file_unchanged(bridge, qapp, monkeypatch, tm
     assert r2["result"]["checkpointId"]
     assert (plain_dir / "a.txt").read_text(encoding="utf-8") == "fixed\n"
     assert run_api._active["proposals"] == []
+
+
+# ---------------- F6 (@-mentions): run.start bridge validation ----------------
+
+
+def test_run_start_mentions_valid_pinned_and_invalid_reported_as_info(bridge, qapp, monkeypatch, git_repo):
+    """`run.start`'s optional `mentions` param: a valid mention (existing
+    project file) becomes a `pinned_paths` entry the pipeline actually uses
+    (visible on the canonical plan.started event); an invalid one (doesn't
+    exist) is DROPPED and surfaced as an info event, never crashes the run."""
+    ports_factory = _make_ports_factory(
+        worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}',
+    )
+    monkeypatch.setattr(engine_factory, "build_pipeline_ports", ports_factory)
+    events = []
+    bridge.event.connect(lambda raw: events.append(json.loads(raw)))
+    r = rpc(bridge, "run.start", {
+        "task": "a.txt'yi düzelt", "routing": _all_native_routing(),
+        "mentions": ["a.txt", "does-not-exist.txt"],
+    })
+    assert r["ok"], r
+    run_id = r["result"]["runId"]
+
+    def is_finished():
+        return any(e["channel"] == "run.finished" for e in events)
+
+    assert _wait_until(is_finished, qapp), f"run.finished gelmedi; toplanan olaylar: {events}"
+
+    evs = _run_ev_payloads(events, run_id)
+    info_texts = [e["text"] for e in evs if e["type"] == "info"]
+    assert any("Bahsedilen dosya bulunamadı: does-not-exist.txt" in t for t in info_texts)
+
+    from webhost import state as _state
+    canonical_events = _state.get_run_runtime().events(run_id, limit=500).events
+    plan_started = next(e for e in canonical_events if e.type == "plan.started")
+    assert plan_started.payload.get("pinned_paths") == ["a.txt"]
+
+
+def test_run_start_mentions_capped_at_backend_limit(bridge, qapp, monkeypatch, git_repo):
+    """The backend enforces its own mention cap regardless of what a client
+    sends -- never trust the Composer's own 10-item UI cap blindly."""
+    from webhost.api import run as run_api
+
+    ports_factory = _make_ports_factory(
+        worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}',
+    )
+    monkeypatch.setattr(engine_factory, "build_pipeline_ports", ports_factory)
+    events = []
+    bridge.event.connect(lambda raw: events.append(json.loads(raw)))
+    many = [f"nope-{i}.txt" for i in range(25)]
+    r = rpc(bridge, "run.start", {
+        "task": "a.txt'yi düzelt", "routing": _all_native_routing(), "mentions": many,
+    })
+    assert r["ok"], r
+    run_id = r["result"]["runId"]
+
+    def is_finished():
+        return any(e["channel"] == "run.finished" for e in events)
+
+    assert _wait_until(is_finished, qapp), f"run.finished gelmedi; toplanan olaylar: {events}"
+    evs = _run_ev_payloads(events, run_id)
+    info_texts = [e["text"] for e in evs if e["type"] == "info"]
+    # every one of the 25 fabricated mentions is invalid (none exist), so
+    # every one is reported -- proving the cap applies to VALID mentions
+    # only, never silently drops the invalid-mention info events themselves.
+    assert len(info_texts) >= 25

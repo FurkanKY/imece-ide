@@ -60,6 +60,16 @@ export function fileExists(rel: string): boolean {
   return typeof resolve(rel) === "string";
 }
 
+/** F6 (@-mentions): dosya VEYA klasör olarak var mı (mock run.start doğrulaması). */
+export function pathExists(rel: string): boolean {
+  return resolve(rel) !== undefined;
+}
+
+export function isDir(rel: string): boolean {
+  const node = resolve(rel);
+  return typeof node === "object" && node !== undefined;
+}
+
 export function writeFile(rel: string, content: string) {
   const parts = rel.split("/");
   const name = parts.pop()!;

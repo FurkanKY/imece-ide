@@ -70,7 +70,7 @@ fabricated automatic PASS.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
@@ -157,12 +157,14 @@ class PipelineRunner:
         *,
         cancel_event: threading.Event | None = None,
         on_stage: OnStage | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> PipelineReport:
         if not isinstance(run_id, str) or not run_id:
             raise PipelineInputError("PipelineRunner.run requires a non-empty run_id.")
         if not isinstance(task, str) or not task.strip():
             raise PipelineInputError("PipelineRunner.run requires a non-empty task.")
         on_stage = on_stage or _noop_on_stage
+        pinned_paths = tuple(pinned_paths) if pinned_paths else ()
         # A CancellationToken wraps `cancel_event` (or is None if no event was
         # supplied) so it can be forwarded, unchanged in meaning, down to
         # every port call (Planner/Worker/Verification/Reviewer/FixLoop) --
@@ -172,7 +174,7 @@ class PipelineRunner:
         cancel_token = CancellationToken.from_event(cancel_event)
 
         try:
-            return self._run(run_id, workspace, task, cancel_token, on_stage)
+            return self._run(run_id, workspace, task, cancel_token, on_stage, pinned_paths)
         except OperationCancelledError:
             # Cancellation may now be observed EITHER between stages (see
             # _check_cancel) or from inside an in-progress Worker/
@@ -189,13 +191,14 @@ class PipelineRunner:
     def _run(
         self, run_id: str, workspace, task: str,
         cancel_token: CancellationToken | None, on_stage: OnStage,
+        pinned_paths: Sequence[str] = (),
     ) -> PipelineReport:
         self._check_cancel(cancel_token)
 
         # ---------------- 1. plan ----------------
         on_stage("planning", {})
         plan_id = new_plan_id()
-        plan_report = self._run_planner(workspace, task, plan_id, cancel_token)
+        plan_report = self._run_planner(workspace, task, plan_id, cancel_token, pinned_paths=pinned_paths)
 
         # ---------------- 2. detect verification plan ----------------
         verification_plan = detect_verification_plan(workspace.root)
@@ -205,7 +208,9 @@ class PipelineRunner:
         # ---------------- 3. initial worker attempt ----------------
         on_stage("working", {"plan_id": plan_id})
         execution_id = new_fix_execution_id()
-        rendered_input = self._render_initial_input(workspace, task, plan_report, verification_plan)
+        rendered_input = self._render_initial_input(
+            workspace, task, plan_report, verification_plan, pinned_paths=pinned_paths,
+        )
         worker_request = InitialWorkerRequest(task=task, rendered_input=rendered_input, plan=plan_report.summary)
         worker_result = self._run_worker(workspace, worker_request, execution_id, cancel_token)
         self._require_execution_completed(run_id, worker_result.execution_id)
@@ -222,7 +227,7 @@ class PipelineRunner:
 
         if verification_plan is None:
             return self._run_needs_user_path(
-                run_id, workspace, task, plan_report, change_set, on_stage, cancel_token,
+                run_id, workspace, task, plan_report, change_set, on_stage, cancel_token, pinned_paths,
             )
 
         self._check_cancel(cancel_token)
@@ -236,6 +241,7 @@ class PipelineRunner:
             trigger = FixTrigger(kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=verification_report)
             return self._run_fix_loop(
                 run_id, workspace, task, plan_report, verification_plan, trigger, on_stage, cancel_token,
+                pinned_paths,
             )
 
         self._check_cancel(cancel_token)
@@ -245,7 +251,7 @@ class PipelineRunner:
         review_changes = self._capture(workspace)
         review_request = self._build_review_request(task, plan_report, review_changes, verification_report)
         review_id = new_review_id()
-        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token)
+        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token, pinned_paths=pinned_paths)
 
         if review_report.verdict is ReviewVerdict.NEEDS_FIX:
             trigger = FixTrigger(
@@ -254,6 +260,7 @@ class PipelineRunner:
             )
             return self._run_fix_loop(
                 run_id, workspace, task, plan_report, verification_plan, trigger, on_stage, cancel_token,
+                pinned_paths,
             )
 
         if review_report.verdict is not ReviewVerdict.APPROVED:  # pragma: no cover - exhaustive above
@@ -285,13 +292,14 @@ class PipelineRunner:
 
     def _run_needs_user_path(
         self, run_id, workspace, task, plan_report, change_set, on_stage, cancel_token,
+        pinned_paths: Sequence[str] = (),
     ) -> PipelineReport:
         self._check_cancel(cancel_token)
 
         on_stage("reviewing", {"advisory": True})
         review_request = self._build_review_request(task, plan_report, change_set, None)
         review_id = new_review_id()
-        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token)
+        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token, pinned_paths=pinned_paths)
 
         CanonicalPipelineRecorder(self._runtime, run_id).needs_user(payload={
             "reason": "review_advisory",
@@ -309,11 +317,13 @@ class PipelineRunner:
 
     def _run_fix_loop(
         self, run_id, workspace, task, plan_report, verification_plan, trigger, on_stage, cancel_token,
+        pinned_paths: Sequence[str] = (),
     ) -> PipelineReport:
         on_stage("fixing", {"trigger_kind": trigger.kind.value})
         request = FixLoopRequest(
             task=task, trigger=trigger, verification_plan=verification_plan,
             plan=plan_report.summary, max_fix_attempts=self._max_fix_attempts,
+            pinned_paths=tuple(pinned_paths),
         )
         try:
             fix_loop_report = self._fix_loop.run(run_id, workspace, request, cancel_token=cancel_token)
@@ -377,9 +387,12 @@ class PipelineRunner:
 
     def _run_planner(
         self, workspace, task: str, plan_id: str, cancel_token: CancellationToken | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> PlanReport:
         try:
-            report = self._planner.run(workspace, task, plan_id=plan_id, cancel_token=cancel_token)
+            report = self._planner.run(
+                workspace, task, plan_id=plan_id, cancel_token=cancel_token, pinned_paths=pinned_paths,
+            )
         except OperationCancelledError:
             raise
         except Exception as exc:
@@ -388,11 +401,15 @@ class PipelineRunner:
             raise PipelineExecutionError("Planner port did not return the requested plan_id.")
         return report
 
-    def _render_initial_input(self, workspace, task: str, plan_report: PlanReport, verification_plan) -> str:
+    def _render_initial_input(
+        self, workspace, task: str, plan_report: PlanReport, verification_plan,
+        pinned_paths: Sequence[str] = (),
+    ) -> str:
         try:
             rules = load_project_rules(workspace.root)
             return render_initial_worker_input(
                 task=task, plan=plan_report.summary, verification_plan=verification_plan, rules=rules,
+                pinned_paths=pinned_paths,
             )
         except Exception as exc:
             raise PipelineExecutionError(f"Initial worker input could not be rendered: {exc}") from exc
@@ -481,11 +498,12 @@ class PipelineRunner:
 
     def _run_reviewer(
         self, workspace, review_request: ReviewRequest, review_id: str,
-        cancel_token: CancellationToken | None = None,
+        cancel_token: CancellationToken | None = None, pinned_paths: Sequence[str] = (),
     ) -> ReviewReport:
         try:
             result = self._reviewer.run(
                 workspace, review_request, review_id=review_id, cancel_token=cancel_token,
+                pinned_paths=pinned_paths,
             )
         except OperationCancelledError:
             raise

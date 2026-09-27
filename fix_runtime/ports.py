@@ -9,6 +9,7 @@ capability owned elsewhere.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -91,9 +92,13 @@ class ReviewAttemptRunner(Protocol):
     does not duplicate review_runtime.ReviewerRunner's parser/prompt/context/
     read-only-tool-policy logic — it is expected to be a thin adapter over
     the existing ReviewerRunner.
+
+    `pinned_paths` (F6, @-mentions; optional, default empty): see
+    pipeline_runtime.ports.PlanAttemptRunner's docstring for the same
+    contract — purely additive, fed through to ContextEngine.build.
     """
 
     def run(
         self, workspace, request: ReviewRequest, *, review_id: str,
-        cancel_token: CancellationToken | None = None,
+        cancel_token: CancellationToken | None = None, pinned_paths: Sequence[str] = (),
     ) -> ReviewReport: ...

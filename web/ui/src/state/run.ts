@@ -50,12 +50,18 @@ export interface PlanInfo {
 export type RunStatus = "idle" | "running" | "done" | "failed" | "cancelled";
 export type RunStage = "draft" | "planning" | "working" | "reviewing" | "ready" | "applied" | "restored" | "error";
 
+/** F6 (@-mentions) — Composer'da @ ile pinlenen dosya/klasör; sadece bu
+    oturum boyunca task taslağıyla birlikte tutulur (kalıcı depoya YAZILMAZ). */
+export const MAX_MENTIONS = 10;
+
 interface RunState {
   status: RunStatus;
   /** Kullanıcının gördüğü lifecycle; altyapıdaki RunStatus'tan daha ayrıntılıdır. */
   runStage: RunStage;
   runId: string | null;
   task: string;
+  /** F6 (@-mentions): proje-göreli, forward-slash yollar (dosya veya klasör). */
+  mentions: string[];
   plan: PlanInfo | null;
   routing: Routing;
   providers: ProviderInfo[];
@@ -74,6 +80,9 @@ interface RunState {
   loadProviders: () => Promise<void>;
   setRouting: (role: Role, provider: string) => void;
   setTask: (task: string) => void;
+  /** F6 (@-mentions): halihazırda pinliyse yoksayılır; MAX_MENTIONS'da doludur. */
+  addMention: (path: string) => boolean;
+  removeMention: (path: string) => void;
   start: () => Promise<void>;
   cancel: () => Promise<void>;
   toggleDiff: (path: string) => void;
@@ -98,6 +107,7 @@ export const useRun = create<RunState>((set, get) => ({
   runStage: "draft",
   runId: null,
   task: "",
+  mentions: [],
   plan: null,
   routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
   providers: [],
@@ -138,8 +148,18 @@ export const useRun = create<RunState>((set, get) => ({
 
   setTask: (task) => set({ task }),
 
+  addMention: (path) => {
+    const { mentions } = get();
+    if (mentions.includes(path)) return true;
+    if (mentions.length >= MAX_MENTIONS) return false;
+    set({ mentions: [...mentions, path] });
+    return true;
+  },
+
+  removeMention: (path) => set((s) => ({ mentions: s.mentions.filter((m) => m !== path) })),
+
   start: async () => {
-    const { task, routing, status, runStage } = get();
+    const { task, routing, mentions, status, runStage } = get();
     if (status === "running") return;
     if (runStage === "ready") {
       toast.info("Önce hazır değişiklikleri inceleyin veya vazgeçin.");
@@ -164,8 +184,12 @@ export const useRun = create<RunState>((set, get) => ({
       checkpointId: null,
     });
     try {
-      const { runId } = await bridge.call("run.start", { task: task.trim(), routing });
+      const { runId } = await bridge.call("run.start", { task: task.trim(), routing, mentions });
       set({ runId });
+      // F1 (canlı ajan etkinliği): Etkinlik sekmesi bir önceki koşudan kalan
+      // öğeleri göstermesin diye döngüsel importu geciktir (diğer state
+      // dosyalarındaki desenle aynı).
+      void import("@/state/activity").then(({ useActivity }) => useActivity.getState().reset(runId));
     } catch (e) {
       set({ status: "failed", runStage: "error", error: e instanceof Error ? e.message : "Koşu başlatılamadı." });
       toast.err(e instanceof Error ? e.message : "Koşu başlatılamadı.");
@@ -209,6 +233,7 @@ export const useRun = create<RunState>((set, get) => ({
         proposals: [],
         runStage: "applied",
         task: "",
+        mentions: [],
         checkpointId,
         lastRestoredCheckpointId: null,
       });
@@ -281,7 +306,7 @@ export const useRun = create<RunState>((set, get) => ({
 
   reject: async () => {
     await bridge.call("run.rejectProposals", {});
-    set({ diffs: [], proposals: [], runStage: "draft", task: "" });
+    set({ diffs: [], proposals: [], runStage: "draft", task: "", mentions: [] });
     (await import("@/state/editor")).useEditor.getState().closeDiff();
     toast.info("Değişiklikler reddedildi.");
   },

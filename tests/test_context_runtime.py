@@ -257,3 +257,71 @@ def test_context_pack_used_chars_matches_canonical_rendering(tmp_path):
     _write(tmp_path, "sample.py", "def needle():\n    return 1\n")
     pack = ContextEngine().build(_workspace(tmp_path), "needle")
     assert pack.used_chars == len(render_context_pack(pack))
+
+
+# ---------------- F6 (@-mentions): pinned files/folders ----------------
+
+
+def test_pinned_file_is_included_first_at_highest_priority(tmp_path):
+    _write(tmp_path, "unrelated.py", "def needle():\n    return 1\n" * 50)
+    _write(tmp_path, "pinned.py", "x = 1\n")
+    pack = ContextEngine().build(_workspace(tmp_path), "needle", pinned_paths=("pinned.py",))
+    assert pack.segments[0].path == "pinned.py"
+    assert "pinned" in pack.segments[0].reasons
+    assert "[user-referenced file]" in render_context_pack(pack)
+
+
+def test_pinned_folder_yields_a_bounded_file_listing_without_contents(tmp_path):
+    _write(tmp_path, "folder/a.py", "secret content A\n")
+    _write(tmp_path, "folder/b.py", "secret content B\n")
+    pack = ContextEngine().build(_workspace(tmp_path), "x", pinned_paths=("folder",))
+    folder_segments = [s for s in pack.segments if s.path == "folder"]
+    assert len(folder_segments) == 1
+    text = folder_segments[0].text
+    assert "folder/a.py" in text and "folder/b.py" in text
+    assert "secret content" not in text  # no contents, listing only
+    assert "pinned_folder" in folder_segments[0].reasons
+    assert "[user-referenced folder listing]" in render_context_pack(pack)
+
+
+def test_pinned_large_file_is_truncated_with_an_explicit_note(tmp_path):
+    _write(tmp_path, "big.py", "x" * 100_000)
+    budget = ContextBudget(total_chars=4_000, map_chars=500, max_segment_chars=500)
+    pack = ContextEngine().build(_workspace(tmp_path), "x", budget, pinned_paths=("big.py",))
+    segment = next(s for s in pack.segments if s.path == "big.py")
+    assert segment.text.endswith("[pinned file truncated to the configured segment budget]")
+    assert len(render_context_pack(pack)) <= budget.total_chars
+    assert pack.truncated is True
+
+
+def test_pinned_paths_respect_the_total_budget(tmp_path):
+    for i in range(5):
+        _write(tmp_path, f"pin{i}.py", f"content {i}\n" * 20)
+    budget = ContextBudget(total_chars=1_500, map_chars=300, max_segment_chars=300)
+    pack = ContextEngine().build(
+        _workspace(tmp_path), "content", budget,
+        pinned_paths=tuple(f"pin{i}.py" for i in range(5)),
+    )
+    assert len(render_context_pack(pack)) <= budget.total_chars
+
+
+def test_pinned_path_escape_is_rejected():
+    with pytest.raises(ContextValidationError):
+        ContextEngine().build(ChangingReadWorkspace(), "x", pinned_paths=("../etc/passwd",))
+    with pytest.raises(ContextValidationError):
+        ContextEngine().build(ChangingReadWorkspace(), "x", pinned_paths=("/etc/passwd",))
+
+
+def test_pinned_paths_default_is_backward_compatible(tmp_path):
+    _write(tmp_path, "a.py", "x = 1\n")
+    a = ContextEngine().build(_workspace(tmp_path), "x")
+    b = ContextEngine().build(_workspace(tmp_path), "x", pinned_paths=())
+    assert a == b
+
+
+def test_pinned_paths_are_deduplicated_and_missing_ones_skipped(tmp_path):
+    _write(tmp_path, "a.py", "x = 1\n")
+    pack = ContextEngine().build(
+        _workspace(tmp_path), "x", pinned_paths=("a.py", "a.py", "does/not/exist.py"),
+    )
+    assert [s.path for s in pack.segments if "pinned" in s.reasons] == ["a.py"]

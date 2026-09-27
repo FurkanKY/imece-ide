@@ -104,6 +104,17 @@ class CanonicalReviewEventSink:
     def expected_last_event_seq(self) -> int:
         return self._expected_seq
 
+    def note_external_append(self, seq: int) -> None:
+        """F1 (live agent activity): see run_runtime.planner.
+        CanonicalPlannerEventSink.note_external_append -- same rationale,
+        Reviewer counterpart (used by executor_runtime.acp_reviewer.
+        AcpReviewAttemptRunner when an interleaved agent.activity notice is
+        recorded mid-session)."""
+        if isinstance(seq, bool) or not isinstance(seq, int):
+            raise ValueError("note_external_append seq must be an integer")
+        if seq > self._expected_seq:
+            self._expected_seq = seq
+
     # ---------------- AgentEventSink protocol ----------------
 
     def emit(self, event: AgentEvent) -> None:

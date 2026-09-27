@@ -8,6 +8,7 @@ executor. See docs/superpowers/specs/2026-08-26-native-planner-design.md.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 
 from agent_runtime.backend import ModelBackend
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
@@ -95,6 +96,7 @@ class PlannerRunner:
         recorder: PlanRecorder | None = None,
         plan_id: str | None = None,
         cancel_token: CancellationToken | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> PlanReport:
         # A. Validate task before any Agent side effect.
         task = _validate_task(task)
@@ -103,9 +105,10 @@ class PlannerRunner:
         plan_id = validate_plan_id(plan_id) if plan_id is not None else new_plan_id()
         task_sha256 = hashlib.sha256(task.encode("utf-8")).hexdigest()
 
-        # C. Build ContextPack.
+        # C. Build ContextPack. F6 (@-mentions): pinned_paths (if any) are
+        # included FIRST, at the highest priority, before rank-based segments.
         query = task[:MAX_QUERY_CHARS]
-        context_pack = self._context_engine.build(workspace, query, _PLANNER_CONTEXT_BUDGET)
+        context_pack = self._context_engine.build(workspace, query, _PLANNER_CONTEXT_BUDGET, pinned_paths=pinned_paths)
 
         # D. Render bounded planner input (project rules, if any, are read
         # from this same isolated workspace root -- see context_runtime.rules).

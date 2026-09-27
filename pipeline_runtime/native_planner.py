@@ -6,6 +6,8 @@ Reviewer adapters (see tests/test_native_attempt_adapters_integration.py).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from agent_runtime.backend import ModelBackend
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.models import AgentLimits
@@ -45,6 +47,7 @@ class NativePlanAttemptRunner:
 
     def run(
         self, workspace, task: str, *, plan_id: str, cancel_token: CancellationToken | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> PlanReport:
         # Reading rules here (in addition to PlannerRunner.run()'s own read
         # of the same workspace root) only costs a cheap, read-only file
@@ -55,12 +58,16 @@ class NativePlanAttemptRunner:
             sink = CanonicalPlannerEventSink(
                 self._runtime, self._run_id, plan_id=plan_id,
                 rules_sha256=rules.sha256 if rules is not None else None,
+                pinned_paths=pinned_paths,
             )
         except ValueError as exc:
             raise PipelineInputError(f"Cannot construct canonical Planner sink: {exc}") from exc
 
         try:
-            report = self._planner.run(workspace, task, recorder=sink, plan_id=plan_id, cancel_token=cancel_token)
+            report = self._planner.run(
+                workspace, task, recorder=sink, plan_id=plan_id, cancel_token=cancel_token,
+                pinned_paths=pinned_paths,
+            )
         except OperationCancelledError as exc:
             raise PipelineCancelledError(f"Planner port cancelled: {exc}") from exc
         except Exception as exc:

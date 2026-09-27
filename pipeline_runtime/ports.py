@@ -9,6 +9,7 @@ depends on. This mirrors that style for the Planner.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from agent_runtime.cancellation import CancellationToken
@@ -27,8 +28,15 @@ class PlanAttemptRunner(Protocol):
       - Planner activity NEVER counts as execution activity (see
         run_runtime.planner.CanonicalPlannerEventSink) — this is unchanged
         by PipelineRunner using this port.
+      - `pinned_paths` (F6, @-mentions; optional, default empty) is an
+        ordered sequence of workspace-relative paths the USER explicitly
+        referenced for this run. When present, the implementation SHOULD
+        feed it through to its ContextEngine.build(..., pinned_paths=...)
+        call so those files/folders are included at the highest priority.
+        This is purely additive: omitting it reproduces prior behavior.
     """
 
     def run(
         self, workspace, task: str, *, plan_id: str, cancel_token: CancellationToken | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> PlanReport: ...

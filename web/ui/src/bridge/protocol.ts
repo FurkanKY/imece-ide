@@ -29,6 +29,25 @@ export interface RunEvent {
   [key: string]: unknown;
 }
 
+/** F1 (canlı ajan etkinliği) — run_runtime.activity_projection.project_event
+    ile birebir eşleşir (bkz. webhost/api/activity.py). */
+export type ActivityRole = "planner" | "worker" | "verification" | "reviewer" | "fix" | "system";
+export type ActivityKind = "tool" | "model" | "check" | "stage" | "note" | "usage";
+export type ActivityStatus = "running" | "ok" | "error" | "info";
+
+export interface ActivityItem {
+  /** aynı mantıksal öğe (ör. bir araç çağrısı) için sabit — yerinde güncelleme */
+  id: string;
+  runId: string;
+  seq: number;
+  ts: string;
+  role: ActivityRole;
+  kind: ActivityKind;
+  status: ActivityStatus;
+  title: string;
+  detail?: string;
+}
+
 // ---- İstek/yanıt yüzeyi ----
 export interface Api {
   // window
@@ -81,7 +100,11 @@ export interface Api {
     params: {};
     result: { providers: ProviderInfo[]; recommendedRouting: Routing };
   };
-  "run.start": { params: { task: string; routing: Routing }; result: { runId: string } };
+  /** mentions: F6 (@-mentions) — Composer'da @ ile seçilen proje-göreli,
+      forward-slash yollar (dosya veya klasör); en fazla 10. Sunucu bunları
+      Project._safe ile bağımsızca doğrular — mevcut olmayan/proje dışına
+      çıkan bir yol sessizce düşürülür ve bir "info" olayıyla bildirilir. */
+  "run.start": { params: { task: string; routing: Routing; mentions?: string[] }; result: { runId: string } };
   "run.cancel": { params: { runId?: string }; result: {} };
   "run.applyProposals": {
     params: { paths: string[] };
@@ -358,6 +381,10 @@ export interface Events {
   "fs.changed": { kind: "created" | "deleted" | "modified" | "renamed"; paths: string[] };
   "run.event": { runId: string; ev: RunEvent };
   "run.finished": { runId: string; status: "done" | "failed" | "cancelled"; error?: string };
+  /** F1 (canlı ajan etkinliği) — run_runtime.activity_projection.project_event
+      çıktısıyla birebir; `id` aynı öğenin (ör. bir araç çağrısı) sonraki
+      durum güncellemeleri için sabit kalır (update-in-place). */
+  "run.activity": ActivityItem;
   "terminal.data": { termId: string; data: string };
   "terminal.exit": { termId: string; code: number };
   "search.results": { searchId: string; matches: SearchMatch[] };

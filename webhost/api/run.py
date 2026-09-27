@@ -40,6 +40,7 @@ durumu kalıcıdır); checkpoint restore bu dilimde kanonikleştirilmedi (bkz.
 webhost/api/checkpoint.py, DEĞİŞTİRİLMEDİ).
 """
 
+import os
 import threading
 import time
 
@@ -48,7 +49,7 @@ from PySide6.QtCore import QThread, Signal
 import ui_prefs
 import engine_factory
 from checkpoints import CheckpointStore
-from project import Project
+from project import IGNORE_EXT, Project
 from project_runner import run_project_task
 import providers as provider_registry
 from agents import DEFAULT_ROUTING
@@ -56,6 +57,7 @@ from run_runtime.events import RunEventType
 from run_runtime.legacy import LegacyRunCoordinator
 from run_runtime.models import RunStatus
 from webhost import state
+from webhost.api.activity import ActivityStreamer
 from webhost.bridge import handler, BridgeError
 
 try:
@@ -68,7 +70,14 @@ _active: dict = {
     "worker": None, "coordinator": None, "run_id": None, "proposals": [],
     # T1.2 — yeni (pipeline) motor durumu:
     "engine": "legacy", "workspace": None, "cancel_event": None,
+    # F1 (live agent activity) — yalnızca pipeline motorunda kullanılır;
+    # legacy koşularda hep None kalır (bkz. _stop_activity_streamer).
+    "activity_streamer": None,
 }
+
+# F6 (@-mentions): backend cap independent of (and enforced regardless of)
+# the Composer's own UI-level cap — a client is never trusted blindly.
+_MAX_MENTIONS = 10
 
 # kanonik pipeline rolü -> legacy routing anahtarı (bkz. agents.DEFAULT_ROUTING).
 _ROLE_ROUTING_KEY = {"planner": "planner", "worker": "coder", "reviewer": "reviewer"}
@@ -80,16 +89,17 @@ class _Worker(QThread):
     failed = Signal(str)
     cancelled = Signal()
 
-    def __init__(self, root, task, routing):
+    def __init__(self, root, task, routing, mentions=None):
         super().__init__()
         self.root, self.task, self.routing = root, task, routing
+        self.mentions = mentions or []
         self._cancel = False
 
     def cancel(self):
         self._cancel = True
 
     def run(self):
-        gen = run_project_task(self.root, self.task, self.routing)
+        gen = run_project_task(self.root, self.task, self.routing, mentions=self.mentions)
         try:
             for ev in gen:
                 if self._cancel:
@@ -112,7 +122,7 @@ class _PipelineWorker(QThread):
     finished_ok = Signal(object)  # PipelineReport
     failed = Signal(str)
 
-    def __init__(self, runtime, run_id, workspace, ports, task, cancel_event):
+    def __init__(self, runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=None):
         super().__init__()
         self.runtime = runtime
         self.run_id = run_id
@@ -120,6 +130,7 @@ class _PipelineWorker(QThread):
         self.ports = ports
         self.task = task
         self.cancel_event = cancel_event
+        self.pinned_paths = pinned_paths or []
 
     def run(self):
         try:
@@ -133,6 +144,7 @@ class _PipelineWorker(QThread):
                 self.run_id, self.workspace, self.task,
                 cancel_event=self.cancel_event,
                 on_stage=lambda s, info: self.stage.emit(s, dict(info)),
+                pinned_paths=self.pinned_paths,
             )
             self.finished_ok.emit(report)
         except Exception as e:  # motor hatası UI'a düzgün gitsin
@@ -141,6 +153,66 @@ class _PipelineWorker(QThread):
 
 def _effective_routing(params: dict) -> dict:
     return {**DEFAULT_ROUTING, **(params.get("routing") or {})}
+
+
+def _validate_mentions(proj: Project, raw: list) -> tuple[list[str], list[str]]:
+    """F6 (@-mentions): normalize + validate `run.start`'s optional `mentions`
+    param against the project.
+
+    Returns (valid, invalid): `valid` holds project-relative, forward-slash
+    paths that exist inside the project (file or folder) and, for files,
+    aren't an ignored binary extension (see project.IGNORE_EXT) -- a client
+    is never trusted blindly, this re-validates independently of whatever
+    the Composer already checked. `invalid` holds the ORIGINAL raw strings
+    that failed, for the caller to surface as an info event ("Bahsedilen
+    dosya bulunamadı: ..."). Capped at _MAX_MENTIONS regardless of how many
+    were sent.
+    """
+    valid: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+    for item in raw or []:
+        if not isinstance(item, str) or not item.strip():
+            invalid.append(item if isinstance(item, str) else str(item))
+            continue
+        rel = item.strip().replace("\\", "/").strip("/")
+        if not rel or rel in (".", ".."):
+            invalid.append(item)
+            continue
+        try:
+            full = proj._safe(rel)
+        except ValueError:
+            invalid.append(item)
+            continue
+        is_dir = os.path.isdir(full)
+        is_file = os.path.isfile(full)
+        if not is_dir and not is_file:
+            invalid.append(item)
+            continue
+        if is_file and os.path.splitext(rel)[1].lower() in IGNORE_EXT:
+            invalid.append(item)
+            continue
+        if rel in seen:
+            continue
+        seen.add(rel)
+        valid.append(rel)
+        if len(valid) >= _MAX_MENTIONS:
+            break
+    return valid, invalid
+
+
+def _stop_activity_streamer() -> None:
+    """F1: idempotent, best-effort stop+drain of the pipeline activity
+    streamer (no-op for legacy runs, where this is always None)."""
+    streamer = _active.get("activity_streamer")
+    _active["activity_streamer"] = None
+    if streamer is None:
+        return
+    try:
+        streamer.request_stop()
+        streamer.wait(2000)
+    except Exception:
+        pass
 
 
 def _dispose_workspace() -> None:
@@ -337,6 +409,7 @@ def _start(params, ctx):
         raise BridgeError("pending_proposals", "Bekleyen öneriler var; önce uygula veya reddet.")
 
     routing = _effective_routing(params)
+    mentions, invalid_mentions = _validate_mentions(proj, params.get("mentions") or [])
     runtime = state.get_run_runtime()
     # run.created/run.started BURADA, QThread BAŞLAMADAN ÖNCE kalıcı olur.
     # Başarısız olursa (Task/Run kalıcılığı) BridgeError doğal olarak
@@ -352,6 +425,7 @@ def _start(params, ctx):
     _active["workspace"] = None
     _active["cancel_event"] = None
     _active["engine"] = "legacy"
+    _active["activity_streamer"] = None
 
     bridge = ctx._bridge  # ana thread'e sinyalle taşınır (queued connection)
     ended = {"flag": False}  # failed/cancelled sonrası ikinci "done" yayınlanmasın
@@ -376,6 +450,7 @@ def _start(params, ctx):
         # COMMIT olmuştur (ya da hiç olmamıştır — o karar bu satırdan ÖNCE,
         # aşağıdaki status parametresiyle belirlenmiştir). run.finished
         # yalnızca mevcut host/UI yaşam döngüsünü sonlandırıp bildirir.
+        _stop_activity_streamer()
         payload = {"runId": run_id, "status": status}
         if error:
             payload["error"] = error
@@ -407,13 +482,13 @@ def _start(params, ctx):
             worker = _start_pipeline_run(
                 runtime, coordinator, workspace, pipeline_ports, task,
                 emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
-                ended=ended,
+                ended=ended, bridge=bridge, pinned_paths=mentions,
             )
         else:
             _active["engine"] = "legacy"
             worker = _start_legacy_run(
                 proj, coordinator, task, emit_ui=emit_ui, finish=finish,
-                settle_canonical_failure=settle_canonical_failure, ended=ended,
+                settle_canonical_failure=settle_canonical_failure, ended=ended, mentions=mentions,
             )
     except Exception as exc:
         # Kanonik run.created/run.started ZATEN commit oldu ama yerel QThread
@@ -431,6 +506,7 @@ def _start(params, ctx):
                 workspace.dispose()
             except Exception:
                 pass
+        _stop_activity_streamer()
         _active["worker"] = None
         _active["coordinator"] = None
         _active["run_id"] = None
@@ -440,16 +516,21 @@ def _start(params, ctx):
         raise BridgeError("worker_start_failed", f"Koşu başlatılamadı: {exc}")
 
     _active["worker"] = worker
+    # F6 (@-mentions): invalid mentions are surfaced as an info event AFTER
+    # the worker actually started, exactly like fallback_reason below --
+    # the run itself still proceeds with whatever valid mentions remain.
+    for bad in invalid_mentions:
+        emit_ui({"type": "info", "text": f"Bahsedilen dosya bulunamadı: {bad}"})
     if fallback_reason and ai_engine_pref == "auto":
         emit_ui({"type": "info", "text": fallback_reason})
     return {"runId": run_id}
 
 
-def _start_legacy_run(proj, coordinator, task, *, emit_ui, finish, settle_canonical_failure, ended):
+def _start_legacy_run(proj, coordinator, task, *, emit_ui, finish, settle_canonical_failure, ended, mentions=None):
     # Worker'a TAM OLARAK kanonik Run'da saklanan routing verilir — build_agents'ın
     # örtük ikinci bir DEFAULT_ROUTING türetmesine GÜVENİLMEZ; kalıcı routing ile
     # fiilen kullanılan routing AYNI olur.
-    worker = _Worker(proj.root, task, coordinator.routing)
+    worker = _Worker(proj.root, task, coordinator.routing, mentions=mentions)
 
     def on_event(ev: dict):
         try:
@@ -516,7 +597,8 @@ def _start_legacy_run(proj, coordinator, task, *, emit_ui, finish, settle_canoni
     return worker
 
 
-def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui, finish, settle_canonical_failure, ended):
+def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui, finish, settle_canonical_failure,
+                         ended, bridge, pinned_paths=None):
     run_id = coordinator.run_id
     cancel_event = threading.Event()
     # F7: this MUST be the same Event instance run.cancel()/shutdown() act
@@ -526,7 +608,7 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     # cancel requested the instant after run.start() returns is never lost.
     _active["cancel_event"] = cancel_event
     proj = _require_project()
-    worker = _PipelineWorker(runtime, run_id, workspace, ports, task, cancel_event)
+    worker = _PipelineWorker(runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=pinned_paths)
 
     stage_state = {"role": None, "start_ts": None, "last_seq": 0}
 
@@ -628,6 +710,21 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     worker.failed.connect(on_pipeline_failed)
     worker.finished_ok.connect(on_pipeline_finished)
     worker.start()
+
+    # F1 (live agent activity): tails the SAME canonical event log this run
+    # writes to (run_runtime is the single source of truth) and emits
+    # `run.activity` items live, independent of on_stage's coarse stage
+    # boundaries. Best-effort: a streaming failure never affects the run
+    # itself (see webhost.api.activity.ActivityStreamer).
+    streamer = ActivityStreamer(runtime, run_id)
+
+    def on_activity(item: dict) -> None:
+        bridge.emit_event("run.activity", item)
+
+    streamer.activity.connect(on_activity)
+    _active["activity_streamer"] = streamer
+    streamer.start()
+
     return worker
 
 
@@ -829,4 +926,5 @@ def shutdown():
         else:
             w.cancel()
         w.wait(2000)
+    _stop_activity_streamer()
     _dispose_workspace()

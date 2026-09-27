@@ -213,3 +213,47 @@ def test_render_initial_worker_input_huge_rules_never_exceed_budget():
     )
     assert len(rendered) <= MAX_FIX_INPUT_CHARS
     assert "task" in rendered
+
+
+# ---------------- F6 (@-mentions): USER-REFERENCED FILES section ----------------
+
+
+def test_render_initial_worker_input_without_pinned_paths_is_unchanged():
+    without = render_initial_worker_input(task="task", plan=None, verification_plan=None)
+    without_explicit_empty = render_initial_worker_input(
+        task="task", plan=None, verification_plan=None, pinned_paths=(),
+    )
+    assert without == without_explicit_empty
+    assert "USER-REFERENCED FILES" in without  # section always present, "(none)" body
+
+
+def test_render_initial_worker_input_lists_pinned_paths_without_contents():
+    rendered = render_initial_worker_input(
+        task="task", plan=None, verification_plan=None, pinned_paths=("src/app.py", "src/lib"),
+    )
+    assert "USER-REFERENCED FILES" in rendered
+    assert "src/app.py" in rendered
+    assert "src/lib" in rendered
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+
+
+def test_render_fix_worker_input_lists_pinned_paths_and_stays_bounded():
+    trigger = _verification_fail_trigger()
+    rendered = render_fix_worker_input(
+        task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2,
+        pinned_paths=("a.py", "b/c.py"),
+    )
+    assert "USER-REFERENCED FILES" in rendered
+    assert "a.py" in rendered and "b/c.py" in rendered
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+
+
+def test_render_fix_worker_input_without_pinned_paths_is_unchanged():
+    trigger = _verification_fail_trigger()
+    without = render_fix_worker_input(
+        task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2,
+    )
+    without_explicit_empty = render_fix_worker_input(
+        task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2, pinned_paths=(),
+    )
+    assert without == without_explicit_empty

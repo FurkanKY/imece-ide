@@ -216,7 +216,9 @@ class FixLoopRunner:
             review_changes = self._capture(workspace)
             review_request = self._build_review_request(request, review_changes, verification_report)
             review_id = new_review_id()
-            review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token)
+            review_report = self._run_reviewer(
+                workspace, review_request, review_id, cancel_token, pinned_paths=request.pinned_paths,
+            )
             self._validate_review_provenance(review_report, review_id, verification_id, review_changes)
             last_review_report = review_report
 
@@ -298,7 +300,7 @@ class FixLoopRunner:
             return render_fix_worker_input(
                 task=request.task, plan=request.plan, trigger=trigger,
                 attempt_index=attempt_index, max_fix_attempts=request.max_fix_attempts,
-                rules=rules,
+                rules=rules, pinned_paths=request.pinned_paths,
             )
         except Exception as exc:
             raise FixLoopExecutionError(f"Fix worker input could not be rendered: {exc}") from exc
@@ -372,10 +374,13 @@ class FixLoopRunner:
 
     def _run_reviewer(
         self, workspace, review_request: ReviewRequest, review_id: str,
-        cancel_token: CancellationToken | None = None,
+        cancel_token: CancellationToken | None = None, pinned_paths=(),
     ):
         try:
-            result = self._reviewer.run(workspace, review_request, review_id=review_id, cancel_token=cancel_token)
+            result = self._reviewer.run(
+                workspace, review_request, review_id=review_id, cancel_token=cancel_token,
+                pinned_paths=pinned_paths,
+            )
         except OperationCancelledError:
             raise
         except Exception as exc:

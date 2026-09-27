@@ -7,6 +7,8 @@ never duplicated here; the caller builds a ReviewerRunner and hands it in.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from context_runtime import load_project_rules
 from review_runtime.models import ReviewReport, ReviewRequest
@@ -43,7 +45,7 @@ class NativeReviewAttemptAdapter:
 
     def run(
         self, workspace, request: ReviewRequest, *, review_id: str,
-        cancel_token: CancellationToken | None = None,
+        cancel_token: CancellationToken | None = None, pinned_paths: Sequence[str] = (),
     ) -> ReviewReport:
         if not isinstance(request, ReviewRequest):
             raise ExecutorAdapterInputError("NativeReviewAttemptAdapter.run requires a ReviewRequest.")
@@ -64,6 +66,7 @@ class NativeReviewAttemptAdapter:
         try:
             report = self._reviewer.run(
                 workspace, request, recorder=sink, review_id=review_id, cancel_token=cancel_token,
+                pinned_paths=pinned_paths,
             )
         except OperationCancelledError as exc:
             raise ExecutorAdapterCancelledError(f"Reviewer port cancelled: {exc}") from exc

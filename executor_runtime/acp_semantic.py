@@ -33,6 +33,19 @@ execution.* canonical events (that is exclusively the Worker's vocabulary,
 via run_runtime.acp.CanonicalAcpEventSink) -- see the plan/review attempt
 runner modules for how intermediate ACP progress is instead dropped rather
 than mapped into plan.*/review.* canonical events.
+
+F1 (live agent activity) addendum: `_AgentMessageTextSink` MAY additionally
+be given an `activity_recorder` callable (see `run_acp_semantic_prompt`'s
+`activity_recorder`/`role` parameters). When present, `tool_call` /
+`tool_call_update` / `plan` session updates are mapped into
+run_runtime.agent_activity.record_agent_activity(...) calls tagged with
+`agent.activity` -- a NON-authoritative, advisory canonical event kept
+entirely outside plan.*/review.*/execution.* vocabulary (see that module's
+docstring for why this can never affect RunCompletionGate). Only a single
+"Düşünüyor…" note is recorded per uninterrupted burst of
+`agent_thought_chunk` updates (reset by the next tool_call/plan/message
+update) -- individual thought text is still never persisted, matching the
+existing agent_thought_chunk-drop behavior above.
 """
 
 from __future__ import annotations
@@ -40,7 +53,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from typing import Protocol
+from typing import Any, Protocol
 
 import acp
 
@@ -48,7 +61,20 @@ from agent_runtime.cancellation import OperationCancelledError
 from acp_runtime.events import AcpEventSink, AcpPermissionRequested, AcpPermissionResolved, AcpSessionUpdateObserved
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest, AcpRunResult
 from change_runtime.git import GitWorktreeChangeProvider
+from run_runtime.activity_projection import acp_tool_title
 from workspace.worktree import GitWorktreeWorkspace
+
+# ACP ToolCallStart/ToolCallProgress.status -> agent.activity status; kept in
+# sync with run_runtime.activity_projection._ACP_STATUS (not imported --
+# that mapping is private to the projection module).
+_ACP_ACTIVITY_STATUS = {
+    "pending": "running",
+    "in_progress": "running",
+    "completed": "ok",
+    "failed": "error",
+}
+
+ActivityRecorder = Any
 
 ACP_SYSTEM_INSTRUCTIONS_HEADER = (
     "===== SYSTEM INSTRUCTIONS (highest priority; ACP has no separate "
@@ -115,8 +141,21 @@ class _AgentMessageTextSink:
     runners that use this sink.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, role: str | None = None, activity_recorder: ActivityRecorder | None = None) -> None:
         self._chunks: list[str] = []
+        self._role = role
+        self._activity_recorder = activity_recorder
+        self._thinking_note_open = False
+
+    def _record_activity(self, **kwargs: Any) -> None:
+        if self._activity_recorder is None or self._role is None:
+            return
+        try:
+            self._activity_recorder(role=self._role, **kwargs)
+        except Exception:
+            # Best-effort only: a live-activity notice failure must never
+            # interrupt/abort the underlying semantic ACP session.
+            pass
 
     def emit(self, event: object) -> None:
         if isinstance(event, AcpSessionUpdateObserved):
@@ -126,6 +165,34 @@ class _AgentMessageTextSink:
                 text = getattr(content, "text", None)
                 if isinstance(text, str):
                     self._chunks.append(text)
+                self._thinking_note_open = False
+                return
+            if isinstance(update, acp.schema.AgentThoughtChunk):
+                if not self._thinking_note_open:
+                    self._record_activity(kind="note", title="Düşünüyor…", status="info")
+                    self._thinking_note_open = True
+                return
+            if isinstance(update, (acp.schema.ToolCallStart, acp.schema.ToolCallProgress)):
+                self._thinking_note_open = False
+                status = _ACP_ACTIVITY_STATUS.get(getattr(update, "status", None), "running")
+                title = acp_tool_title(getattr(update, "kind", None), getattr(update, "title", None))
+                tool_call_id = getattr(update, "tool_call_id", None)
+                self._record_activity(
+                    kind="tool", title=title, status=status,
+                    tool_call_id=tool_call_id if isinstance(tool_call_id, str) else None,
+                )
+                return
+            if isinstance(update, acp.schema.AgentPlanUpdate):
+                self._thinking_note_open = False
+                entries = getattr(update, "entries", None) or []
+                summary = "; ".join(
+                    f"{getattr(entry, 'status', '?')}: {getattr(entry, 'content', '')}" for entry in entries[:20]
+                )
+                self._record_activity(
+                    kind="stage", title="Plan güncellendi", status="info",
+                    detail=summary or None,
+                )
+                return
             return
         if isinstance(event, (AcpPermissionRequested, AcpPermissionResolved)):
             # Already auto-denied by the ACP client core (layer 1); nothing
@@ -181,6 +248,8 @@ def run_acp_semantic_prompt(
     prompt: str,
     limits: AcpClientLimits | None = None,
     cancel_token=None,
+    role: str | None = None,
+    activity_recorder: ActivityRecorder | None = None,
 ) -> tuple[str, AcpRunResult]:
     """Run one fresh, read-only ACP session and return (final_text, result).
 
@@ -188,6 +257,13 @@ def run_acp_semantic_prompt(
     differs before vs. after the session (see module docstring layer 2).
     Must not be called from inside a running event loop (mirrors
     executor_runtime.acp_worker.AcpWorkerAttemptAdapter.run's guard).
+
+    `role`/`activity_recorder` are optional F1 (live agent activity) hooks:
+    when both are given, tool_call/tool_call_update/plan session updates are
+    mapped into `activity_recorder(role=role, kind=..., title=..., status=...,
+    tool_call_id=..., detail=...)` calls -- see module docstring addendum.
+    Omitting either keeps this function's behavior byte-identical to before
+    F1 (no activity mapping, no extra canonical writes).
     """
     if limits is None:
         limits = AcpClientLimits()
@@ -217,7 +293,7 @@ def run_acp_semantic_prompt(
         raise AcpSemanticExecutionError("run_acp_semantic_prompt cannot execute inside a running event loop.")
 
     before_fingerprint = _workspace_fingerprint(workspace)
-    sink = _AgentMessageTextSink()
+    sink = _AgentMessageTextSink(role=role, activity_recorder=activity_recorder)
     try:
         result = asyncio.run(
             acp_client.run(

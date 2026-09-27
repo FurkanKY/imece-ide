@@ -359,3 +359,107 @@ def test_pipeline_project_rules_reach_planner_worker_and_reviewer(tmp_path, repo
         text = backend.first_user_input_text
         assert marker in text, f"{role} did not receive the project rules"
         assert "untrusted" in text.lower(), f"{role}'s rules section was not labelled untrusted"
+
+
+def test_pipeline_pinned_paths_reach_planner_reviewer_content_and_worker_path_list(tmp_path, repo_workspace):
+    """F6 (@-mentions): a pinned file's CONTENT reaches the Planner and
+    Reviewer (via ContextEngine, at highest priority), while the Worker only
+    gets the pinned PATH LIST (it has full repository tools and reads pinned
+    files itself -- see fix_runtime.prompt's module docstring)."""
+    runtime, run = setup_runtime(tmp_path)
+
+    pinned_marker = "PINNED-FILE-SENTINEL-CONTENT-6f2a"
+    (repo_workspace.root / "pinned.txt").write_text(f"{pinned_marker}\n", encoding="utf-8")
+
+    planner_backend = ScriptedBackend([_completed_turn(_plan_json())])
+    planner = NativePlanAttemptRunner(runtime, run.run_id, planner_backend)
+
+    worker_backend = ScriptedBackend([
+        ModelTurn(
+            "", (ModelToolCall("c1", "write_file", {"path": "a.txt", "content": "fixed\n"}),),
+            ModelStopReason.TOOL_USE, ModelUsage(),
+        ),
+        _completed_turn("Fixed the bug."),
+    ])
+    worker = NativeWorkerAttemptAdapter(runtime, run.run_id, worker_backend)
+
+    verification = NativeVerificationAttemptAdapter(
+        runtime, run.run_id, process_runner=FakeProcessRunner([_process_result(0)]),
+    )
+
+    review_backend = ScriptedBackend([_completed_turn('{"verdict":"APPROVED","summary":"Good fix.","findings":[]}')])
+    reviewer = NativeReviewAttemptAdapter(runtime, run.run_id, ReviewerRunner(review_backend))
+
+    change_provider = GitWorktreeChangeProvider()
+
+    pipeline = PipelineRunner(
+        runtime, planner=planner, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=change_provider,
+    )
+
+    report = pipeline.run(
+        run.run_id, repo_workspace, "Fix the bug in a.txt", pinned_paths=("pinned.txt",),
+    )
+    assert report.status is PipelineStatus.NEEDS_USER
+
+    # Planner and Reviewer went through ContextEngine.build(pinned_paths=...):
+    # the pinned file's actual CONTENT is inlined, tagged as user-referenced.
+    for backend, role in ((planner_backend, "planner"), (review_backend, "reviewer")):
+        text = backend.first_user_input_text
+        assert pinned_marker in text, f"{role} did not receive the pinned file's content"
+        assert "[user-referenced file]" in text, f"{role}'s pinned segment was not tagged"
+
+    # Worker gets only the PATH, never the pinned file's content inlined --
+    # it has its own repository tools to read it (see render_initial_worker_input).
+    worker_text = worker_backend.first_user_input_text
+    assert "USER-REFERENCED FILES" in worker_text
+    assert "pinned.txt" in worker_text
+    assert pinned_marker not in worker_text
+
+    # Canonical provenance: plan.started carries pinned_paths (decision 5),
+    # the same additive-field style as rules_sha256.
+    events = runtime.events(run.run_id, limit=500).events
+    plan_started = next(e for e in events if e.type == RunEventType.PLAN_STARTED)
+    assert plan_started.payload.get("pinned_paths") == ["pinned.txt"]
+
+
+def test_pipeline_without_pinned_paths_is_unaffected(tmp_path, repo_workspace):
+    """Backward compatibility: omitting pinned_paths reproduces the exact
+    prior behavior (no USER-REFERENCED FILES noise, no pinned_paths field)."""
+    runtime, run = setup_runtime(tmp_path)
+
+    planner_backend = ScriptedBackend([_completed_turn(_plan_json())])
+    planner = NativePlanAttemptRunner(runtime, run.run_id, planner_backend)
+
+    worker_backend = ScriptedBackend([
+        ModelTurn(
+            "", (ModelToolCall("c1", "write_file", {"path": "a.txt", "content": "fixed\n"}),),
+            ModelStopReason.TOOL_USE, ModelUsage(),
+        ),
+        _completed_turn("Fixed the bug."),
+    ])
+    worker = NativeWorkerAttemptAdapter(runtime, run.run_id, worker_backend)
+
+    verification = NativeVerificationAttemptAdapter(
+        runtime, run.run_id, process_runner=FakeProcessRunner([_process_result(0)]),
+    )
+
+    review_backend = ScriptedBackend([_completed_turn('{"verdict":"APPROVED","summary":"Good fix.","findings":[]}')])
+    reviewer = NativeReviewAttemptAdapter(runtime, run.run_id, ReviewerRunner(review_backend))
+
+    change_provider = GitWorktreeChangeProvider()
+
+    pipeline = PipelineRunner(
+        runtime, planner=planner, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=change_provider,
+    )
+
+    report = pipeline.run(run.run_id, repo_workspace, "Fix the bug in a.txt")
+    assert report.status is PipelineStatus.NEEDS_USER
+
+    assert worker_backend.first_user_input_text.count("USER-REFERENCED FILES") == 1
+    assert "(none)" in worker_backend.first_user_input_text
+
+    events = runtime.events(run.run_id, limit=500).events
+    plan_started = next(e for e in events if e.type == RunEventType.PLAN_STARTED)
+    assert "pinned_paths" not in plan_started.payload

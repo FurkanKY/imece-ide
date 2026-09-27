@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from agent_runtime.backend import ModelBackend
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.errors import AgentRuntimeError
@@ -77,6 +79,7 @@ class ReviewerRunner:
         recorder: ReviewRecorder | None = None,
         review_id: str | None = None,
         cancel_token: CancellationToken | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> ReviewReport:
         if not isinstance(request, ReviewRequest):
             raise ReviewInputError("ReviewerRunner.run requires a ReviewRequest.")
@@ -84,7 +87,7 @@ class ReviewerRunner:
         review_id = validate_review_id(review_id) if review_id is not None else new_review_id()
 
         query = request.task[:MAX_QUERY_CHARS]
-        context_pack = self._context_engine.build(workspace, query, _REVIEW_CONTEXT_BUDGET)
+        context_pack = self._context_engine.build(workspace, query, _REVIEW_CONTEXT_BUDGET, pinned_paths=pinned_paths)
 
         rules = load_project_rules(workspace.root)
         rendered_input = render_initial_review_input(

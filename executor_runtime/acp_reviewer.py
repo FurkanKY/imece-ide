@@ -23,6 +23,7 @@ RunEvent.execution_id -- only review.* (see run_runtime.reviewer).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.events import ExecutionCompleted, ExecutionStarted
@@ -33,6 +34,7 @@ from review_runtime.models import ReviewReport, ReviewRequest, validate_review_i
 from review_runtime.parser import parse_review_decision
 from review_runtime.prompt import REVIEWER_SYSTEM_INSTRUCTIONS, render_initial_review_input
 from review_runtime.runner import _REVIEW_CONTEXT_BUDGET
+from run_runtime.agent_activity import record_agent_activity
 from run_runtime.reviewer import CanonicalReviewEventSink
 from run_runtime.service import RunRuntime
 
@@ -84,7 +86,7 @@ class AcpReviewAttemptRunner:
 
     def run(
         self, workspace, request: ReviewRequest, *, review_id: str,
-        cancel_token: CancellationToken | None = None,
+        cancel_token: CancellationToken | None = None, pinned_paths: Sequence[str] = (),
     ) -> ReviewReport:
         if not isinstance(request, ReviewRequest):
             raise ExecutorAdapterInputError("AcpReviewAttemptRunner.run requires a ReviewRequest.")
@@ -100,7 +102,7 @@ class AcpReviewAttemptRunner:
             raise ExecutorAdapterInputError(f"Cannot construct canonical Reviewer sink: {exc}") from exc
 
         query = request.task[:MAX_QUERY_CHARS]
-        context_pack = self._context_engine.build(workspace, query, _REVIEW_CONTEXT_BUDGET)
+        context_pack = self._context_engine.build(workspace, query, _REVIEW_CONTEXT_BUDGET, pinned_paths=pinned_paths)
         rendered_task_input = render_initial_review_input(
             task=request.task,
             plan=request.plan,
@@ -125,6 +127,21 @@ class AcpReviewAttemptRunner:
         transient_execution_id = f"acp_review_exec_{review_id}"
         sink.emit(ExecutionStarted(execution_id=transient_execution_id, task=request.task))
 
+        def _activity(**kwargs) -> None:
+            # F1 (live agent activity): best-effort, advisory only -- never
+            # allowed to fail the Reviewer attempt itself (see
+            # run_runtime.agent_activity's module docstring).
+            try:
+                event = record_agent_activity(
+                    self._runtime, self._run_id, execution_id=transient_execution_id, **kwargs,
+                )
+                # See pipeline_runtime.acp_planner's identical comment: keeps
+                # sink's own optimistic cursor from going stale because of
+                # this interleaved, independently-appended notice.
+                sink.note_external_append(event.seq)
+            except Exception:
+                pass
+
         try:
             final_text, _acp_result = run_acp_semantic_prompt(
                 acp_client=self._acp_client,
@@ -133,6 +150,8 @@ class AcpReviewAttemptRunner:
                 prompt=acp_prompt,
                 limits=self._limits,
                 cancel_token=cancel_token,
+                role="reviewer",
+                activity_recorder=_activity,
             )
         except OperationCancelledError as cancellation:
             self._fail(sink, review_id, cancellation)

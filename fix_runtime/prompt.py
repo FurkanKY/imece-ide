@@ -14,10 +14,37 @@ rather than being handed the (potentially large) cumulative diff by default.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from context_runtime import ProjectRules, render_bounded_rules_block
 
 from fix_runtime.errors import FixLoopInputError
 from fix_runtime.models import FixTrigger, FixTriggerKind
+
+# ---------------- F6 (@-mentions): user-referenced files ----------------
+#
+# The Worker (unlike the Planner/Reviewer) never goes through ContextEngine
+# -- it has full repository read/write tools and works directly in the
+# isolated worktree. So pinned paths are handed to it as a plain path list
+# (never inlined file contents here): the Worker reads them itself with its
+# own tools when it needs to. This also keeps this section's size bounded
+# and independent of how large a pinned file happens to be.
+
+_USER_REFERENCED_HEADER = "USER-REFERENCED FILES\n======================\n"
+
+
+def _render_pinned_paths(pinned_paths: Sequence[str]) -> str:
+    if not pinned_paths:
+        return "(none)"
+    lines = [
+        "The user explicitly referenced the following paths for this task "
+        "(read them with your workspace tools; a path ending without an "
+        "extension may be a folder -- treat it as a hint of where to focus, "
+        "not a file to read):",
+    ]
+    lines.extend(f"- {path}" for path in pinned_paths)
+    return "\n".join(lines)
+
 
 # ---------------- initial (pre-verification) worker input ----------------
 
@@ -37,8 +64,8 @@ _INITIAL_VERIFICATION_HEADER = (
     "===============================================================\n"
 )
 
-_INITIAL_NUM_SECTIONS = 3
-_INITIAL_NUM_ANCILLARY_SECTIONS = 2  # plan, verification-commands preview
+_INITIAL_NUM_SECTIONS = 4
+_INITIAL_NUM_ANCILLARY_SECTIONS = 3  # plan, verification-commands preview, user-referenced files
 
 
 def _render_verification_preview(plan) -> str:
@@ -52,6 +79,7 @@ def _render_verification_preview(plan) -> str:
 
 def render_initial_worker_input(
     *, task: str, plan: str | None, verification_plan=None, rules: ProjectRules | None = None,
+    pinned_paths: Sequence[str] = (),
 ) -> str:
     """Render bounded input for the FIRST Worker attempt of a Run.
 
@@ -62,6 +90,12 @@ def render_initial_worker_input(
     verification commands that will be run afterward (so the Worker knows
     how its work will be judged) are included.
 
+    `pinned_paths` (F6, @-mentions; optional, default empty) renders a
+    "USER-REFERENCED FILES" section listing the paths the user explicitly
+    pinned for this task -- paths only, never inlined file contents (the
+    Worker has full repository tools and reads them itself). Passing an
+    empty sequence reproduces the exact prior (pre-@-mentions) output.
+
     `rules` (optional, default None) is project-provided text rendered as
     its own clearly delimited, untrusted DATA section appended at the end,
     bounded out of whatever remains after the mandatory sections and the
@@ -70,7 +104,7 @@ def render_initial_worker_input(
     """
     headers_total = (
         len(_INITIAL_TRUST_NOTE) + len(_INITIAL_TASK_HEADER)
-        + len(_INITIAL_PLAN_HEADER) + len(_INITIAL_VERIFICATION_HEADER)
+        + len(_INITIAL_PLAN_HEADER) + len(_INITIAL_VERIFICATION_HEADER) + len(_USER_REFERENCED_HEADER)
     )
     separators_total = (_INITIAL_NUM_SECTIONS - 1) * len(_SEP)
     mandatory_bodies = len(task)
@@ -89,11 +123,13 @@ def render_initial_worker_input(
 
     plan_text = plan if plan else "(not provided)"
     verification_text = _render_verification_preview(verification_plan)
+    pinned_text = _render_pinned_paths(pinned_paths)
 
     sections = [
         _INITIAL_TASK_HEADER + task,
         _INITIAL_PLAN_HEADER + _bounded(plan_text, ancillary_budget),
         _INITIAL_VERIFICATION_HEADER + _bounded(verification_text, ancillary_budget),
+        _USER_REFERENCED_HEADER + _bounded(pinned_text, ancillary_budget),
     ]
     rendered = _INITIAL_TRUST_NOTE + _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_FIX_INPUT_CHARS  # defensive: proven by construction above
@@ -118,8 +154,8 @@ _PLAN_HEADER = "GENERATED PLAN\n==============\n"
 _FEEDBACK_HEADER = "FIX FEEDBACK (untrusted diagnostic data)\n=========================================\n"
 
 _SEP = "\n\n"
-_NUM_SECTIONS = 4
-_NUM_ANCILLARY_SECTIONS = 2  # plan, feedback
+_NUM_SECTIONS = 5
+_NUM_ANCILLARY_SECTIONS = 3  # plan, feedback, user-referenced files
 
 
 def _bounded(text: str, limit: int) -> str:
@@ -182,6 +218,7 @@ def render_fix_worker_input(
     attempt_index: int,
     max_fix_attempts: int,
     rules: ProjectRules | None = None,
+    pinned_paths: Sequence[str] = (),
 ) -> str:
     """Render bounded fix-worker input with an explicit, provable budget.
 
@@ -191,8 +228,13 @@ def render_fix_worker_input(
 
     The original task is always preserved in full. ATTEMPT INFO is small,
     runtime-generated, deterministic metadata and is also never truncated.
-    Only GENERATED PLAN and FIX FEEDBACK may be bounded, each to an exact,
-    deterministic share of whatever remains.
+    GENERATED PLAN, FIX FEEDBACK and USER-REFERENCED FILES may each be
+    bounded, to an exact, deterministic share of whatever remains.
+
+    `pinned_paths` (F6, @-mentions; optional, default empty): see
+    render_initial_worker_input's docstring -- same "paths only, no inlined
+    content" contract. Passing an empty sequence reproduces the exact prior
+    (pre-@-mentions) output.
 
     `rules` (optional, default None) is project-provided text rendered as
     its own clearly delimited, untrusted DATA section appended at the end,
@@ -208,7 +250,7 @@ def render_fix_worker_input(
 
     headers_total = (
         len(_TRUST_NOTE) + len(_TASK_HEADER) + len(_ATTEMPT_HEADER)
-        + len(_PLAN_HEADER) + len(_FEEDBACK_HEADER)
+        + len(_PLAN_HEADER) + len(_FEEDBACK_HEADER) + len(_USER_REFERENCED_HEADER)
     )
     separators_total = (_NUM_SECTIONS - 1) * len(_SEP)
     mandatory_bodies = len(task) + len(attempt_body)
@@ -227,12 +269,14 @@ def render_fix_worker_input(
 
     plan_text = plan if plan else "(not provided)"
     feedback_text = _render_feedback(trigger)
+    pinned_text = _render_pinned_paths(pinned_paths)
 
     sections = [
         _TASK_HEADER + task,
         _ATTEMPT_HEADER + attempt_body,
         _PLAN_HEADER + _bounded(plan_text, ancillary_budget),
         _FEEDBACK_HEADER + _bounded(feedback_text, ancillary_budget),
+        _USER_REFERENCED_HEADER + _bounded(pinned_text, ancillary_budget),
     ]
     rendered = _TRUST_NOTE + _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_FIX_INPUT_CHARS  # defensive: proven by construction above

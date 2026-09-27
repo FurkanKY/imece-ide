@@ -157,7 +157,7 @@ class FakeReviewAttemptRunner:
         self._verdicts = list(verdicts)
         self.calls: list[str] = []
 
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         self.calls.append(review_id)
         verdict = self._verdicts.pop(0)
         findings = () if verdict is ReviewVerdict.APPROVED else (ReviewFinding(ReviewSeverity.MAJOR, "bug"),)
@@ -192,7 +192,7 @@ class FakeReviewAttemptRunner:
 
 
 class WrongProvenanceReviewAttemptRunner:
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         return ReviewReport(
             review_id="wrong-id-not-requested", verdict=ReviewVerdict.APPROVED, summary="s", findings=(),
             repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,
@@ -500,7 +500,7 @@ class MutatingReviewAttemptRunner:
     def __init__(self, workspace: FakeWorkspace):
         self._workspace = workspace
 
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         report = ReviewReport(
             review_id=review_id, verdict=ReviewVerdict.APPROVED, summary="s", findings=(),
             repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,
@@ -761,7 +761,7 @@ class WrongTypeVerificationAttemptRunner:
 
 
 class NoneReturningReviewAttemptRunner:
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         return None
 
 

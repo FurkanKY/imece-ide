@@ -2,7 +2,7 @@
    composer + geçmiş çekmecesi. Öneri gelince Değişiklikler'e otomatik geçer. */
 
 import { useEffect, useState } from "react";
-import { Clock, ClipboardList, Activity, FileDiff, CircleAlert, CheckCircle2, PanelRightClose, ShieldCheck, RotateCcw, Play } from "lucide-react";
+import { Clock, ClipboardList, Activity as ActivityIcon, FileDiff, CircleAlert, CheckCircle2, PanelRightClose, ShieldCheck, RotateCcw, Play, Radio } from "lucide-react";
 import { IconButton } from "@/components/ui";
 import { useRun } from "@/state/run";
 import { Pipeline } from "./Pipeline";
@@ -11,13 +11,14 @@ import { Changes } from "./Changes";
 import { Composer } from "./Composer";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { Plan } from "./Plan";
+import { Activity } from "./Activity";
 
-type Tab = "plan" | "work" | "review";
+type Tab = "plan" | "work" | "review" | "activity";
 
 const STAGE_META = {
   draft: { label: "Hazır", Icon: ClipboardList, tone: "text-muted" },
   planning: { label: "Planlanıyor", Icon: ClipboardList, tone: "text-accent" },
-  working: { label: "Değişiklik hazırlanıyor", Icon: Activity, tone: "text-accent" },
+  working: { label: "Değişiklik hazırlanıyor", Icon: ActivityIcon, tone: "text-accent" },
   reviewing: { label: "İnceleniyor", Icon: FileDiff, tone: "text-warn" },
   ready: { label: "İnceleme hazır", Icon: FileDiff, tone: "text-warn" },
   applied: { label: "Uygulandı", Icon: CheckCircle2, tone: "text-ok" },
@@ -27,7 +28,7 @@ const STAGE_META = {
 
 const DECISION_META = {
   planning: { title: "Plan hazırlanıyor", description: "Kapsam ve riskler çıkarılıyor.", Icon: ClipboardList, tone: "text-accent", line: "border-l-accent" },
-  working: { title: "Değişiklik hazırlanıyor", description: "Plan dosya değişikliklerine dönüştürülüyor.", Icon: Activity, tone: "text-accent", line: "border-l-accent" },
+  working: { title: "Değişiklik hazırlanıyor", description: "Plan dosya değişikliklerine dönüştürülüyor.", Icon: ActivityIcon, tone: "text-accent", line: "border-l-accent" },
   reviewing: { title: "İnceleme sürüyor", description: "Değişiklikler kontrol ediliyor.", Icon: FileDiff, tone: "text-warn", line: "border-l-warn" },
   ready: { title: "İnceleme hazır", description: "Dosyaları uygula ya da vazgeç.", Icon: ShieldCheck, tone: "text-warn", line: "border-l-warn" },
   applied: { title: "Uygulandı", description: "Geri almak için checkpoint hazır.", Icon: CheckCircle2, tone: "text-ok", line: "border-l-ok" },
@@ -92,8 +93,9 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         {(
           [
             { id: "plan", label: "Plan", Icon: ClipboardList, badge: 0 },
-            { id: "work", label: "Çalışma", Icon: Activity, badge: status === "running" ? 1 : 0 },
+            { id: "work", label: "Çalışma", Icon: ActivityIcon, badge: status === "running" ? 1 : 0 },
             { id: "review", label: "İnceleme", Icon: FileDiff, badge: diffCount },
+            { id: "activity", label: "Etkinlik", Icon: Radio, badge: 0 },
           ] as const
         ).map(({ id, label, Icon, badge }) => (
           <button
@@ -114,7 +116,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
 
       {/* içerik */}
       <div className="min-h-0 flex-1">
-        {tab === "plan" ? <Plan /> : tab === "work" ? <Chat /> : <Changes />}
+        {tab === "plan" ? <Plan /> : tab === "work" ? <Chat /> : tab === "activity" ? <Activity /> : <Changes />}
       </div>
 
       <Composer />

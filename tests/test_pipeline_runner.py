@@ -48,9 +48,11 @@ class FakeChangeProvider:
 class FakePlanAttemptRunner:
     def __init__(self):
         self.calls: list[str] = []
+        self.pinned_paths_seen: list[tuple] = []
 
-    def run(self, workspace, task, *, plan_id, cancel_token=None):
+    def run(self, workspace, task, *, plan_id, cancel_token=None, pinned_paths=()):
         self.calls.append(plan_id)
+        self.pinned_paths_seen.append(tuple(pinned_paths))
         return PlanReport(
             plan_id=plan_id, summary="Do the thing.",
             steps=(PlanStep(title="Step 1", objective="Do it."),),
@@ -137,10 +139,12 @@ class FakeReviewAttemptRunner:
         self._verdicts = list(verdicts)
         self.calls: list[str] = []
         self.requests: list = []
+        self.pinned_paths_seen: list[tuple] = []
 
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         self.calls.append(review_id)
         self.requests.append(request)
+        self.pinned_paths_seen.append(tuple(pinned_paths))
         verdict = self._verdicts.pop(0)
         findings = () if verdict is ReviewVerdict.APPROVED else (ReviewFinding(ReviewSeverity.MAJOR, "bug"),)
         verification_report = request.verification_report
@@ -363,7 +367,7 @@ class _CancellingVerificationAttemptRunner(FakeVerificationAttemptRunner):
 
 
 class _CancellingReviewAttemptRunner(FakeReviewAttemptRunner):
-    def run(self, workspace, request, *, review_id, cancel_token=None):
+    def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
         raise OperationCancelledError("review cancelled mid-execution")
 
 

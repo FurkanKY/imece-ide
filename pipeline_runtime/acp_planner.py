@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Sequence
 
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.events import ExecutionCompleted, ExecutionStarted
@@ -51,6 +52,7 @@ from planner_runtime.models import PlanReport, validate_plan_id
 from planner_runtime.parser import parse_plan_decision
 from planner_runtime.prompt import PLANNER_SYSTEM_INSTRUCTIONS, render_initial_planner_input
 from planner_runtime.runner import _PLANNER_CONTEXT_BUDGET, _validate_task
+from run_runtime.agent_activity import record_agent_activity
 from run_runtime.planner import CanonicalPlannerEventSink
 from run_runtime.service import RunRuntime
 
@@ -98,6 +100,7 @@ class AcpPlanAttemptRunner:
 
     def run(
         self, workspace, task: str, *, plan_id: str, cancel_token: CancellationToken | None = None,
+        pinned_paths: Sequence[str] = (),
     ) -> PlanReport:
         task = _validate_task(task)
         plan_id = validate_plan_id(plan_id)
@@ -107,6 +110,7 @@ class AcpPlanAttemptRunner:
             sink = CanonicalPlannerEventSink(
                 self._runtime, self._run_id, plan_id=plan_id,
                 rules_sha256=rules.sha256 if rules is not None else None,
+                pinned_paths=pinned_paths,
             )
         except ValueError as exc:
             raise PipelineInputError(f"Cannot construct canonical Planner sink: {exc}") from exc
@@ -114,7 +118,7 @@ class AcpPlanAttemptRunner:
         task_sha256 = hashlib.sha256(task.encode("utf-8")).hexdigest()
 
         query = task[:MAX_QUERY_CHARS]
-        context_pack = self._context_engine.build(workspace, query, _PLANNER_CONTEXT_BUDGET)
+        context_pack = self._context_engine.build(workspace, query, _PLANNER_CONTEXT_BUDGET, pinned_paths=pinned_paths)
         rendered_task_input = render_initial_planner_input(task=task, context_pack=context_pack, rules=rules)
         acp_prompt = wrap_system_instructions_for_acp_prompt(PLANNER_SYSTEM_INSTRUCTIONS, rendered_task_input)
 
@@ -130,6 +134,25 @@ class AcpPlanAttemptRunner:
         transient_execution_id = f"acp_planner_exec_{plan_id}"
         sink.emit(ExecutionStarted(execution_id=transient_execution_id, task=task))
 
+        def _activity(**kwargs) -> None:
+            # F1 (live agent activity): best-effort, advisory only -- never
+            # allowed to fail the Planner attempt itself (see
+            # run_runtime.agent_activity's module docstring).
+            try:
+                event = record_agent_activity(
+                    self._runtime, self._run_id, execution_id=transient_execution_id, **kwargs,
+                )
+                # This append happens BETWEEN sink.emit(ExecutionStarted)
+                # (already committed) and sink.complete()/sink.fail() (not
+                # yet committed) -- sink's own optimistic cursor must be
+                # told about it, or its next commit uses a stale
+                # expected_last_event_seq and raises EventSequenceError
+                # even though nothing is actually wrong (see
+                # CanonicalPlannerEventSink.note_external_append).
+                sink.note_external_append(event.seq)
+            except Exception:
+                pass
+
         try:
             final_text, _acp_result = run_acp_semantic_prompt(
                 acp_client=self._acp_client,
@@ -138,6 +161,8 @@ class AcpPlanAttemptRunner:
                 prompt=acp_prompt,
                 limits=self._limits,
                 cancel_token=cancel_token,
+                role="planner",
+                activity_recorder=_activity,
             )
         except OperationCancelledError as cancellation:
             self._fail(sink, plan_id, cancellation)
