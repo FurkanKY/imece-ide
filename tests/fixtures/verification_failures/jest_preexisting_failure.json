@@ -1,0 +1,13 @@
+{
+  "name": "jest_preexisting_failure",
+  "tool": "jest",
+  "stdout": "",
+  "stderr": "FAIL tests/legacy.test.js\n  ✕ old flaky assertion\n\n    Expected: 2\n    Received: 1\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/other.js"
+  ],
+  "baseline_status": "fail",
+  "expected_label": "unrelated_preexisting"
+}

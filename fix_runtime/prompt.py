@@ -219,6 +219,9 @@ def _render_feedback(trigger: FixTrigger) -> str:
     return "\n\n".join(parts)
 
 
+_MAX_CLASSIFICATION_CHARS = 128
+
+
 def render_fix_worker_input(
     *,
     task: str,
@@ -228,6 +231,7 @@ def render_fix_worker_input(
     max_fix_attempts: int,
     rules: ProjectRules | None = None,
     pinned_paths: Sequence[str] = (),
+    classification: str | None = None,
 ) -> str:
     """Render bounded fix-worker input with an explicit, provable budget.
 
@@ -258,12 +262,23 @@ def render_fix_worker_input(
     not diagnostic data; see the module docstring). This is the ONLY
     behavior change: for the other two trigger kinds, the exact prior
     (pre-F2) section layout and budget arithmetic is reproduced unchanged.
+
+    `classification` (Jev System One decision layer, docs/JEV-DESIGN.md
+    Spike S1; optional, default None) is a short decision_runtime
+    failure_kind label (e.g. "code_bug") appended to ATTEMPT INFO -- see the
+    design doc's action table: "fix loop (as today), with the classification
+    added to the fix prompt". Omitted entirely when None (the decision layer
+    is off), so existing callers/tests are byte-for-byte unaffected; small,
+    deterministic, code-produced metadata like attempt_index/trigger_kind
+    above, so it is never truncated, only length-bounded defensively.
     """
     attempt_body = (
         f"attempt_index: {attempt_index}\n"
         f"max_fix_attempts: {max_fix_attempts}\n"
         f"trigger_kind: {trigger.kind.value}\n"
     )
+    if classification is not None:
+        attempt_body += f"decision_classification: {classification[:_MAX_CLASSIFICATION_CHARS]}\n"
 
     has_followup = trigger.kind is FixTriggerKind.USER_FEEDBACK
     num_sections = _NUM_SECTIONS + (1 if has_followup else 0)

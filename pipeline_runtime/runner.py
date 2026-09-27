@@ -77,6 +77,7 @@ from agent_runtime.cancellation import CancellationToken, OperationCancelledErro
 from change_runtime.models import WorkspaceChangeSet
 from change_runtime.provider import ChangeProvider
 from context_runtime import load_project_rules
+from decision_runtime.gate import VerificationFailureGate
 from fix_runtime.models import (
     DEFAULT_MAX_FIX_ATTEMPTS,
     FixLoopRequest,
@@ -152,6 +153,7 @@ class PipelineRunner:
         change_provider: ChangeProvider,
         completion_gate: RunCompletionGate | None = None,
         max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS,
+        decision_gate: VerificationFailureGate | None = None,
     ) -> None:
         self._runtime = runtime
         self._planner = planner
@@ -163,6 +165,11 @@ class PipelineRunner:
         # word, so the default gate never settles straight to RUN_COMPLETED.
         self._completion_gate = completion_gate or RunCompletionGate(runtime, settlement="await_user")
         self._max_fix_attempts = max_fix_attempts
+        # Jev System One decision layer (docs/JEV-DESIGN.md Spike S1): None
+        # (the default, "decision_layer": "off" -- see engine_factory.
+        # build_verification_failure_gate) means the fix loop's own
+        # behaviour, and therefore PipelineRunner's, is exactly unchanged.
+        self._decision_gate = decision_gate
         self._fix_loop = FixLoopRunner(
             runtime,
             worker=worker,
@@ -170,6 +177,7 @@ class PipelineRunner:
             reviewer=reviewer,
             change_provider=change_provider,
             completion_gate=self._completion_gate,
+            decision_gate=decision_gate,
         )
 
     def run(
@@ -313,6 +321,12 @@ class PipelineRunner:
         except Exception as exc:
             raise PipelineExecutionError(f"Fix loop failed: {exc}") from exc
 
+        if fix_loop_report.status is FixLoopStatus.NEEDS_USER:
+            review_task = _augment_task_with_feedback(task, feedback)
+            return self._settle_decision_needs_user(
+                run_id, workspace, review_task, plan_text, None, fix_loop_report,
+                on_stage, cancel_token, pinned_paths,
+            )
         if fix_loop_report.status is FixLoopStatus.COMPLETED:
             status = self._status_after_gate_settlement(run_id)
         else:
@@ -541,6 +555,11 @@ class PipelineRunner:
         except Exception as exc:
             raise PipelineExecutionError(f"Fix loop failed: {exc}") from exc
 
+        if fix_loop_report.status is FixLoopStatus.NEEDS_USER:
+            return self._settle_decision_needs_user(
+                run_id, workspace, task, plan_report.summary, plan_report, fix_loop_report,
+                on_stage, cancel_token, pinned_paths,
+            )
         if fix_loop_report.status is FixLoopStatus.COMPLETED:
             status = self._status_after_gate_settlement(run_id)
         else:
@@ -557,6 +576,62 @@ class PipelineRunner:
             plan_report=plan_report, change_set=change_set,
             verification_report=fix_loop_report.verification_report,
             review_report=fix_loop_report.review_report,
+            fix_loop_report=fix_loop_report,
+        )
+
+    # ---------------- Jev System One decision layer: NEEDS_USER settlement ----------------
+
+    def _settle_decision_needs_user(
+        self, run_id, workspace, review_task: str, plan_text: str | None, plan_report: PlanReport | None,
+        fix_loop_report, on_stage: OnStage, cancel_token: CancellationToken | None,
+        pinned_paths: Sequence[str],
+    ) -> PipelineReport:
+        """Settle a FixLoopStatus.NEEDS_USER outcome (docs/JEV-DESIGN.md Spike
+        S1: missing_dependency/environment_or_tooling, or a check that also
+        fails on the pre-change baseline) by mirroring PipelineRunner's own
+        EXISTING "no verification plan detected" advisory path: an advisory
+        Reviewer pass over whatever diff the fix attempt(s) produced (never a
+        synthetic PASS -- see the module docstring's "No verification plan"
+        section for why that's refused), then CanonicalPipelineRecorder.
+        needs_user() so the Run lands WAITING_USER with a real proposal.ready
+        the user can still inspect and Apply/Reject -- unlike an ordinary
+        FAILED/EXHAUSTED fix-loop outcome, which is already terminal.
+
+        This is the ONLY caller responsible for finishing Run settlement for
+        a NEEDS_USER fix_loop_report (FixLoopRunner deliberately left the Run
+        RUNNING -- see FixLoopStatus.NEEDS_USER's docstring).
+        """
+        self._check_cancel(cancel_token)
+        on_stage("reviewing", {"advisory": True})
+        change_set = self._capture(workspace)
+        review_request = ReviewRequest(
+            task=review_task, plan=plan_text, diff=change_set.diff,
+            # The FAILing (or timed-out) VerificationReport is included as
+            # evidence for the Reviewer -- unlike the true no-verification-
+            # plan path, one DOES exist here, it just never reached PASS.
+            verification_report=fix_loop_report.verification_report,
+        )
+        review_id = new_review_id()
+        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token, pinned_paths=pinned_paths)
+
+        payload = {
+            "reason": fix_loop_report.reason,
+            "review_id": review_id,
+            "review_verdict": review_report.verdict.value,
+            "diff_sha256": change_set.diff_sha256,
+        }
+        if fix_loop_report.needs_user_message:
+            payload["message"] = fix_loop_report.needs_user_message
+        if fix_loop_report.verification_report is not None:
+            payload["verification_id"] = fix_loop_report.verification_report.verification_id
+            payload["verification_status"] = fix_loop_report.verification_report.status.value
+
+        CanonicalPipelineRecorder(self._runtime, run_id).needs_user(payload=payload)
+        on_stage("done", {"status": PipelineStatus.NEEDS_USER.value})
+        return PipelineReport(
+            run_id=run_id, status=PipelineStatus.NEEDS_USER, reason=fix_loop_report.reason,
+            plan_report=plan_report, change_set=change_set,
+            verification_report=fix_loop_report.verification_report, review_report=review_report,
             fix_loop_report=fix_loop_report,
         )
 

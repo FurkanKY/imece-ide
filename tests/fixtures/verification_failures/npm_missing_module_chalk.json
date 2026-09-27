@@ -1,0 +1,13 @@
+{
+  "name": "npm_missing_module_chalk",
+  "tool": "npm",
+  "stdout": "",
+  "stderr": "internal/modules/cjs/loader.js:883\n  throw err;\n  ^\n\nError: Cannot find module 'chalk'\nRequire stack:\n- /repo/bin/cli.js\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "bin/cli.js"
+  ],
+  "baseline_status": null,
+  "expected_label": "missing_dependency"
+}

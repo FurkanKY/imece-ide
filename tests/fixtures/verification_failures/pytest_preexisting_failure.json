@@ -1,0 +1,13 @@
+{
+  "name": "pytest_preexisting_failure",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "tests/test_legacy.py::test_old_behavior FAILED\nE   AssertionError: assert 1 == 2\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/unrelated.py"
+  ],
+  "baseline_status": "fail",
+  "expected_label": "unrelated_preexisting"
+}

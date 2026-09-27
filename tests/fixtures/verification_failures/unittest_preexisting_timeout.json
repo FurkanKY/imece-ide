@@ -1,0 +1,13 @@
+{
+  "name": "unittest_preexisting_timeout",
+  "tool": "unittest",
+  "stdout": "",
+  "stderr": "Ran 10 tests\nFAILED (errors=1)\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "app/unrelated.py"
+  ],
+  "baseline_status": "timeout",
+  "expected_label": "unrelated_preexisting"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "shell_command_not_found_pytest_alt",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "/bin/sh: 1: pytest: not found\n",
+  "exit_code": 127,
+  "timed_out": false,
+  "changed_paths": [
+    "tests/test_signup.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "environment_or_tooling"
+}

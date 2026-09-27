@@ -1,0 +1,13 @@
+{
+  "name": "pytest_assertion_error",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "tests/test_math.py::test_add FAILED\n\ndef test_add():\n>       assert add(2, 2) == 5\nE       assert 4 == 5\nE        +  where 4 = add(2, 2)\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/math.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "code_bug"
+}

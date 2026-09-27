@@ -1,0 +1,13 @@
+{
+  "name": "sh_command_not_found_go",
+  "tool": "go test",
+  "stdout": "",
+  "stderr": "sh: 1: go: not found\n",
+  "exit_code": 127,
+  "timed_out": false,
+  "changed_paths": [
+    "cmd/server/main.go"
+  ],
+  "baseline_status": null,
+  "expected_label": "environment_or_tooling"
+}

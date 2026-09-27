@@ -350,3 +350,79 @@ def _discover_repo_root_for_worktree(worktree_dir: Path) -> Path | None:
         return git_dir.parent
     except (ValueError, IndexError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Jev System One decision layer (docs/JEV-DESIGN.md Spike S1a): "decision_layer"
+# ui_pref (off | rules | jev) -> a decision_runtime.DecisionPort backend and,
+# for the fix-loop's verification-failure triage hook, a VerificationFailureGate.
+#
+# "off" (the default) returns None everywhere below -- PipelineRunner/
+# FixLoopRunner treat None exactly as "the decision layer is disabled", so
+# nothing here changes today's behaviour unless a caller opts in. "rules" and
+# "jev" both currently resolve to RuleDecisionBackend: no JevDecisionBackend
+# exists yet (S1a is fully offline, no typesafe-sdk import anywhere) -- see
+# decision_runtime.ports.DecisionPort's docstring for the seam a future S1b
+# JevDecisionBackend fills without any caller of this module changing.
+#
+# webhost/api/run.py does not call these yet (out of scope for this slice --
+# it constructs PipelineRunner without decision_gate, so "off" is what
+# actually ships today); this is the wiring a later pass hands to it.
+# ---------------------------------------------------------------------------
+
+VALID_DECISION_LAYER_VALUES = ("off", "rules", "jev")
+
+
+def build_decision_backend(decision_layer: str):
+    """The decision_runtime.DecisionPort backend for a "decision_layer"
+    preference value, or None for "off"."""
+    from decision_runtime.ports import DecisionPort
+    from decision_runtime.triage import RuleDecisionBackend
+
+    if decision_layer == "off":
+        return None
+    if decision_layer in ("rules", "jev"):
+        # "jev" falls back to the rule backend until a JevDecisionBackend
+        # exists (S1b) -- see docs/JEV-DESIGN.md's Plan, step S1a.
+        return RuleDecisionBackend()
+    raise ValueError(f"Unknown decision_layer preference: {decision_layer!r}")
+
+
+def build_verification_failure_gate(
+    decision_layer: str,
+    *,
+    runtime: RunRuntime | None = None,
+    run_id: str | None = None,
+    policy=None,
+):
+    """The VerificationFailureGate fix_runtime.FixLoopRunner/pipeline_runtime.
+    PipelineRunner should use for a given "decision_layer" preference, or
+    None when the decision layer is off (preserving today's behaviour
+    byte-for-byte).
+
+    `runtime`/`run_id` are optional: when both are given, every triage
+    decision is recorded as a canonical `decision.made` event (docs/
+    JEV-DESIGN.md design rule 5); omit them (e.g. in a test with no live
+    Run) to skip recording.
+    """
+    from decision_runtime.gate import VerificationFailureGate
+    from decision_runtime.recorder import CanonicalDecisionRecorder
+
+    backend = build_decision_backend(decision_layer)
+    if backend is None:
+        return None
+    recorder = CanonicalDecisionRecorder(runtime, run_id) if runtime is not None and run_id else None
+    return VerificationFailureGate(backend, policy=policy, recorder=recorder)
+
+
+def decision_layer_preference(prefs: dict | None = None) -> str:
+    """Read the "decision_layer" preference (off | rules | jev) from ui_prefs
+    (or a supplied dict), defaulting to and fail-closing to "off" for a
+    missing/unknown value -- never silently enable an accelerator from a
+    malformed preferences file."""
+    if prefs is None:
+        import ui_prefs
+
+        prefs = ui_prefs.load()
+    value = prefs.get("decision_layer", "off")
+    return value if value in VALID_DECISION_LAYER_VALUES else "off"

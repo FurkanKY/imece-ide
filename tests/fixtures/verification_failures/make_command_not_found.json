@@ -1,0 +1,13 @@
+{
+  "name": "make_command_not_found",
+  "tool": "make check",
+  "stdout": "",
+  "stderr": "/bin/sh: 1: golangci-lint: not found\nmake: *** [Makefile:12: lint] Error 127\n",
+  "exit_code": 127,
+  "timed_out": false,
+  "changed_paths": [
+    "internal/service/handler.go"
+  ],
+  "baseline_status": null,
+  "expected_label": "environment_or_tooling"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "jest_assertion_error",
+  "tool": "jest",
+  "stdout": "",
+  "stderr": "FAIL tests/sum.test.js\n  ✕ adds numbers\n\n    expect(received).toBe(expected)\n\n    Expected: 5\n    Received: 4\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/sum.js"
+  ],
+  "baseline_status": null,
+  "expected_label": "code_bug"
+}

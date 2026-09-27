@@ -1,0 +1,13 @@
+{
+  "name": "pytest_timeout",
+  "tool": "pytest",
+  "stdout": "tests/test_slow.py::test_long_running \n",
+  "stderr": "",
+  "exit_code": null,
+  "timed_out": true,
+  "changed_paths": [
+    "src/worker.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "flaky_or_timeout"
+}

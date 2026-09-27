@@ -1,0 +1,13 @@
+{
+  "name": "pytest_missing_module_numpy",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "  File \"src/compute.py\", line 1, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/compute.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "missing_dependency"
+}
