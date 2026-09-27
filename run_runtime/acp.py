@@ -187,6 +187,7 @@ class CanonicalAcpEventSink:
             session_id = self._canonical_text(event.session_id, field="session_id")
             tool_call_id = self._canonical_text(event.tool_call_id, field="tool_call_id")
             outcome = self._canonical_text(event.outcome, field="outcome")
+            reason = self._canonical_text(event.reason, field="reason", allow_empty=True)
             self._bind_session(session_id)
             self._append(
                 self._spec(
@@ -196,6 +197,7 @@ class CanonicalAcpEventSink:
                         "session_id": session_id,
                         "tool_call_id": tool_call_id,
                         "outcome": outcome,
+                        "reason": reason,
                     },
                 )
             )

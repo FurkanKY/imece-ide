@@ -1,9 +1,9 @@
 /* mock — düz tarayıcıda geliştirme + görsel doğrulama için sahte host.
-   Senaryo seçimi: ?scenario=empty|project|running|result|error (P2'de fixtures/run.ts genişler). */
+   Senaryo seçimi: ?scenario=empty|project|running|result|error|nochanges (P2'de fixtures/run.ts genişler). */
 
 import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ProviderInfo, ScmChange } from "../protocol";
 import * as vfs from "./vfs";
-import { RUN_PARTIAL, RUN_FULL, RUN_FOLLOWUP } from "./fixtures/run";
+import { RUN_PARTIAL, RUN_FULL, RUN_FOLLOWUP, RUN_NO_CHANGES } from "./fixtures/run";
 import { ACTIVITY_FEED } from "./fixtures/activity";
 
 interface MockCheckpoint {
@@ -587,7 +587,8 @@ export class MockBridge implements Bridge {
 
   /** senaryoya göre koşu olaylarını zamanlamalı akıt */
   private async streamRun() {
-    const seq = this.scenario === "running" ? RUN_PARTIAL : RUN_FULL;
+    const seq =
+      this.scenario === "running" ? RUN_PARTIAL : this.scenario === "nochanges" ? RUN_NO_CHANGES : RUN_FULL;
     const errorAt = this.scenario === "error" ? 5 : -1; // plan metriği sonrası patla
     let i = 0;
     for (const [delay, ev] of seq) {

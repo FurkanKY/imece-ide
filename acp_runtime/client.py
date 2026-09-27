@@ -41,13 +41,29 @@ from acp_runtime.events import (
     NullAcpEventSink,
 )
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest, AcpRunResult
+from acp_runtime.permission_policy import AcpPermissionDecision, AcpPermissionPolicy, DenyAllAcpPermissionPolicy
 from acp_runtime.stdio import close_acp_agent_connection, spawn_acp_agent_connection
 
 _AUTH_REQUIRED_CODE = -32000
 
+# session_update discriminants for the two ToolCall-shaped update kinds
+# (see acp.schema.ToolCallStart/ToolCallProgress `session_update` literal).
+_TOOL_CALL_UPDATE_KINDS = ("tool_call", "tool_call_update")
+
 
 def _cancelled_permission_response():
     return acp.RequestPermissionResponse(outcome=acp.schema.DeniedOutcome(outcome="cancelled"))
+
+
+def _location_paths(locations: object) -> list[str]:
+    if not locations:
+        return []
+    paths: list[str] = []
+    for location in locations:
+        path = getattr(location, "path", None)
+        if isinstance(path, str) and path:
+            paths.append(path)
+    return paths
 
 
 class _FatalSignal:
@@ -77,14 +93,29 @@ class _ImeceAcpClient:
     such call the agent might make to method_not_found automatically.
     """
 
-    def __init__(self, *, limits: AcpClientLimits, event_sink: AcpEventSink, fatal: _FatalSignal) -> None:
+    def __init__(
+        self,
+        *,
+        limits: AcpClientLimits,
+        event_sink: AcpEventSink,
+        fatal: _FatalSignal,
+        permission_policy: AcpPermissionPolicy | None = None,
+    ) -> None:
         self._limits = limits
         self._event_sink = event_sink
         self._fatal = fatal
+        self._permission_policy = permission_policy if permission_policy is not None else DenyAllAcpPermissionPolicy()
         self.session_id: str | None = None
         self.update_count = 0
         self.update_chars = 0
         self.permission_request_count = 0
+        # tool_call_id -> {"kind": str|None, "locations": list[str], "raw_input": Any}
+        # Built from ToolCallStart/ToolCallProgress session updates so a
+        # subsequent request_permission's own (possibly partial)
+        # ToolCallUpdate can be merged against the latest known state for
+        # that tool call, instead of trusting only whatever fields the
+        # permission request itself happens to carry.
+        self._tool_calls: dict[str, dict] = {}
 
     def bind_session(self, session_id: str) -> None:
         self.session_id = session_id
@@ -135,7 +166,31 @@ class _ImeceAcpClient:
                 )
             )
             return
+        self._track_tool_call(update)
         self._emit(AcpSessionUpdateObserved(session_id=session_id, update=update, serialized_chars=serialized_chars))
+
+    def _track_tool_call(self, update: Any) -> None:
+        """Remember the latest known kind/locations/raw_input for a
+        ToolCallStart/ToolCallProgress update, keyed by tool_call_id. A
+        later request_permission for the same tool_call_id may omit these
+        fields (ToolCallUpdate's own fields are all optional); this cache
+        is what lets the permission policy still see them."""
+        discriminant = getattr(update, "session_update", None)
+        if discriminant not in _TOOL_CALL_UPDATE_KINDS:
+            return
+        tool_call_id = getattr(update, "tool_call_id", None)
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            return
+        entry = self._tool_calls.setdefault(tool_call_id, {"kind": None, "locations": [], "raw_input": None})
+        kind = getattr(update, "kind", None)
+        if kind is not None:
+            entry["kind"] = kind
+        locations = getattr(update, "locations", None)
+        if locations is not None:
+            entry["locations"] = _location_paths(locations)
+        raw_input = getattr(update, "raw_input", None)
+        if raw_input is not None:
+            entry["raw_input"] = raw_input
 
     async def request_permission(self, session_id: str, tool_call: Any, options: Any, **kwargs: Any):
         if self._fatal.event.is_set():
@@ -148,7 +203,11 @@ class _ImeceAcpClient:
 
         tool_call_id = getattr(tool_call, "tool_call_id", "") or ""
         title = getattr(tool_call, "title", "") or ""
-        option_ids = [getattr(option, "option_id", "") for option in (options or ())]
+        option_dicts = [
+            {"option_id": getattr(option, "option_id", "") or "", "kind": getattr(option, "kind", None)}
+            for option in (options or ())
+        ]
+        option_ids = [option["option_id"] for option in option_dicts]
 
         if not self._emit(AcpPermissionRequested(session_id=session_id, tool_call_id=tool_call_id, title=title, option_ids=option_ids)):
             # Sink failed on the request event: fatal already triggered.
@@ -156,9 +215,50 @@ class _ImeceAcpClient:
             return _cancelled_permission_response()
         self.permission_request_count += 1
 
-        self._emit(AcpPermissionResolved(session_id=session_id, tool_call_id=tool_call_id, outcome="cancelled"))
+        # Merge the tool_call's OWN (possibly partial) fields over whatever
+        # was already tracked for this tool_call_id from prior session
+        # updates -- the request's own value wins whenever it is present.
+        tracked = self._tool_calls.get(tool_call_id, {"kind": None, "locations": [], "raw_input": None})
+        kind = getattr(tool_call, "kind", None)
+        if kind is None:
+            kind = tracked["kind"]
+        own_locations = getattr(tool_call, "locations", None)
+        locations = _location_paths(own_locations) if own_locations is not None else tracked["locations"]
+        own_raw_input = getattr(tool_call, "raw_input", None)
+        raw_input = own_raw_input if own_raw_input is not None else tracked["raw_input"]
 
-        return _cancelled_permission_response()
+        try:
+            decision = self._permission_policy.decide(
+                tool_call_id=tool_call_id,
+                title=title,
+                kind=kind,
+                locations=locations,
+                raw_input=raw_input,
+                options=option_dicts,
+            )
+        except Exception as exc:  # noqa: BLE001 - a misbehaving policy must never grant access
+            decision = AcpPermissionDecision(
+                outcome_kind="cancelled",
+                option_id=None,
+                reason=f"permission policy raised {type(exc).__name__}; denying fail-closed",
+            )
+
+        if decision.outcome_kind == "selected":
+            selected_kind = next(
+                (option["kind"] for option in option_dicts if option["option_id"] == decision.option_id),
+                decision.option_id,
+            )
+            outcome = f"selected:{selected_kind}"
+            response = acp.RequestPermissionResponse(
+                outcome=acp.schema.AllowedOutcome(outcome="selected", option_id=decision.option_id)
+            )
+        else:
+            outcome = "cancelled"
+            response = _cancelled_permission_response()
+
+        self._emit(AcpPermissionResolved(session_id=session_id, tool_call_id=tool_call_id, outcome=outcome, reason=decision.reason))
+
+        return response
 
 
 def _map_request_error(exc: "acp.RequestError") -> AcpRuntimeError:
@@ -189,6 +289,7 @@ class AcpClientRuntime:
         limits: AcpClientLimits | None = None,
         event_sink: AcpEventSink | None = None,
         cancel_token=None,
+        permission_policy: AcpPermissionPolicy | None = None,
     ) -> AcpRunResult:
         """`cancel_token` is duck-typed (only `.cancelled`/`.wait(timeout)`
         are used) so acp_runtime never needs to import agent_runtime -- pass
@@ -197,7 +298,16 @@ class AcpClientRuntime:
         cancel` is sent for the active session (mirrors the existing fatal-
         abort path in _run_prompt: `_cancel_and_settle` already sends
         `conn.cancel(...)` and bounds the grace wait), then the usual
-        connection/process teardown in the outer `finally` runs unchanged."""
+        connection/process teardown in the outer `finally` runs unchanged.
+
+        `permission_policy` decides how every `session/request_permission`
+        call is answered; defaults to `DenyAllAcpPermissionPolicy()` --
+        the original, unconditional-cancel behaviour -- so every caller
+        that does not explicitly opt in (Planner, Reviewer, ...) keeps
+        denying every request exactly as before. Only the Worker adapter
+        passes a worktree-scoped policy (see acp_runtime.permission_policy)."""
+        if permission_policy is None:
+            permission_policy = DenyAllAcpPermissionPolicy()
         if not isinstance(launch, AcpLaunchSpec):
             raise AcpInputError("AcpClientRuntime.run requires an AcpLaunchSpec.")
         if not isinstance(request, AcpPromptRequest):
@@ -221,7 +331,7 @@ class AcpClientRuntime:
             raise AcpInputError(f"AcpPromptRequest.cwd does not exist or is not a directory: {request.cwd}")
 
         fatal = _FatalSignal()
-        client = _ImeceAcpClient(limits=limits, event_sink=event_sink, fatal=fatal)
+        client = _ImeceAcpClient(limits=limits, event_sink=event_sink, fatal=fatal, permission_policy=permission_policy)
 
         # Blocker 3: a real OS process may exist even if constructing the
         # SDK connection over it subsequently fails. self._connect (default

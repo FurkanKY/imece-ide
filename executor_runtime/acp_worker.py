@@ -12,6 +12,7 @@ from typing import Protocol
 
 from acp_runtime.errors import AcpInputError
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest
+from acp_runtime.permission_policy import WorktreeEditAcpPermissionPolicy
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 
 from executor_runtime.errors import (
@@ -37,6 +38,18 @@ def _input_error(message: str, exc: BaseException | None = None) -> ExecutorAdap
 SAFE_REDACTED_DIAGNOSTIC_MESSAGE = (
     "ACP Worker execution failed; diagnostic redacted because it contained "
     "sensitive input or launch data."
+)
+
+# Prepended to the rendered task before it is sent to the ACP Worker
+# session. Real Claude Code (and other ACP agent CLIs) will otherwise spend
+# turns trying to run tests/build commands via a shell tool it does not
+# have here -- verification is a separate, deterministic step the IDE runs
+# after this attempt finishes, not something the Worker itself can invoke.
+ACP_WORKER_NO_SHELL_PREAMBLE = (
+    "Note: you do not have a shell or process-execution tool in this "
+    "environment; a separate, deterministic verification step run by the "
+    "IDE checks your work after you finish, so do not ask to run tests or "
+    "commands.\n\n"
 )
 
 
@@ -139,6 +152,8 @@ class _AcpClientRunner(Protocol):
         *,
         limits: AcpClientLimits | None = None,
         event_sink=None,
+        cancel_token=None,
+        permission_policy=None,
     ):
         ...
 
@@ -210,7 +225,7 @@ class AcpWorkerAttemptAdapter:
                 )
             prompt_request = AcpPromptRequest(
                 cwd=cwd,
-                prompt=request.rendered_input,
+                prompt=ACP_WORKER_NO_SHELL_PREAMBLE + request.rendered_input,
             )
         except ExecutorAdapterInputError:
             raise
@@ -239,6 +254,7 @@ class AcpWorkerAttemptAdapter:
                 f"Cannot construct canonical ACP sink: {exc}"
             ) from exc
         sink.start(request.task)
+        permission_policy = WorktreeEditAcpPermissionPolicy(cwd)
         try:
             acp_result = asyncio.run(
                 self._acp_client.run(
@@ -247,6 +263,7 @@ class AcpWorkerAttemptAdapter:
                     limits=self._limits,
                     event_sink=sink,
                     cancel_token=cancel_token,
+                    permission_policy=permission_policy,
                 )
             )
             sink.complete(acp_result)

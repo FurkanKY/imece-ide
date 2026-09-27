@@ -29,7 +29,10 @@ export interface RunEvent {
   // run.followUp handler'ı, continuation'ı BAŞLATMADAN önce yayınlar; UI bu
   // olayla diff/proposal durumunu sıfırlar ve kullanıcının takip metnini
   // kendi mesajı olarak akışa (flow) ekler (bkz. state/run.ts consume()).
-  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal" | "followUpStarted";
+  // "summary": Worker'ın son mesajı (bkz. webhost/api/run.py
+  // _last_worker_final_message) -- yalnızca değişiklik/öneri çıkmadığında
+  // "info" ile birlikte gönderilir.
+  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal" | "followUpStarted" | "summary";
   [key: string]: unknown;
 }
 

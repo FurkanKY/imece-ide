@@ -412,7 +412,70 @@ def _providers(params, ctx):
     return {"providers": items, "recommendedRouting": provider_registry.recommended_routing()}
 
 
-def _emit_pipeline_report(emit_ui, proj: Project, workspace, report) -> None:
+_MAX_WORKER_FINAL_MESSAGE_CHARS = 1_500
+
+
+def _bounded_text(text: str, *, limit: int = _MAX_WORKER_FINAL_MESSAGE_CHARS) -> str:
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+def _last_worker_final_message(runtime, run_id: str) -> str | None:
+    """The last Worker execution's own final text, if any exists in the
+    canonical event log -- shown as an explanatory item alongside "Değişiklik
+    önerisi çıkmadı." (or a failure/cancellation) so the user sees WHAT the
+    agent actually said/attempted, not just that nothing changed.
+
+    Native executions carry their final text directly on execution.completed
+    (`final_text`, see run_runtime.native_agent.ExecutionCompleted). ACP
+    executions never get a synthesized final_text -- their own
+    execution.completed instead carries only transport/session facts, so this
+    reconstructs the agent's last message by concatenating every
+    `agent_message_chunk` session update recorded for that same execution_id
+    (see run_runtime.acp.CanonicalAcpEventSink)."""
+    try:
+        events = []
+        page = runtime.events(run_id, limit=500)
+        events.extend(page.events)
+        while page.has_more:
+            page = runtime.events(run_id, after_seq=events[-1].seq, limit=500)
+            events.extend(page.events)
+    except Exception:
+        return None
+
+    last_completed = None
+    for event in events:
+        if event.type == RunEventType.EXECUTION_COMPLETED:
+            last_completed = event
+    if last_completed is None:
+        return None
+
+    final_text = last_completed.payload.get("final_text")
+    if isinstance(final_text, str) and final_text.strip():
+        return _bounded_text(final_text)
+
+    if last_completed.payload.get("transport") != "acp":
+        return None
+
+    execution_id = last_completed.execution_id
+    chunks: list[str] = []
+    for event in events:
+        if event.type != RunEventType.EXECUTION_OUTPUT or event.execution_id != execution_id:
+            continue
+        update = event.payload.get("update")
+        if not isinstance(update, dict) or update.get("sessionUpdate") != "agent_message_chunk":
+            continue
+        content = update.get("content")
+        text = content.get("text") if isinstance(content, dict) else None
+        if isinstance(text, str):
+            chunks.append(text)
+    joined = "".join(chunks).strip()
+    return _bounded_text(joined) if joined else None
+
+
+def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=None, run_id=None) -> None:
     """PipelineReport'u legacy UI olay sözlüğüne (plan/verdict/info/proposal) çevirir."""
     if report.plan_report is not None:
         pr = report.plan_report
@@ -430,6 +493,10 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report) -> None:
     change_set = report.change_set
     if change_set is None or not change_set.changed_paths:
         emit_ui({"type": "info", "text": "Değişiklik önerisi çıkmadı."})
+        if runtime is not None and run_id is not None:
+            final_message = _last_worker_final_message(runtime, run_id)
+            if final_message:
+                emit_ui({"type": "summary", "text": final_message})
         return
 
     proposals, skipped_binary = _build_pipeline_proposals(proj, workspace, change_set)
@@ -447,6 +514,10 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report) -> None:
         })
     else:
         emit_ui({"type": "info", "text": "Değişiklik önerisi çıkmadı."})
+        if runtime is not None and run_id is not None:
+            final_message = _last_worker_final_message(runtime, run_id)
+            if final_message:
+                emit_ui({"type": "summary", "text": final_message})
 
 
 @handler("run.start")
@@ -785,7 +856,7 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
             # CANCELLED/COMPLETED) worktree burada dispose edilir; Apply/
             # Reject/cancel/yeni run.start/kapanış diğer dispose noktalarıdır
             # (bkz. _apply/_reject/on_pipeline_failed/shutdown).
-            _emit_pipeline_report(emit_ui, proj, workspace, report)
+            _emit_pipeline_report(emit_ui, proj, workspace, report, runtime=runtime, run_id=run_id)
         except Exception as exc:
             settle_canonical_failure(f"Sonuç işlenemedi: {exc}")
             _dispose_workspace()

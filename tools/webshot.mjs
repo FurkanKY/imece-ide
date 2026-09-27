@@ -32,6 +32,9 @@ const SCENARIOS = {
   "running": { query: "?scenario=running", ready: "html[data-ready]", settleMs: 3500 },
   "result": { query: "?scenario=result", ready: "html[data-ready]", settleMs: 8000 },
   "error": { query: "?scenario=error", ready: "html[data-ready]", settleMs: 3500 },
+  // F2/UI bitiş durumu: Worker hiçbir değişiklik üretmedi (bkz. RUN_NO_CHANGES) --
+  // AI panelinin ayrı bir "Değişiklik yok" bitiş kartı gösterdiğini doğrular.
+  "nochanges": { query: "?scenario=nochanges", ready: "html[data-ready]", settleMs: 3500 },
 };
 
 const argScen = process.argv.find((a) => a.startsWith("--scenario="));

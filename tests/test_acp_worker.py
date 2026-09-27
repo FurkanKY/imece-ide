@@ -505,6 +505,7 @@ def test_permission_resolved_preserves_cancelled_outcome(tmp_path):
             session_id="session-1",
             tool_call_id="tool-1",
             outcome="cancelled",
+            reason="deny-all policy (default): the caller's own isolation is the safety boundary",
         )
     )
 
@@ -515,6 +516,7 @@ def test_permission_resolved_preserves_cancelled_outcome(tmp_path):
         "session_id": "session-1",
         "tool_call_id": "tool-1",
         "outcome": "cancelled",
+        "reason": "deny-all policy (default): the caller's own isolation is the safety boundary",
     }
     assert all(event.type not in {RunEventType.RUN_WAITING_USER, RunEventType.RUN_RESUMED} for event in runtime.events(run.run_id, limit=20).events)
 
@@ -600,7 +602,7 @@ class _FakeAcpClient:
         self.calls = []
         self.result = result or _acp_result()
 
-    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None, permission_policy=None):
         self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
         return self.result
 
@@ -610,7 +612,7 @@ class _RaisingAcpClient(_FakeAcpClient):
         super().__init__()
         self.error = error
 
-    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None, permission_policy=None):
         self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
         raise self.error
 
@@ -760,7 +762,9 @@ def test_prompt_request_uses_exact_worktree_root_and_rendered_input(tmp_path):
 
     assert result.execution_id == "execution-1"
     assert client.calls[0]["request"].cwd == str(workspace.root)
-    assert client.calls[0]["request"].prompt == request.rendered_input
+    assert client.calls[0]["request"].prompt.endswith(request.rendered_input)
+    assert request.rendered_input in client.calls[0]["request"].prompt
+    assert client.calls[0]["request"].prompt != request.rendered_input  # the no-shell preamble was prepended
 
 
 def test_injected_structural_fake_acp_client_is_supported(tmp_path):
@@ -1125,7 +1129,7 @@ def test_completion_sequence_conflict_skips_execution_failed_append(tmp_path, mo
             self._runtime = runtime
             self._run_id = run_id
 
-        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
+        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None, permission_policy=None):
             self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
             # Simulate a concurrent external canonical writer advancing the
             # Run's event sequence before this attempt's sink can complete.
@@ -1169,7 +1173,7 @@ def test_streaming_persistence_failure_does_not_attempt_terminal_append(tmp_path
     underlying = RuntimeError("canonical append failed")
 
     class _EmitFailingAcpClient(_FakeAcpClient):
-        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
+        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None, permission_policy=None):
             self.calls.append({"launch": launch, "request": request, "limits": limits, "event_sink": event_sink})
             try:
                 event_sink.emit(AcpSessionUpdateObserved("session-1", _sdk_update(), 10))

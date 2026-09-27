@@ -81,7 +81,7 @@ class _AcpClient:
         self.error = error
         self.calls = []
 
-    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None):
+    async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None, permission_policy=None):
         self.calls.append((launch, request, limits, event_sink))
         if self.error is not None:
             raise self.error

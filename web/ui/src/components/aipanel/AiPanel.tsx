@@ -2,7 +2,7 @@
    composer + geçmiş çekmecesi. Öneri gelince Değişiklikler'e otomatik geçer. */
 
 import { useEffect, useState } from "react";
-import { Clock, ClipboardList, Activity as ActivityIcon, FileDiff, CircleAlert, CheckCircle2, PanelRightClose, ShieldCheck, RotateCcw, Play, Radio } from "lucide-react";
+import { Clock, ClipboardList, Activity as ActivityIcon, FileDiff, CircleAlert, CheckCircle2, PanelRightClose, ShieldCheck, RotateCcw, Play, Radio, Info } from "lucide-react";
 import { IconButton } from "@/components/ui";
 import { useRun } from "@/state/run";
 import { Pipeline } from "./Pipeline";
@@ -24,6 +24,7 @@ const STAGE_META = {
   applied: { label: "Uygulandı", Icon: CheckCircle2, tone: "text-ok" },
   restored: { label: "Geri alındı", Icon: CheckCircle2, tone: "text-muted" },
   error: { label: "Eylem gerekiyor", Icon: CircleAlert, tone: "text-err" },
+  noChanges: { label: "Değişiklik yok", Icon: Info, tone: "text-muted" },
 } as const;
 
 const DECISION_META = {
@@ -35,6 +36,13 @@ const DECISION_META = {
   restored: { title: "Geri alındı", description: "Dosyalar checkpoint durumuna döndü.", Icon: RotateCcw, tone: "text-muted", line: "border-l-border-w2" },
   error: { title: "Koşu tamamlanmadı", description: "Görevi düzenleyip tekrar çalıştır.", Icon: CircleAlert, tone: "text-err", line: "border-l-err" },
   draft: { title: "Başlamaya hazır", description: "Bir görev yaz.", Icon: Play, tone: "text-muted", line: "border-l-border-w2" },
+  noChanges: {
+    title: "Değişiklik önerisi çıkmadı",
+    description: "Ajan bir değişiklik yapmadı; akışta ne olduğunu görüp görevi düzenleyerek tekrar deneyebilirsin.",
+    Icon: Info,
+    tone: "text-muted",
+    line: "border-l-border-w2",
+  },
 } as const;
 
 export function AiPanel({ onClose }: { onClose: () => void }) {
@@ -52,7 +60,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
   // öneri hazır olunca Değişiklikler sekmesine geç (desktop.py _focus_view deseni)
   useEffect(() => {
     if (runStage === "planning") setTab("plan");
-    if (runStage === "working" || runStage === "reviewing" || runStage === "error") setTab("work");
+    if (runStage === "working" || runStage === "reviewing" || runStage === "error" || runStage === "noChanges") setTab("work");
     if (runStage === "ready" || runStage === "applied" || runStage === "restored") setTab("review");
   }, [runStage, status, diffCount]);
 

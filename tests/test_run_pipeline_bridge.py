@@ -385,6 +385,11 @@ def test_pipeline_no_changes(bridge, qapp, monkeypatch, git_repo):
     assert finished["status"] == "done"
     evs = _run_ev_payloads(events, run_id)
     assert any(e["type"] == "info" and "önerisi çıkmadı" in e.get("text", "") for e in evs)
+    # F2/UI bitiş durumu: Worker'ın son mesajı da bir "summary" olayı olarak
+    # akışa eklenir -- kullanıcı sadece "değişiklik yok" değil, ajanın ne
+    # yaptığını/söylediğini de görür (bkz. webhost/api/run.py
+    # _last_worker_final_message).
+    assert any(e["type"] == "summary" and "Hiçbir değişiklik gerekmedi" in e.get("text", "") for e in evs)
 
     from webhost import state as _state
     assert _state.get_run_runtime().get_run(run_id).status.value == "succeeded"

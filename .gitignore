@@ -46,6 +46,7 @@ docs/VISUAL-RESET.md
 docs/VISUAL-SIGNATURE-AUDIT.md
 docs/VISUAL-SIGNATURE-PLAN.md
 docs/WEB-SHELL-PLAN.md
+docs/JEV-DESIGN.md
 web/ui/*.tsbuildinfo
 
 # Yerel inceleme/diff dökümleri (agent oturumlarının ürettiği geçici dosyalar)

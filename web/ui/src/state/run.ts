@@ -48,7 +48,19 @@ export interface PlanInfo {
 }
 
 export type RunStatus = "idle" | "running" | "done" | "failed" | "cancelled";
-export type RunStage = "draft" | "planning" | "working" | "reviewing" | "ready" | "applied" | "restored" | "error";
+export type RunStage =
+  | "draft"
+  | "planning"
+  | "working"
+  | "reviewing"
+  | "ready"
+  | "applied"
+  | "restored"
+  | "error"
+  /** Koşu tamamlandı ama Worker hiçbir değişiklik üretmedi (pipeline
+      "no_changes" veya legacy motorda boş öneri) -- "draft" (hiç başlamamış)
+      ile karıştırılmaması için ayrı bir terminal durum. */
+  | "noChanges";
 /** F2 (takip isteği): bir koşunun GERÇEKTE hangi motorla yürütüldüğü —
     run.finished'ın `engine` alanından gelir; henüz bilinmiyorsa null.
     Composer, takip isteği modunu yalnızca "pipeline" iken açar. */
@@ -378,7 +390,8 @@ export const useRun = create<RunState>((set, get) => ({
         }));
       } else {
         set((s) => ({
-          status: "done", runStage: s.runStage === "ready" ? "ready" : "draft",
+          status: "done",
+          runStage: s.runStage === "ready" ? "ready" : "noChanges",
           engine: engine ?? s.engine,
         }));
       }
@@ -415,6 +428,13 @@ function consume(
       flow: [...s.flow, { id: flowId++, kind: "stage", text: provider, stage }],
     }));
   } else if (type === "info") {
+    set((s) => ({ flow: [...s.flow, { id: flowId++, kind: "info", text: ev.text as string }] }));
+  } else if (type === "summary") {
+    // Worker'ın son mesajı (bkz. webhost/api/run.py _last_worker_final_message)
+    // -- "Değişiklik önerisi çıkmadı." bilgi satırının altında görünür.
+    // kind="info" (yeşil "başarı" görünümü değil) kasıtlı: bu satır bir
+    // proposal-hazır özeti değil, ajanın ne yaptığını/denediğini anlatan
+    // düz bir açıklama.
     set((s) => ({ flow: [...s.flow, { id: flowId++, kind: "info", text: ev.text as string }] }));
   } else if (type === "output") {
     const stage = (ev.stage as string) ?? "";

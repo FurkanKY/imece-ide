@@ -225,7 +225,7 @@ export default function App() {
       useActivity.getState().install(); // F1: run.activity abonelikleri
       await loadSettings();
       // mock senaryoları: otomatik proje aç (+ koşu) — webshot/geliştirme
-      const runScenarios = ["running", "result", "error"];
+      const runScenarios = ["running", "result", "error", "nochanges"];
       if (!bridge.isNative && (scenario === "project" || scenario === "editor" || runScenarios.includes(scenario ?? ""))) {
         await openProject("C:/Projeler/demo-api");
         if (scenario === "editor") await useEditor.getState().open("src/App.tsx");

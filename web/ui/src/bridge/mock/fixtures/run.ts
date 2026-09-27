@@ -65,6 +65,19 @@ export const RUN_REST: [number, RunEvent][] = [
 
 export const RUN_FULL: [number, RunEvent][] = [...RUN_PARTIAL, ...RUN_REST];
 
+/** ?scenario=nochanges — Worker denemesi hiçbir dosya değiştirmedi (bkz.
+    pipeline_runtime.runner PipelineStatus.NO_CHANGES). AI panelinin "Plan —
+    Hazır" kartında SIKIŞIP KALMADIĞINI, aksine ayrı bir bitiş durumu
+    ("Değişiklik yok") ve ajanın son mesajını gösterdiğini doğrular. */
+export const RUN_NO_CHANGES: [number, RunEvent][] = [
+  ...RUN_PARTIAL,
+  [400, { type: "info", text: "Değişiklik önerisi çıkmadı." }],
+  [150, {
+    type: "summary",
+    text: "utils.py'yi incelediğimde biçim zaten ISO 8601 idi; herhangi bir değişikliğe gerek görmedim.",
+  }],
+];
+
 // ---------------- F2 (takip isteği / follow-up) ----------------
 
 const NEW_UTILS_FOLLOWUP = `from datetime import datetime

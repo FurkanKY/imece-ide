@@ -31,6 +31,7 @@ class AcpPermissionResolved:
     session_id: str
     tool_call_id: str
     outcome: str
+    reason: str = ""
 
 
 AcpRuntimeEvent = AcpSessionUpdateObserved | AcpPermissionRequested | AcpPermissionResolved
