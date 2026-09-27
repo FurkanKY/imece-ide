@@ -1,0 +1,14 @@
+{
+  "name": "jest_project_local_import_broken",
+  "tool": "jest",
+  "stdout": "",
+  "stderr": "FAIL tests/helpers.test.js\n  ● Test suite failed to run\n\n    Cannot find module './helpers' from 'tests/helpers.test.js'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/helpers.js",
+    "tests/helpers.test.js"
+  ],
+  "baseline_status": null,
+  "expected_label": "code_bug"
+}

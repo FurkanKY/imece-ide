@@ -1,0 +1,13 @@
+{
+  "name": "go_test_timeout",
+  "tool": "go test",
+  "stdout": "panic: test timed out after 30s\n",
+  "stderr": "",
+  "exit_code": null,
+  "timed_out": true,
+  "changed_paths": [
+    "internal/queue/worker.go"
+  ],
+  "baseline_status": null,
+  "expected_label": "flaky_or_timeout"
+}

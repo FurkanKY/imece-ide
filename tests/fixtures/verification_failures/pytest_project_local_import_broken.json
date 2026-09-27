@@ -1,0 +1,14 @@
+{
+  "name": "pytest_project_local_import_broken",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"tests/test_util.py\", line 2, in <module>\n    from myapp.util import helper\nModuleNotFoundError: No module named 'myapp.util'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "myapp/util.py",
+    "tests/test_util.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "code_bug"
+}

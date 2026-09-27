@@ -32,6 +32,11 @@ DEFAULTS = {
     # Kullanıcının Composer'dan seçtiği rol->sağlayıcı ataması | None ->
     # providers.recommended_routing() kullanılabilirliğe göre önerir.
     "routing": None,
+    # Jev System One karar katmanı (bkz. decision_runtime/, engine_factory.py):
+    # "off" | "rules" | "jev" — varsayılan "off": "off" ile pipeline davranışı
+    # bugünkü ile bayt-bayt aynı kalmalıdır. "jev" şimdilik gerçek bir
+    # JevDecisionBackend OLMADIĞI için "rules" davranışına düşer (S1a).
+    "decision_layer": "off",
 }
 
 

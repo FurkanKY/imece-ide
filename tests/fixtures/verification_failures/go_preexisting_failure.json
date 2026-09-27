@@ -1,0 +1,13 @@
+{
+  "name": "go_preexisting_failure",
+  "tool": "go test",
+  "stdout": "--- FAIL: TestLegacyBehavior (0.00s)\n    legacy_test.go:12: expected 2, got 1\nFAIL\n",
+  "stderr": "",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "internal/other/file.go"
+  ],
+  "baseline_status": "fail",
+  "expected_label": "unrelated_preexisting"
+}

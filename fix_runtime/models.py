@@ -68,6 +68,17 @@ class FixLoopStatus(StrEnum):
     COMPLETED = "completed"
     EXHAUSTED = "exhausted"
     FAILED = "failed"
+    # Jev System One decision layer (docs/JEV-DESIGN.md Spike S1): the decision
+    # gate deliberately stopped the loop WITHOUT settling the Run itself --
+    # unlike every other terminal status, FixLoopRunner does NOT call
+    # completion_gate for this one (see FixLoopRunner._run_attempts's decision-
+    # gate block). The Run is left RUNNING; the caller (pipeline_runtime.
+    # PipelineRunner) is responsible for finishing settlement itself, exactly
+    # mirroring its own existing "no verification plan detected" advisory-
+    # review path. `reason` distinguishes WHY: "needs_user_environment"
+    # (missing dependency/tooling) or "pre_existing_failure" (the same check
+    # also fails on the baseline).
+    NEEDS_USER = "needs_user"
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +323,12 @@ class FixLoopReport:
     verification_report: VerificationReport | None = None
     review_report: ReviewReport | None = None
     diff_sha256: str | None = None
+    # Decision-layer-only field (docs/JEV-DESIGN.md Spike S1): a Turkish,
+    # human-facing message set only for status=NEEDS_USER with reason
+    # "needs_user_environment" (missing dependency/tooling) -- None otherwise,
+    # including for reason "pre_existing_failure" (that case has no message
+    # of its own; the pre-existing verification evidence speaks for itself).
+    needs_user_message: str | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.fix_loop_id, "FixLoopReport.fix_loop_id")
@@ -321,6 +338,8 @@ class FixLoopReport:
             raise FixLoopInputError("FixLoopReport.attempts_used must be a non-negative integer.")
         if not isinstance(self.reason, str) or not self.reason:
             raise FixLoopInputError("FixLoopReport.reason must be a non-empty string.")
+        if self.needs_user_message is not None and not isinstance(self.needs_user_message, str):
+            raise FixLoopInputError("FixLoopReport.needs_user_message must be a string or None.")
 
 
 def new_fix_loop_id() -> str:

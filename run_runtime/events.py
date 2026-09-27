@@ -98,6 +98,19 @@ class RunEventType(StrEnum):
     FIX_LOOP_FAILED = "fix_loop.failed"
     FIX_LOOP_INTERRUPTED = "fix_loop.interrupted"
 
+    # Jev System One decision layer (docs/JEV-DESIGN.md design rule 5): a
+    # NON-authoritative, advisory audit record of one decision_runtime.
+    # DecisionPort.decide() call (decision id, question set version, model
+    # version/backend, answers, confidence, latency, tokens, fallback_used).
+    # Exactly like AGENT_ACTIVITY above, this is deliberately kept OUT of
+    # every completion-gate/projector/readmodel dispatch table (see
+    # run_runtime.agent_activity's module docstring for why that pattern is
+    # safe) -- recorded by decision_runtime.recorder.CanonicalDecisionRecorder
+    # (decision_runtime sits beside agent_runtime/pipeline_runtime; it is the
+    # ONLY thing that appends this event type, mirroring how run_runtime.
+    # agent_activity is the sole appender of AGENT_ACTIVITY).
+    DECISION_MADE = "decision.made"
+
 @dataclass(frozen=True, slots=True)
 class RunEventSpec:
     """A validated event request used by atomic batch append operations."""

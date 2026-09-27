@@ -1,0 +1,13 @@
+{
+  "name": "go_missing_package",
+  "tool": "go test",
+  "stdout": "",
+  "stderr": "go: github.com/some/pkg@v1.2.3: missing go.sum entry\ncannot find package \"github.com/some/pkg\" in any of:\n\t/usr/local/go/src/github.com/some/pkg (from $GOROOT)\n\t/root/go/src/github.com/some/pkg (from $GOPATH)\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "cmd/server/main.go"
+  ],
+  "baseline_status": null,
+  "expected_label": "missing_dependency"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "bash_command_not_found_pytest",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "bash: pytest: command not found\n",
+  "exit_code": 127,
+  "timed_out": false,
+  "changed_paths": [
+    "tests/test_math.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "environment_or_tooling"
+}

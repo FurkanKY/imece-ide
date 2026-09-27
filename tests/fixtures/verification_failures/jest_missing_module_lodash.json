@@ -1,0 +1,13 @@
+{
+  "name": "jest_missing_module_lodash",
+  "tool": "jest",
+  "stdout": "",
+  "stderr": "FAIL tests/util.test.js\n  ● Test suite failed to run\n\n    Cannot find module 'lodash' from 'src/util.js'\n\n    Require stack:\n      src/util.js\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/util.js"
+  ],
+  "baseline_status": null,
+  "expected_label": "missing_dependency"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "go_test_assertion_failure",
+  "tool": "go test",
+  "stdout": "--- FAIL: TestAdd (0.00s)\n    math_test.go:8: got 4, want 5\nFAIL\n",
+  "stderr": "",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "pkg/math/math.go"
+  ],
+  "baseline_status": null,
+  "expected_label": "code_bug"
+}

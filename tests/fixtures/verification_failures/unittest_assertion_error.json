@@ -1,0 +1,13 @@
+{
+  "name": "unittest_assertion_error",
+  "tool": "unittest",
+  "stdout": "",
+  "stderr": "======================================================================\nFAIL: test_subtract (tests.test_math.TestMath)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"tests/test_math.py\", line 10, in test_subtract\n    self.assertEqual(subtract(5, 3), 3)\nAssertionError: 2 != 3\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/math.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "code_bug"
+}

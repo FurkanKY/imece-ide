@@ -1,0 +1,13 @@
+{
+  "name": "npm_script_timeout",
+  "tool": "npm test",
+  "stdout": "",
+  "stderr": "Error: script hung, no output for 60s\n",
+  "exit_code": null,
+  "timed_out": true,
+  "changed_paths": [
+    "scripts/build.js"
+  ],
+  "baseline_status": null,
+  "expected_label": "flaky_or_timeout"
+}

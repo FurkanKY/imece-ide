@@ -14,6 +14,8 @@ from agent_runtime.cancellation import CancellationToken, OperationCancelledErro
 from change_runtime.models import WorkspaceChangeSet
 from change_runtime.provider import ChangeProvider
 from context_runtime import load_project_rules
+from decision_runtime.gate import VerificationFailureGate
+from decision_runtime.triage import TriageAction, TriageOutcome
 from review_runtime.errors import ReviewInputError
 from review_runtime.models import ReviewReport, ReviewRequest, ReviewVerdict, new_review_id
 from run_runtime.completion import RunCompletionGate
@@ -56,6 +58,7 @@ class FixLoopRunner:
         reviewer: ReviewAttemptRunner,
         change_provider: ChangeProvider,
         completion_gate: RunCompletionGate | None = None,
+        decision_gate: VerificationFailureGate | None = None,
     ) -> None:
         self._runtime = runtime
         self._worker = worker
@@ -63,6 +66,11 @@ class FixLoopRunner:
         self._reviewer = reviewer
         self._change_provider = change_provider
         self._completion_gate = completion_gate or RunCompletionGate(runtime)
+        # docs/JEV-DESIGN.md Spike S1: None (the default, "decision_layer":
+        # "off" -- see engine_factory.build_verification_failure_gate) means
+        # every verification FAIL is handled exactly as before this slice; no
+        # decision_runtime import side effect happens on that path at all.
+        self._decision_gate = decision_gate
 
     def run(
         self,
@@ -119,6 +127,7 @@ class FixLoopRunner:
         cancel_token: CancellationToken | None,
     ) -> FixLoopReport:
         current_trigger = trigger
+        current_classification: str | None = None
         attempts_used = 0
         final_execution_id: str | None = None
         last_verification_report = None
@@ -143,7 +152,10 @@ class FixLoopRunner:
                 before_diff_sha256=before.diff_sha256,
             )
 
-            rendered_input = self._render_worker_input(workspace, request, current_trigger, attempt_index)
+            rendered_input = self._render_worker_input(
+                workspace, request, current_trigger, attempt_index, current_classification,
+            )
+            current_classification = None  # consumed: only applies to the attempt it was set for
             worker_request = FixWorkerRequest(
                 task=request.task, trigger=current_trigger, attempt_index=attempt_index, plan=request.plan,
                 rendered_input=rendered_input,
@@ -181,6 +193,27 @@ class FixLoopRunner:
             last_verification_report = verification_report
             status = verification_report.status
 
+            # docs/JEV-DESIGN.md Spike S1: triage a real FAIL BEFORE deciding
+            # whether to start a fix attempt. RERUN_VERIFICATION_ONCE is
+            # applied right here -- it replaces verification_report/status
+            # with the rerun's own result and then falls through the SAME
+            # ERROR/TIMEOUT/FAIL/PASS handling below unconditionally (only
+            # ONE rerun ever happens per triage; see the design doc's
+            # "re-run the check once before deciding"). Any other outcome is
+            # consumed only in the FAIL branch below (never for ERROR/TIMEOUT).
+            decision_outcome: TriageOutcome | None = None
+            if status is VerificationStatus.FAIL and self._decision_gate is not None:
+                decision_outcome = self._evaluate_decision_gate(workspace, request, verification_report, after)
+                if decision_outcome is not None and decision_outcome.action is TriageAction.RERUN_VERIFICATION_ONCE:
+                    rerun_id = new_verification_id()
+                    verification_report = self._run_verification(
+                        workspace, request.verification_plan, rerun_id, cancel_token,
+                    )
+                    verification_id = rerun_id
+                    last_verification_report = verification_report
+                    status = verification_report.status
+                    decision_outcome = None
+
             if status is VerificationStatus.ERROR:
                 recorder.failed(reason="verification_error")
                 self._completion_gate.fail_fix_loop(run_id, fix_loop_id=fix_loop_id)
@@ -198,6 +231,35 @@ class FixLoopRunner:
                     verification_report=verification_report, diff_sha256=after.diff_sha256,
                 )
             if status is VerificationStatus.FAIL:
+                if decision_outcome is not None and decision_outcome.action is TriageAction.NEEDS_USER:
+                    # Deliberately NOT completion_gate.fail_fix_loop(): the Run
+                    # is left RUNNING so pipeline_runtime.PipelineRunner can
+                    # run an advisory review and settle WAITING_USER itself
+                    # (the proposal stays viewable) -- see FixLoopStatus.NEEDS_USER.
+                    recorder.exhausted(
+                        reason="needs_user_environment", attempts_used=attempts_used,
+                        max_fix_attempts=request.max_fix_attempts,
+                        decision_failure_kind=decision_outcome.failure_kind,
+                    )
+                    return FixLoopReport(
+                        fix_loop_id=fix_loop_id, status=FixLoopStatus.NEEDS_USER, attempts_used=attempts_used,
+                        reason="needs_user_environment", final_execution_id=final_execution_id,
+                        verification_report=verification_report, diff_sha256=after.diff_sha256,
+                        needs_user_message=decision_outcome.needs_user_message,
+                    )
+                if decision_outcome is not None and decision_outcome.action is TriageAction.MARK_PRE_EXISTING:
+                    # Same "leave it to the caller" contract as NEEDS_USER
+                    # above (see FixLoopStatus.NEEDS_USER's docstring).
+                    recorder.exhausted(
+                        reason="pre_existing_failure", attempts_used=attempts_used,
+                        max_fix_attempts=request.max_fix_attempts,
+                        decision_failure_kind=decision_outcome.failure_kind,
+                    )
+                    return FixLoopReport(
+                        fix_loop_id=fix_loop_id, status=FixLoopStatus.NEEDS_USER, attempts_used=attempts_used,
+                        reason="pre_existing_failure", final_execution_id=final_execution_id,
+                        verification_report=verification_report, diff_sha256=after.diff_sha256,
+                    )
                 if attempt_index == request.max_fix_attempts:
                     recorder.exhausted(
                         reason="budget_exhausted", attempts_used=attempts_used,
@@ -212,6 +274,13 @@ class FixLoopRunner:
                 current_trigger = FixTrigger(
                     kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=verification_report,
                 )
+                # CODE_BUG/TEST_NEEDS_UPDATE (or the gate off/low-confidence/
+                # no-strong-signal case, where decision_outcome is None or
+                # CONTINUE_FIX_LOOP): today's behaviour, optionally annotated
+                # with the decision layer's classification for the next
+                # attempt's prompt (docs/JEV-DESIGN.md action table).
+                if decision_outcome is not None and decision_outcome.action is TriageAction.CONTINUE_FIX_LOOP:
+                    current_classification = decision_outcome.failure_kind
                 continue
 
             if status is not VerificationStatus.PASS:  # pragma: no cover - exhaustive above
@@ -299,17 +368,34 @@ class FixLoopRunner:
         return result
 
     def _render_worker_input(
-        self, workspace, request: FixLoopRequest, trigger: FixTrigger, attempt_index: int
+        self, workspace, request: FixLoopRequest, trigger: FixTrigger, attempt_index: int,
+        classification: str | None = None,
     ) -> str:
         try:
             rules = load_project_rules(workspace.root)
             return render_fix_worker_input(
                 task=request.task, plan=request.plan, trigger=trigger,
                 attempt_index=attempt_index, max_fix_attempts=request.max_fix_attempts,
-                rules=rules, pinned_paths=request.pinned_paths,
+                rules=rules, pinned_paths=request.pinned_paths, classification=classification,
             )
         except Exception as exc:
             raise FixLoopExecutionError(f"Fix worker input could not be rendered: {exc}") from exc
+
+    def _evaluate_decision_gate(
+        self, workspace, request: FixLoopRequest, verification_report, after: WorkspaceChangeSet,
+    ) -> TriageOutcome | None:
+        """design rule 1: the decision layer is an accelerator, never a hard
+        dependency -- ANY failure evaluating it (baseline rerun, a backend
+        error the gate itself didn't already catch, a bug) must degrade to
+        None ("no triage evidence"), handled identically to the gate being
+        off: today's fix-loop behaviour, never a pipeline crash."""
+        try:
+            return self._decision_gate.evaluate(
+                workspace=workspace, verification_plan=request.verification_plan,
+                verification_report=verification_report, changed_paths=after.changed_paths,
+            )
+        except Exception:
+            return None
 
     def _run_worker(
         self, workspace, worker_request: FixWorkerRequest, execution_id: str,

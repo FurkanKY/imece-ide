@@ -1,0 +1,13 @@
+{
+  "name": "pytest_missing_module_requests",
+  "tool": "pytest",
+  "stdout": "",
+  "stderr": "ImportError while importing test module 'tests/test_api.py'.\nTraceback (most recent call last):\n  File \"tests/test_api.py\", line 3, in <module>\n    import requests\nModuleNotFoundError: No module named 'requests'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/api/client.py"
+  ],
+  "baseline_status": null,
+  "expected_label": "missing_dependency"
+}

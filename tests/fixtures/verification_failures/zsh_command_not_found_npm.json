@@ -1,0 +1,13 @@
+{
+  "name": "zsh_command_not_found_npm",
+  "tool": "npm",
+  "stdout": "",
+  "stderr": "zsh: command not found: npm\n",
+  "exit_code": 127,
+  "timed_out": false,
+  "changed_paths": [
+    "package.json"
+  ],
+  "baseline_status": null,
+  "expected_label": "environment_or_tooling"
+}
