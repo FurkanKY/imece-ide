@@ -257,3 +257,74 @@ def test_render_fix_worker_input_without_pinned_paths_is_unchanged():
         task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=2, pinned_paths=(),
     )
     assert without == without_explicit_empty
+
+
+# ---------------- F2 (follow-up on a proposal): USER_FEEDBACK rendering ----------------
+
+
+def _user_feedback_trigger(feedback="also handle negative numbers", diff_sha="a" * 64):
+    return FixTrigger(
+        kind=FixTriggerKind.USER_FEEDBACK, verification_report=None, review_report=None,
+        feedback=feedback, diff_sha256=diff_sha,
+    )
+
+
+def test_render_fix_worker_input_includes_followup_section_for_user_feedback():
+    trigger = _user_feedback_trigger("also handle negative numbers")
+    rendered = render_fix_worker_input(task="Implement the widget", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=1)
+    assert "FOLLOW-UP INSTRUCTION FROM THE USER" in rendered
+    assert "also handle negative numbers" in rendered
+    assert "Implement the widget" in rendered
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+
+
+def test_render_fix_worker_input_followup_never_truncated_even_with_huge_task():
+    # task near the model's own 32_000-char bound; feedback capped at 8_000 --
+    # both must survive verbatim (the followup section is treated as
+    # mandatory, exactly like ORIGINAL USER TASK).
+    task = "T" * 31_000
+    feedback = "F" * 7_500
+    trigger = _user_feedback_trigger(feedback)
+    rendered = render_fix_worker_input(task=task, plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=1)
+    assert task in rendered
+    assert feedback in rendered
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS
+
+
+def test_render_fix_worker_input_no_followup_section_for_other_trigger_kinds():
+    trigger = _verification_fail_trigger()
+    rendered = render_fix_worker_input(task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=1)
+    assert "FOLLOW-UP INSTRUCTION FROM THE USER" not in rendered
+
+
+def test_render_fix_worker_input_user_feedback_feedback_section_says_none():
+    # No verification/review context supplied -> FIX FEEDBACK section renders
+    # "(none)" rather than crashing on a None verification_report.
+    trigger = _user_feedback_trigger()
+    rendered = render_fix_worker_input(task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=1)
+    assert "FIX FEEDBACK" in rendered
+    assert "(none)" in rendered
+
+
+def test_render_fix_worker_input_user_feedback_with_context_reports():
+    from verification_runtime.models import VerificationCheckResult, VerificationReport, VerificationStatus
+    from review_runtime.models import ReviewReport, ReviewVerdict
+
+    verification = VerificationReport(
+        verification_id="ver-1", plan_id="plan-1",
+        results=(VerificationCheckResult("c1", "Check", VerificationStatus.PASS, _process_result("", "", 0)),),
+        duration_ms=1,
+    )
+    review = ReviewReport(
+        review_id="rev-1", verdict=ReviewVerdict.APPROVED, summary="looked good",
+        findings=(), repository_fingerprint="a" * 64, diff_sha256="b" * 64,
+        verification_id="ver-1", verification_status="pass",
+    )
+    trigger = FixTrigger(
+        kind=FixTriggerKind.USER_FEEDBACK, verification_report=verification, review_report=review,
+        feedback="also handle negative numbers", diff_sha256="c" * 64,
+    )
+    rendered = render_fix_worker_input(task="task", plan=None, trigger=trigger, attempt_index=1, max_fix_attempts=1)
+    assert "looked good" in rendered
+    assert "also handle negative numbers" in rendered
+    assert len(rendered) <= MAX_FIX_INPUT_CHARS

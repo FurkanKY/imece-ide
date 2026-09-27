@@ -202,6 +202,112 @@ def test_fix_loop_request_rejects_oversized_task():
         FixLoopRequest(task="x" * 32_001, trigger=trigger, verification_plan=_valid_verification_plan())
 
 
+# ---------------- FixTrigger (USER_FEEDBACK, F2) ----------------
+
+
+def _sha256_hex(byte: str = "a") -> str:
+    return byte * 64
+
+
+def test_user_feedback_trigger_valid():
+    trigger = FixTrigger(
+        kind=FixTriggerKind.USER_FEEDBACK, verification_report=None, review_report=None,
+        feedback="also handle negative numbers", diff_sha256=_sha256_hex(),
+    )
+    assert trigger.feedback == "also handle negative numbers"
+    assert trigger.diff_sha256 == _sha256_hex()
+    assert trigger.verification_report is None
+    assert trigger.review_report is None
+
+
+def test_user_feedback_trigger_may_carry_context_reports():
+    trigger = FixTrigger(
+        kind=FixTriggerKind.USER_FEEDBACK,
+        verification_report=_verification(VerificationStatus.PASS),
+        review_report=_review(ReviewVerdict.APPROVED),
+        feedback="rename x to y", diff_sha256=_sha256_hex("c"),
+    )
+    assert trigger.verification_report.status is VerificationStatus.PASS
+    assert trigger.review_report.verdict is ReviewVerdict.APPROVED
+
+
+def test_user_feedback_trigger_rejects_empty_feedback():
+    with pytest.raises(FixLoopInputError):
+        FixTrigger(
+            kind=FixTriggerKind.USER_FEEDBACK, verification_report=None,
+            feedback="", diff_sha256=_sha256_hex(),
+        )
+
+
+def test_user_feedback_trigger_rejects_oversized_feedback():
+    with pytest.raises(FixLoopInputError):
+        FixTrigger(
+            kind=FixTriggerKind.USER_FEEDBACK, verification_report=None,
+            feedback="x" * 8_001, diff_sha256=_sha256_hex(),
+        )
+
+
+def test_user_feedback_trigger_rejects_nul_in_feedback():
+    with pytest.raises(FixLoopInputError):
+        FixTrigger(
+            kind=FixTriggerKind.USER_FEEDBACK, verification_report=None,
+            feedback="a\x00b", diff_sha256=_sha256_hex(),
+        )
+
+
+@pytest.mark.parametrize("bad_sha", [None, "", "not-hex", "a" * 63, "A" * 64])
+def test_user_feedback_trigger_rejects_invalid_diff_sha256(bad_sha):
+    with pytest.raises(FixLoopInputError):
+        FixTrigger(
+            kind=FixTriggerKind.USER_FEEDBACK, verification_report=None,
+            feedback="fix it", diff_sha256=bad_sha,
+        )
+
+
+def test_verification_fail_trigger_rejects_feedback_fields():
+    with pytest.raises(FixLoopInputError):
+        FixTrigger(
+            kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=_verification(VerificationStatus.FAIL),
+            feedback="nope", diff_sha256=_sha256_hex(),
+        )
+
+
+def test_review_needs_fix_trigger_rejects_feedback_fields():
+    with pytest.raises(FixLoopInputError):
+        FixTrigger(
+            kind=FixTriggerKind.REVIEW_NEEDS_FIX, verification_report=_verification(VerificationStatus.PASS),
+            review_report=_review(ReviewVerdict.NEEDS_FIX, findings=_finding()),
+            feedback="nope", diff_sha256=_sha256_hex(),
+        )
+
+
+# ---------------- FixLoopRequest.review_task (F2) ----------------
+
+
+def test_fix_loop_request_review_task_defaults_to_none():
+    trigger = FixTrigger(kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=_verification(VerificationStatus.FAIL))
+    request = FixLoopRequest(task="t", trigger=trigger, verification_plan=_valid_verification_plan())
+    assert request.review_task is None
+
+
+def test_fix_loop_request_review_task_bounded_and_stored():
+    trigger = FixTrigger(kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=_verification(VerificationStatus.FAIL))
+    request = FixLoopRequest(
+        task="t", trigger=trigger, verification_plan=_valid_verification_plan(),
+        review_task="t\n\nFollow-up instruction from the user: also handle negative numbers",
+    )
+    assert "Follow-up instruction" in request.review_task
+
+
+def test_fix_loop_request_rejects_oversized_review_task():
+    trigger = FixTrigger(kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=_verification(VerificationStatus.FAIL))
+    with pytest.raises(FixLoopInputError):
+        FixLoopRequest(
+            task="t", trigger=trigger, verification_plan=_valid_verification_plan(),
+            review_task="x" * 32_001,
+        )
+
+
 # ---------------- FixLoopReport ----------------
 
 

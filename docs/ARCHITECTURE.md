@@ -86,7 +86,60 @@ ports exposed by `fix_runtime`, `planner_runtime`, `executor_runtime` and
     │  worker attempt → verification → (review if verification passes) → repeat
     ▼
  COMPLETED (reviewer APPROVED)  or  EXHAUSTED / FAILED ──► run.failed
+
+ WAITING_USER (proposal.ready)
+    │
+    ├─ Apply / Reject ──────────────────────────► terminal, worktree disposed
+    │
+    └─ run.followUp {feedback} ───────────────── PipelineRunner.continue_with_feedback
+             │        run.resumed (WAITING_USER → RUNNING, same worktree,
+             │        NO new Planner attempt)
+             ▼
+       fix loop with a USER_FEEDBACK trigger (worker attempt → verification
+       (if a plan is still detected) → review → repeat, same bounded budget)
+             │
+             └─► RunCompletionGate.complete_reviewed() (same await_user gate)
+                   ──► WAITING_USER again (proposal.ready) — repeatable
 ```
+
+### Follow-up on a proposal (F2)
+
+A Reviewer-APPROVED, `WAITING_USER` pipeline run does not have to end in
+Apply or Reject: `PipelineRunner.continue_with_feedback(run_id, workspace,
+feedback, ...)` lets the user type a follow-up instruction ("also handle
+negative numbers", "rename x to y") and resumes the **same** Run from the
+**same** worktree — no new Planner attempt, no fresh isolation setup.
+
+- A new `FixTriggerKind.USER_FEEDBACK` (`fix_runtime.models.FixTrigger`)
+  carries the user's `feedback` (bounded, non-empty, NUL-free) and the
+  `diff_sha256` of the change set it refers to — `FixLoopRunner` validates
+  that `diff_sha256` against the worktree's current capture before acting on
+  it, exactly like it already does for a stale `REVIEW_NEEDS_FIX` review. It
+  may also carry the last known verification/review reports purely as
+  context (never as a gate).
+- `fix_runtime.prompt.render_fix_worker_input` gives a `USER_FEEDBACK`
+  trigger its own "FOLLOW-UP INSTRUCTION FROM THE USER" section, trusted
+  like the original task (never truncated) and kept separate from the
+  diagnostic "FIX FEEDBACK" section used by the other two trigger kinds.
+- `continue_with_feedback` records `run.resumed` (via
+  `CanonicalPipelineRecorder.resumed()` — `run_runtime.projector` only
+  accepts `RUN_RESUMED` from `WAITING_USER`), re-detects the verification
+  plan, and then either runs the bounded `FixLoopRunner` (verification
+  plan present) or a single advisory worker-then-review attempt (no plan —
+  mirroring `run()`'s own "no verification plan" path), settling through
+  the *same* `await_user` `RunCompletionGate` used for the initial run. The
+  Reviewer's task context is augmented with the follow-up text (bounded)
+  so semantic review is aware of it too. Cancellation and the
+  no-verification-plan path work exactly as they do for `run()`.
+- The worktree is **no longer disposed right after building proposals** —
+  `webhost/api/run.py` now keeps it alive for as long as the canonical Run
+  stays `WAITING_USER`, and disposes it only on Apply, Reject, cancel,
+  failure, a new `run.start`, or app shutdown. `run.followUp {feedback}` is
+  the bridge handler: valid only for a pipeline run currently `WAITING_USER`
+  with a live worktree (a clear Turkish `BridgeError` otherwise, e.g. for
+  the classic engine), and it clears the in-memory proposals, restarts the
+  live activity stream from the run's current event sequence, and rebuilds
+  proposals (fresh `baseHash`) once the continuation settles again.
 
 Even a run that reaches Reviewer-APPROVED with a passing verification is
 **not** applied automatically: `PipelineRunner` always constructs its

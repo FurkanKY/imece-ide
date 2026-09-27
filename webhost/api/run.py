@@ -73,6 +73,13 @@ _active: dict = {
     # F1 (live agent activity) — yalnızca pipeline motorunda kullanılır;
     # legacy koşularda hep None kalır (bkz. _stop_activity_streamer).
     "activity_streamer": None,
+    # F2 (takip isteği / follow-up): run.start sırasında sabitlenen, sonraki
+    # run.followUp çağrılarının PipelineRunner.continue_with_feedback'e
+    # AYNEN geçirdiği bağlam. "plan_text" yalnızca gerçek bir Planner
+    # denemesi ürettiğinde (ilk koşu) güncellenir -- bir takip isteği
+    # continuation'ı KENDİ planını üretmez, bu yüzden önceki plan metni
+    # sonraki takip isteklerinde de KORUNUR (bkz. on_pipeline_finished).
+    "pipeline_ports": None, "task": None, "plan_text": None, "pinned_paths": [],
 }
 
 # F6 (@-mentions): backend cap independent of (and enforced regardless of)
@@ -145,6 +152,54 @@ class _PipelineWorker(QThread):
                 cancel_event=self.cancel_event,
                 on_stage=lambda s, info: self.stage.emit(s, dict(info)),
                 pinned_paths=self.pinned_paths,
+            )
+            self.finished_ok.emit(report)
+        except Exception as e:  # motor hatası UI'a düzgün gitsin
+            self.failed.emit(str(e))
+
+
+class _FollowUpWorker(QThread):
+    """F2 (takip isteği): _PipelineWorker'ın AYNI QThread desenini izler, ama
+    PipelineRunner.run() yerine continue_with_feedback() çağırır -- AYNI
+    worktree'den, YENİ bir Planner denemesi OLMADAN devam eder."""
+
+    stage = Signal(str, dict)
+    finished_ok = Signal(object)  # PipelineReport
+    failed = Signal(str)
+
+    def __init__(
+        self, runtime, run_id, workspace, ports, task, feedback, plan_text, cancel_event,
+        pinned_paths=None, max_fix_attempts=None,
+    ):
+        super().__init__()
+        self.runtime = runtime
+        self.run_id = run_id
+        self.workspace = workspace
+        self.ports = ports
+        self.task = task
+        self.feedback = feedback
+        self.plan_text = plan_text
+        self.cancel_event = cancel_event
+        self.pinned_paths = pinned_paths or []
+        self.max_fix_attempts = max_fix_attempts
+
+    def run(self):
+        try:
+            pipeline = PipelineRunner(
+                self.runtime,
+                planner=self.ports.planner, worker=self.ports.worker,
+                verification=self.ports.verification, reviewer=self.ports.reviewer,
+                change_provider=self.ports.change_provider,
+            )
+            kwargs = {}
+            if self.max_fix_attempts is not None:
+                kwargs["max_fix_attempts"] = self.max_fix_attempts
+            report = pipeline.continue_with_feedback(
+                self.run_id, self.workspace, self.feedback,
+                task=self.task, plan_report_or_text=self.plan_text, pinned_paths=self.pinned_paths,
+                cancel_event=self.cancel_event,
+                on_stage=lambda s, info: self.stage.emit(s, dict(info)),
+                **kwargs,
             )
             self.finished_ok.emit(report)
         except Exception as e:  # motor hatası UI'a düzgün gitsin
@@ -426,6 +481,14 @@ def _start(params, ctx):
     _active["cancel_event"] = None
     _active["engine"] = "legacy"
     _active["activity_streamer"] = None
+    # F2 (takip isteği): her yeni run.start bu bağlamı SIFIRLAR -- önceki
+    # koşudan kalan bir plan/ports/pinned_paths bir sonraki run.followUp'a
+    # ASLA sızmaz (bkz. run.followUp'ın kendi run_id/coordinator kontrolü de
+    # buna ek bir bağımsız koruma sağlar).
+    _active["pipeline_ports"] = None
+    _active["task"] = task
+    _active["plan_text"] = None
+    _active["pinned_paths"] = list(mentions)
 
     bridge = ctx._bridge  # ana thread'e sinyalle taşınır (queued connection)
     ended = {"flag": False}  # failed/cancelled sonrası ikinci "done" yayınlanmasın
@@ -451,7 +514,9 @@ def _start(params, ctx):
         # aşağıdaki status parametresiyle belirlenmiştir). run.finished
         # yalnızca mevcut host/UI yaşam döngüsünü sonlandırıp bildirir.
         _stop_activity_streamer()
-        payload = {"runId": run_id, "status": status}
+        # F2: UI'ın takip isteği modunu yalnızca GERÇEKTEN pipeline motoruyla
+        # yürütülmüş bir koşuda açabilmesi için (bkz. web/ui state/run.ts).
+        payload = {"runId": run_id, "status": status, "engine": _active.get("engine")}
         if error:
             payload["error"] = error
         bridge.emit_event("run.finished", payload)
@@ -475,6 +540,19 @@ def _start(params, ctx):
                 workspace = None
             pipeline_ports = None
             fallback_reason = f"Yeni motor kullanılamadı ({exc}); klasik motor kullanılıyor."
+    _active["pipeline_ports"] = pipeline_ports
+    # F2 (takip isteği) sırasında bir GERÇEK bug fark edildi ve BURADA
+    # düzeltildi: `_active["workspace"]` başarılı bir pipeline koşusunda
+    # daha önce HİÇBİR ZAMAN gerçek workspace nesnesine atanmıyordu --
+    # yalnızca hata yollarında None'a ayarlanıyordu. Bu yüzden
+    # _dispose_workspace() (run.applyProposals/run.rejectProposals/
+    # on_pipeline_finished/on_pipeline_failed/shutdown'da çağrılan) HER ZAMAN
+    # no-op'tu; worktree'ler yalnızca bir sonraki uygulama başlangıcında
+    # prune_startup_workspaces() ile temizleniyordu (ARCHITECTURE.md'nin
+    # "run sona erdiğinde worktree kaldırılır" iddiasıyla ÇELİŞEN bir
+    # durum). F2'nin worktree yaşam döngüsü kararı (#1) tam olarak bu alanın
+    # DOĞRU ayarlanmasına bağlı olduğundan burada düzeltiliyor.
+    _active["workspace"] = workspace
 
     try:
         if pipeline_ports is not None:
@@ -609,7 +687,19 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     _active["cancel_event"] = cancel_event
     proj = _require_project()
     worker = _PipelineWorker(runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=pinned_paths)
+    _wire_pipeline_worker(
+        worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,
+        emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
+        ended=ended, bridge=bridge, activity_after_seq=0,
+    )
+    return worker
 
+
+def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, proj, emit_ui, finish,
+                           settle_canonical_failure, ended, bridge, activity_after_seq=0):
+    """Shared stage/finished/failed wiring + F1 activity streaming for BOTH
+    _PipelineWorker (run.start) and _FollowUpWorker (run.followUp, F2) --
+    they share the exact same stage/finished_ok/failed Signal shapes."""
     stage_state = {"role": None, "start_ts": None, "last_seq": 0}
 
     def flush_role_metrics():
@@ -685,15 +775,36 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
         try:
             # Öneri içeriği ("new") worktree'den BURADA okunup proposal
             # sözlüğüne gömülür — Apply daha sonra yalnızca bu sözlükten
-            # yazar, worktree'yi bir daha OKUMAZ. Bu yüzden worktree, rapor
-            # işlendikten SONRA (durumdan bağımsız) her zaman güvenle
-            # dispose edilebilir.
+            # yazar, worktree'yi bir daha OKUMAZ.
+            #
+            # F2 (takip isteği): worktree ARTIK burada koşulsuz dispose
+            # EDİLMEZ. Run kanonik olarak GERÇEKTEN WAITING_USER'da (bekleyen
+            # bir proposal var) kalıyorsa, worktree KORUNUR -- bir sonraki
+            # run.followUp AYNI worktree'den devam edebilsin diye. Run
+            # terminal bir duruma ulaştıysa (NO_CHANGES/FAILED/EXHAUSTED/
+            # CANCELLED/COMPLETED) worktree burada dispose edilir; Apply/
+            # Reject/cancel/yeni run.start/kapanış diğer dispose noktalarıdır
+            # (bkz. _apply/_reject/on_pipeline_failed/shutdown).
             _emit_pipeline_report(emit_ui, proj, workspace, report)
         except Exception as exc:
             settle_canonical_failure(f"Sonuç işlenemedi: {exc}")
+            _dispose_workspace()
             finish("failed", str(exc))
             return
-        finally:
+
+        # F2: a fresh Planner attempt's summary becomes the plan context for
+        # any SUBSEQUENT follow-up. A follow-up continuation's own report
+        # never carries a plan_report (see PipelineRunner.continue_with_
+        # feedback), so this deliberately does NOT clear plan_text then --
+        # the ORIGINAL plan stays available across multiple follow-ups.
+        if report.plan_report is not None:
+            _active["plan_text"] = report.plan_report.summary
+
+        try:
+            still_waiting = coordinator.get_run().status == RunStatus.WAITING_USER
+        except Exception:
+            still_waiting = False
+        if not still_waiting:
             _dispose_workspace()
 
         status = report.status
@@ -716,7 +827,14 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     # `run.activity` items live, independent of on_stage's coarse stage
     # boundaries. Best-effort: a streaming failure never affects the run
     # itself (see webhost.api.activity.ActivityStreamer).
-    streamer = ActivityStreamer(runtime, run_id)
+    #
+    # F2 (takip isteği): the caller stops any PREVIOUS streamer for this run
+    # before calling this function again, and passes activity_after_seq =
+    # the run's current last_event_seq so the restarted streamer only emits
+    # NEW items (the prior streamer already delivered everything up to that
+    # point; the UI keeps its own history across a follow-up).
+    _stop_activity_streamer()
+    streamer = ActivityStreamer(runtime, run_id, after_seq=activity_after_seq)
 
     def on_activity(item: dict) -> None:
         bridge.emit_event("run.activity", item)
@@ -726,6 +844,100 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     streamer.start()
 
     return worker
+
+
+@handler("run.followUp")
+def _follow_up(params, ctx):
+    """F2 (takip isteği): bekleyen bir proposal varken kullanıcının yazdığı
+    takip talimatıyla AYNI (kanonik) Run'ı, AYNI worktree'den devam ettirir.
+
+    Yalnızca aktif koşu bir PİPELİNE koşusuysa VE kanonik Run şu anda
+    WAITING_USER'daysa VE hâlâ canlı bir worktree'si varsa geçerlidir --
+    aksi halde BridgeError (klasik motorda Türkçe, kullanıcıya gösterilecek
+    özel bir mesajla)."""
+    proj = _require_project()
+    feedback = (params.get("feedback") or "").strip()
+    if not feedback:
+        raise BridgeError("empty_feedback", "Takip isteği boş.")
+
+    if _active.get("engine") != "pipeline":
+        raise BridgeError(
+            "follow_up_unsupported",
+            "Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın.",
+        )
+    w = _active.get("worker")
+    if w is not None and w.isRunning():
+        raise BridgeError("busy", "Zaten bir koşu sürüyor.")
+
+    coordinator = _active.get("coordinator")
+    workspace = _active.get("workspace")
+    ports = _active.get("pipeline_ports")
+    if coordinator is None or workspace is None or ports is None:
+        raise BridgeError("no_active_run", "Takip isteği için bekleyen bir öneri yok.")
+    try:
+        current = coordinator.get_run()
+    except Exception as exc:
+        raise BridgeError("canonical_state_unavailable", f"Koşu durumu doğrulanamadı: {exc}")
+    if current.status != RunStatus.WAITING_USER:
+        raise BridgeError("not_waiting_user", "Takip isteği için bekleyen bir öneri yok.")
+
+    run_id = coordinator.run_id
+    runtime = state.get_run_runtime()
+    mentions, invalid_mentions = _validate_mentions(proj, params.get("mentions") or [])
+    # F6 (@-mentions): önceki koşudan/takip isteklerinden pinlenmiş yollar
+    # KORUNUR, yeni bahisler EKLENİR (sırayı bozmadan, yinelenenler atlanır).
+    pinned_paths = list(dict.fromkeys(list(_active.get("pinned_paths") or []) + mentions))
+    _active["pinned_paths"] = pinned_paths
+
+    task = _active.get("task") or ""
+    plan_text = _active.get("plan_text")
+
+    # F2: mevcut öneriler ARTIK GEÇERSİZ -- Uygula/Reddet bu andan itibaren
+    # devre dışı kalmalı (yeni bir proposal.ready gelene kadar). Akış/sohbet
+    # geçmişi (flow) KORUNUR -- yalnızca diff/proposal durumu sıfırlanır.
+    _active["proposals"] = []
+
+    cancel_event = threading.Event()
+    _active["cancel_event"] = cancel_event
+
+    bridge = ctx._bridge
+    ended = {"flag": False}
+
+    def emit_ui(ev: dict) -> None:
+        bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
+
+    def settle_canonical_failure(message: str) -> None:
+        try:
+            coordinator.finish_failed(message)
+        except Exception:
+            pass
+
+    def finish(status: str, error: str | None = None) -> None:
+        if ended["flag"]:
+            return
+        ended["flag"] = True
+        _stop_activity_streamer()
+        payload = {"runId": run_id, "status": status, "engine": "pipeline"}
+        if error:
+            payload["error"] = error
+        bridge.emit_event("run.finished", payload)
+
+    activity_after_seq = current.last_event_seq
+    worker = _FollowUpWorker(
+        runtime, run_id, workspace, ports, task, feedback, plan_text, cancel_event,
+        pinned_paths=pinned_paths,
+    )
+    _wire_pipeline_worker(
+        worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,
+        emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
+        ended=ended, bridge=bridge, activity_after_seq=activity_after_seq,
+    )
+    _active["worker"] = worker
+
+    emit_ui({"type": "followUpStarted", "feedback": feedback})
+    for bad in invalid_mentions:
+        emit_ui({"type": "info", "text": f"Bahsedilen dosya bulunamadı: {bad}"})
+    return {"runId": run_id}
 
 
 @handler("run.cancel")

@@ -209,6 +209,13 @@ def _initial_fail_trigger(verification_id="ver-0"):
     return FixTrigger(kind=FixTriggerKind.VERIFICATION_FAIL, verification_report=_verification_result(verification_id, VerificationStatus.FAIL))
 
 
+def _user_feedback_trigger(diff_sha256: str, feedback="also handle negative numbers"):
+    return FixTrigger(
+        kind=FixTriggerKind.USER_FEEDBACK, verification_report=None, review_report=None,
+        feedback=feedback, diff_sha256=diff_sha256,
+    )
+
+
 def _initial_needs_fix_trigger(workspace_diff: str, verification_id="ver-0", review_id="rev-0"):
     import hashlib
 
@@ -573,6 +580,132 @@ def test_stale_review_needs_fix_trigger_rejected_before_fix_loop_started(tmp_pat
 
     assert worker.call_count == 0
     assert event_types(runtime, run) == [RunEventType.RUN_STARTED]  # fix_loop.started never committed
+
+
+# ==================== F2 (follow-up on a proposal): USER_FEEDBACK trigger ====================
+
+
+def test_stale_user_feedback_trigger_rejected_before_fix_loop_started(tmp_path):
+    runtime, run = setup_runtime(tmp_path)
+    workspace = FakeWorkspace(content="")
+    # Trigger claims a diff_sha256 that does not match the CURRENT (empty)
+    # workspace change set -- stale from the start.
+    trigger = _user_feedback_trigger(diff_sha256="f" * 64)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id)
+    verification = FakeVerificationAttemptRunner(runtime, run.run_id, [])
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [])
+    runner = FixLoopRunner(runtime, worker=worker, verification=verification, reviewer=reviewer, change_provider=FakeChangeProvider())
+    request = FixLoopRequest(task="fix it", trigger=trigger, verification_plan=_valid_verification_plan())
+
+    with pytest.raises(FixLoopInputError):
+        runner.run(run.run_id, workspace, request)
+
+    assert worker.call_count == 0
+    assert event_types(runtime, run) == [RunEventType.RUN_STARTED]
+
+
+def test_user_feedback_happy_path_completes_and_reaches_await_user_gate(tmp_path):
+    """feedback -> worker change -> verification PASS -> review APPROVED ->
+    completed, via the SAME FixLoopRunner used for VERIFICATION_FAIL/
+    REVIEW_NEEDS_FIX (see PipelineRunner.continue_with_feedback)."""
+    from run_runtime.completion import RunCompletionGate
+
+    runtime, run = setup_runtime(tmp_path)
+    workspace = FakeWorkspace(content="")
+    trigger = _user_feedback_trigger(diff_sha256=FakeChangeProvider().capture(workspace).diff_sha256)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id, changes=True)
+    verification = FakeVerificationAttemptRunner(runtime, run.run_id, [VerificationStatus.PASS])
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [ReviewVerdict.APPROVED])
+    runner = FixLoopRunner(
+        runtime, worker=worker, verification=verification, reviewer=reviewer, change_provider=FakeChangeProvider(),
+        completion_gate=RunCompletionGate(runtime, settlement="await_user"),
+    )
+    request = FixLoopRequest(task="fix it", trigger=trigger, verification_plan=_valid_verification_plan())
+
+    report = runner.run(run.run_id, workspace, request)
+
+    assert report.status is FixLoopStatus.COMPLETED
+    assert worker.call_count == 1
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+    types = event_types(runtime, run)
+    assert RunEventType.PROPOSAL_READY in types
+    assert RunEventType.RUN_WAITING_USER in types
+
+
+def test_user_feedback_verification_fail_then_fix_recovers(tmp_path):
+    from run_runtime.completion import RunCompletionGate
+
+    runtime, run = setup_runtime(tmp_path)
+    workspace = FakeWorkspace(content="")
+    trigger = _user_feedback_trigger(diff_sha256=FakeChangeProvider().capture(workspace).diff_sha256)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id, changes=[True, True])
+    verification = FakeVerificationAttemptRunner(runtime, run.run_id, [VerificationStatus.FAIL, VerificationStatus.PASS])
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [ReviewVerdict.APPROVED])
+    runner = FixLoopRunner(
+        runtime, worker=worker, verification=verification, reviewer=reviewer, change_provider=FakeChangeProvider(),
+        completion_gate=RunCompletionGate(runtime, settlement="await_user"),
+    )
+    request = FixLoopRequest(task="fix it", trigger=trigger, verification_plan=_valid_verification_plan())
+
+    report = runner.run(run.run_id, workspace, request)
+
+    assert report.status is FixLoopStatus.COMPLETED
+    assert worker.call_count == 2
+    # 2nd attempt's trigger must have flipped to VERIFICATION_FAIL (the
+    # deterministic evidence always wins over the ORIGINAL user feedback
+    # once a fresh Verification result exists).
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+
+
+def test_user_feedback_review_task_used_for_review_request_when_provided(tmp_path):
+    class CapturingReviewer:
+        def __init__(self):
+            self.tasks: list[str] = []
+
+        def run(self, workspace, request, *, review_id, cancel_token=None, pinned_paths=()):
+            self.tasks.append(request.task)
+            report = ReviewReport(
+                review_id=review_id, verdict=ReviewVerdict.APPROVED, summary="s", findings=(),
+                repository_fingerprint="a" * 64, diff_sha256=request.diff_sha256,
+                verification_id=request.verification_report.verification_id,
+                verification_status=request.verification_report.status.value,
+            )
+            runtime.record_many(run_id=run.run_id, specs=(
+                RunEventSpec(type=RunEventType.REVIEW_STARTED, payload={"review_id": review_id}, correlation_id=review_id, source="reviewer"),
+                RunEventSpec(
+                    type=RunEventType.REVIEW_COMPLETED,
+                    payload={
+                        "review_id": review_id, "verdict": "APPROVED", "note": "s", "summary": "s", "findings": [],
+                        "repository_fingerprint": "a" * 64, "diff_sha256": request.diff_sha256,
+                        "verification_id": request.verification_report.verification_id,
+                        "verification_status": request.verification_report.status.value,
+                    },
+                    correlation_id=review_id, source="reviewer",
+                ),
+            ))
+            return report
+
+    runtime, run = setup_runtime(tmp_path)
+    workspace = FakeWorkspace(content="")
+    trigger = _user_feedback_trigger(diff_sha256=FakeChangeProvider().capture(workspace).diff_sha256)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id, changes=True)
+    verification = FakeVerificationAttemptRunner(runtime, run.run_id, [VerificationStatus.PASS])
+    reviewer = CapturingReviewer()
+    from run_runtime.completion import RunCompletionGate
+
+    runner = FixLoopRunner(
+        runtime, worker=worker, verification=verification, reviewer=reviewer, change_provider=FakeChangeProvider(),
+        completion_gate=RunCompletionGate(runtime, settlement="await_user"),
+    )
+    request = FixLoopRequest(
+        task="fix it", trigger=trigger, verification_plan=_valid_verification_plan(),
+        review_task="fix it\n\nFollow-up instruction from the user: also handle negative numbers",
+    )
+
+    report = runner.run(run.run_id, workspace, request)
+
+    assert report.status is FixLoopStatus.COMPLETED
+    assert reviewer.tasks == ["fix it\n\nFollow-up instruction from the user: also handle negative numbers"]
 
 
 # ==================== port / infrastructure failures ====================

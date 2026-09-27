@@ -25,7 +25,11 @@ export interface Prefs {
 
 export interface RunEvent {
   // project_runner.py olay sözlüğü DEĞİŞMEDEN forward edilir (doğrulandı :80–152)
-  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal";
+  // "followUpStarted": F2 (takip isteği) — webhost/api/run.py'nin
+  // run.followUp handler'ı, continuation'ı BAŞLATMADAN önce yayınlar; UI bu
+  // olayla diff/proposal durumunu sıfırlar ve kullanıcının takip metnini
+  // kendi mesajı olarak akışa (flow) ekler (bkz. state/run.ts consume()).
+  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal" | "followUpStarted";
   [key: string]: unknown;
 }
 
@@ -106,6 +110,10 @@ export interface Api {
       çıkan bir yol sessizce düşürülür ve bir "info" olayıyla bildirilir. */
   "run.start": { params: { task: string; routing: Routing; mentions?: string[] }; result: { runId: string } };
   "run.cancel": { params: { runId?: string }; result: {} };
+  /** F2 (takip isteği / follow-up): sadece bekleyen bir öneri (WAITING_USER,
+      canlı worktree'li bir pipeline koşusu) varken geçerlidir; klasik
+      motorda veya aktif koşu yokken BridgeError. */
+  "run.followUp": { params: { feedback: string; mentions?: string[] }; result: { runId: string } };
   "run.applyProposals": {
     params: { paths: string[] };
     result: {
@@ -380,7 +388,13 @@ export interface Events {
   "window.closeRequested": {};
   "fs.changed": { kind: "created" | "deleted" | "modified" | "renamed"; paths: string[] };
   "run.event": { runId: string; ev: RunEvent };
-  "run.finished": { runId: string; status: "done" | "failed" | "cancelled"; error?: string };
+  /** F2: `engine`, bu koşunun GERÇEKTE hangi motorla yürütüldüğünü taşır
+      ("pipeline" | "legacy") -- Composer'ın takip isteği modunu yalnızca
+      pipeline motorunda açması için (bkz. state/run.ts). */
+  "run.finished": {
+    runId: string; status: "done" | "failed" | "cancelled"; error?: string;
+    engine?: "pipeline" | "legacy";
+  };
   /** F1 (canlı ajan etkinliği) — run_runtime.activity_projection.project_event
       çıktısıyla birebir; `id` aynı öğenin (ör. bir araç çağrısı) sonraki
       durum güncellemeleri için sabit kalır (update-in-place). */

@@ -3,7 +3,7 @@
 
 import { Api, Bridge, Events, DebugFrame, Prefs, Proposal, ProviderInfo, ScmChange } from "../protocol";
 import * as vfs from "./vfs";
-import { RUN_PARTIAL, RUN_FULL } from "./fixtures/run";
+import { RUN_PARTIAL, RUN_FULL, RUN_FOLLOWUP } from "./fixtures/run";
 import { ACTIVITY_FEED } from "./fixtures/activity";
 
 interface MockCheckpoint {
@@ -405,6 +405,15 @@ export class MockBridge implements Bridge {
         this.runCancelled = true;
         this.emit("run.finished", { runId: "mock-1", status: "cancelled" });
         return {} as R;
+      case "run.followUp": {
+        const { feedback } = params as { feedback: string; mentions?: string[] };
+        if (this.scenario === "legacy") {
+          throw new Error("Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın.");
+        }
+        this.runCancelled = false;
+        void this.streamFollowUp(feedback);
+        return { runId: "mock-1" } as R;
+      }
       case "run.applyProposals": {
         const wanted = new Set((params as { paths: string[] }).paths);
         const selected = this.mockProposals.filter((proposal) => wanted.has(proposal.path));
@@ -598,8 +607,29 @@ export class MockBridge implements Bridge {
       i++;
     }
     if (this.scenario !== "running") {
-      this.emit("run.finished", { runId: "mock-1", status: "done" });
+      // F2: ?scenario=legacy, Composer'ın takip-isteği devre dışı ipucunu
+      // görsel olarak doğrulamak için -- diğer TÜM senaryolar pipeline'dır
+      // (F1'in run.activity akışı zaten yalnızca pipeline motorunda anlamlı).
+      this.emit("run.finished", {
+        runId: "mock-1", status: "done",
+        engine: this.scenario === "legacy" ? "legacy" : "pipeline",
+      });
     }
+  }
+
+  /** F2 (takip isteği): run.followUp mock akışı -- YENİ bir Planner
+      denemesi olmadan doğrudan code -> review -> proposal. */
+  private async streamFollowUp(feedback: string) {
+    this.emit("run.event", { runId: "mock-1", ev: { type: "followUpStarted", feedback } });
+    for (const [delay, ev] of RUN_FOLLOWUP) {
+      await new Promise((r) => setTimeout(r, delay));
+      if (this.runCancelled) return;
+      if (ev.type === "proposal") {
+        this.mockProposals = (ev.proposals as Proposal[]) ?? [];
+      }
+      this.emit("run.event", { runId: "mock-1", ev });
+    }
+    this.emit("run.finished", { runId: "mock-1", status: "done", engine: "pipeline" });
   }
 
   /** F1: run.activity kanalını ayrı bir zaman çizelgesiyle akıtır (running

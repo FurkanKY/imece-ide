@@ -64,3 +64,47 @@ export const RUN_REST: [number, RunEvent][] = [
 ];
 
 export const RUN_FULL: [number, RunEvent][] = [...RUN_PARTIAL, ...RUN_REST];
+
+// ---------------- F2 (takip isteği / follow-up) ----------------
+
+const NEW_UTILS_FOLLOWUP = `from datetime import datetime
+
+
+def format_date(d: datetime) -> str:
+    return d.isoformat()
+
+
+def parse_date(s: str) -> datetime:
+    return datetime.fromisoformat(s.strip())
+`;
+
+const DIFF_UTILS_FOLLOWUP = `--- a/utils.py
++++ b/utils.py
+@@ -6,4 +6,4 @@
+
+
+ def parse_date(s: str) -> datetime:
+-    return datetime.fromisoformat(s)
++    return datetime.fromisoformat(s.strip())`;
+
+/** run.followUp mock akışı — YENİ bir Planner denemesi YOK (bkz.
+    PipelineRunner.continue_with_feedback): doğrudan code -> review ->
+    proposal. */
+export const RUN_FOLLOWUP: [number, RunEvent][] = [
+  [250, { type: "stage", stage: "code", provider: "deepseek" }],
+  [700, {
+    type: "output", stage: "code",
+    text: "### FILE: utils.py\n```python\n" + NEW_UTILS_FOLLOWUP + "```",
+  }],
+  [250, { type: "metric", stage: "code", provider: "deepseek", model: "deepseek-v4-pro", latency_s: 3.1, tokens: 240, cost_usd: 0.0002 }],
+  [250, { type: "stage", stage: "review", provider: "gemini" }],
+  [700, { type: "output", stage: "review", text: "VERDICT: APPROVED\nBaştaki/sondaki boşluklar artık ayrıştırmayı bozmuyor." }],
+  [300, { type: "metric", stage: "review", provider: "gemini", model: "gemini-3.5-flash", latency_s: 2.6, tokens: 140, cost_usd: 0.00001 }],
+  [200, { type: "verdict", verdict: "APPROVED", note: "Baştaki/sondaki boşluklar artık ayrıştırmayı bozmuyor." }],
+  [250, {
+    type: "proposal",
+    proposals: [{ path: "src/utils.ts", new: NEW_UTILS_FOLLOWUP, diff: DIFF_UTILS_FOLLOWUP, is_new: false }],
+    totals: { latency_s: 5.7, tokens: 380, cost_usd: 0.00021 },
+    verdict: "APPROVED",
+  }],
+];

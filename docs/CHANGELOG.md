@@ -5,6 +5,12 @@ planning records are intentionally not part of the published repository.
 
 ## Unreleased
 
+- **Follow-up requests on a pending proposal:** while a pipeline run's
+  proposal is waiting for a decision, you can type a follow-up instruction
+  (e.g. "also handle negative numbers") and the same run continues from the
+  same isolated worktree — another Worker attempt, verification/review, and
+  a fresh proposal — instead of starting a new task from scratch. See
+  [USAGE.md](USAGE.md#follow-up-requests).
 - **New AI engine (pipeline):** on an existing Git-repository project, runs
   now go through an isolated, multi-stage pipeline — plan, an initial
   attempt made in a separate isolated copy of the project, automatic

@@ -17,6 +17,8 @@ _ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _MAX_ID_LENGTH = 128
 _MAX_TASK_CHARS = 32_000
 _MAX_PLAN_CHARS = 64_000
+_MAX_FEEDBACK_CHARS = 8_000
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 DEFAULT_MAX_FIX_ATTEMPTS = 2
 MIN_MAX_FIX_ATTEMPTS = 1
@@ -46,9 +48,20 @@ def _bounded_text(value: Any, field: str, *, max_chars: int, allow_empty: bool =
     return value
 
 
+def _validate_diff_sha256(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+        raise FixLoopInputError(f"{field} must be a lowercase SHA-256 hex digest.")
+    return value
+
+
 class FixTriggerKind(StrEnum):
     VERIFICATION_FAIL = "verification_fail"
     REVIEW_NEEDS_FIX = "review_needs_fix"
+    # F2 (follow-up on a proposal): the user typed a follow-up instruction
+    # while a proposal was pending -- there is no fresh Verification/Review
+    # evidence yet (the run is resuming from WAITING_USER), only the user's
+    # own feedback text and the diff it refers to.
+    USER_FEEDBACK = "user_feedback"
 
 
 class FixLoopStatus(StrEnum):
@@ -61,48 +74,86 @@ class FixLoopStatus(StrEnum):
 class FixTrigger:
     """Evidence that makes a bounded fix attempt eligible to run.
 
-    Only two shapes are valid — deterministic Verification always wins:
-    a VERIFICATION_FAIL trigger carries no review evidence at all, and a
-    REVIEW_NEEDS_FIX trigger requires a PASSing verification whose identity
-    the review itself already references (review provenance, not trust).
+    Three shapes are valid — deterministic Verification always wins over a
+    human's review feedback, and a human's follow-up wins only because there
+    is nothing else to arbitrate against (it starts a fresh loop from
+    WAITING_USER, not a continuation of stale evidence):
+
+    - VERIFICATION_FAIL carries no review evidence at all.
+    - REVIEW_NEEDS_FIX requires a PASSing verification whose identity the
+      review itself already references (review provenance, not trust).
+    - USER_FEEDBACK (F2, follow-up on a proposal) carries the user's own
+      feedback text plus the diff_sha256 it refers to (validated by
+      FixLoopRunner against the CURRENT workspace change set, exactly like
+      REVIEW_NEEDS_FIX's diff check) instead of fresh Verification/Review
+      evidence — there is none yet, the run is resuming from WAITING_USER.
+      It MAY carry the last known verification_report/review_report purely
+      as informational context (never as a gate: the fields aren't cross-
+      checked against each other or against diff_sha256 the way
+      REVIEW_NEEDS_FIX's are).
     """
 
     kind: FixTriggerKind
-    verification_report: VerificationReport
+    verification_report: VerificationReport | None
     review_report: ReviewReport | None = None
+    feedback: str | None = None
+    diff_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, FixTriggerKind):
             raise FixLoopInputError("FixTrigger.kind must be a FixTriggerKind.")
-        if not isinstance(self.verification_report, VerificationReport):
-            raise FixLoopInputError("FixTrigger.verification_report must be a VerificationReport.")
+        if self.verification_report is not None and not isinstance(
+            self.verification_report, VerificationReport
+        ):
+            raise FixLoopInputError("FixTrigger.verification_report must be a VerificationReport or None.")
+        if self.review_report is not None and not isinstance(self.review_report, ReviewReport):
+            raise FixLoopInputError("FixTrigger.review_report must be a ReviewReport or None.")
 
         if self.kind is FixTriggerKind.VERIFICATION_FAIL:
+            if not isinstance(self.verification_report, VerificationReport):
+                raise FixLoopInputError("VERIFICATION_FAIL trigger requires a VerificationReport.")
             if self.verification_report.status is not VerificationStatus.FAIL:
                 raise FixLoopInputError(
                     "VERIFICATION_FAIL trigger requires VerificationReport.status == FAIL."
                 )
             if self.review_report is not None:
                 raise FixLoopInputError("VERIFICATION_FAIL trigger must not carry a review_report.")
+            if self.feedback is not None or self.diff_sha256 is not None:
+                raise FixLoopInputError("VERIFICATION_FAIL trigger must not carry feedback/diff_sha256.")
             return
 
-        # REVIEW_NEEDS_FIX
-        if self.verification_report.status is not VerificationStatus.PASS:
-            raise FixLoopInputError(
-                "REVIEW_NEEDS_FIX trigger requires VerificationReport.status == PASS."
-            )
-        if not isinstance(self.review_report, ReviewReport):
-            raise FixLoopInputError("REVIEW_NEEDS_FIX trigger requires a ReviewReport.")
-        if self.review_report.verdict is not ReviewVerdict.NEEDS_FIX:
-            raise FixLoopInputError("REVIEW_NEEDS_FIX trigger requires ReviewReport.verdict == NEEDS_FIX.")
-        if self.review_report.verification_id != self.verification_report.verification_id:
-            raise FixLoopInputError(
-                "REVIEW_NEEDS_FIX trigger review_report.verification_id must match verification_report.verification_id."
-            )
-        if self.review_report.verification_status != "pass":
-            raise FixLoopInputError(
-                "REVIEW_NEEDS_FIX trigger review_report.verification_status must be 'pass'."
-            )
+        if self.kind is FixTriggerKind.REVIEW_NEEDS_FIX:
+            if not isinstance(self.verification_report, VerificationReport):
+                raise FixLoopInputError("REVIEW_NEEDS_FIX trigger requires a VerificationReport.")
+            if self.verification_report.status is not VerificationStatus.PASS:
+                raise FixLoopInputError(
+                    "REVIEW_NEEDS_FIX trigger requires VerificationReport.status == PASS."
+                )
+            if not isinstance(self.review_report, ReviewReport):
+                raise FixLoopInputError("REVIEW_NEEDS_FIX trigger requires a ReviewReport.")
+            if self.review_report.verdict is not ReviewVerdict.NEEDS_FIX:
+                raise FixLoopInputError("REVIEW_NEEDS_FIX trigger requires ReviewReport.verdict == NEEDS_FIX.")
+            if self.review_report.verification_id != self.verification_report.verification_id:
+                raise FixLoopInputError(
+                    "REVIEW_NEEDS_FIX trigger review_report.verification_id must match verification_report.verification_id."
+                )
+            if self.review_report.verification_status != "pass":
+                raise FixLoopInputError(
+                    "REVIEW_NEEDS_FIX trigger review_report.verification_status must be 'pass'."
+                )
+            if self.feedback is not None or self.diff_sha256 is not None:
+                raise FixLoopInputError("REVIEW_NEEDS_FIX trigger must not carry feedback/diff_sha256.")
+            return
+
+        # USER_FEEDBACK (F2)
+        object.__setattr__(
+            self, "feedback",
+            _bounded_text(self.feedback, "FixTrigger.feedback", max_chars=_MAX_FEEDBACK_CHARS),
+        )
+        object.__setattr__(
+            self, "diff_sha256",
+            _validate_diff_sha256(self.diff_sha256, "FixTrigger.diff_sha256"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +238,14 @@ class FixLoopRequest:
     verification_plan: VerificationPlan
     plan: str | None = None
     max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS
+    # F2 (follow-up on a proposal): when set, used as the Reviewer's task
+    # context INSTEAD OF `task` for every review call this fix loop makes
+    # (e.g. task + the user's follow-up instruction) -- purely additive:
+    # None reproduces the exact prior (pre-F2) behavior of reviewing against
+    # `task` verbatim. Never used for the Worker's rendered input (see
+    # fix_runtime.prompt.render_fix_worker_input; the trigger carries its
+    # own feedback field for that).
+    review_task: str | None = None
     # F6 (@-mentions): ordered, workspace-relative paths the user explicitly
     # pinned for this run -- threaded verbatim into render_fix_worker_input's
     # "USER-REFERENCED FILES" section for every fix attempt. Purely additive:
@@ -208,6 +267,11 @@ class FixLoopRequest:
             object.__setattr__(
                 self, "plan",
                 _bounded_text(self.plan, "FixLoopRequest.plan", max_chars=_MAX_PLAN_CHARS, allow_empty=True),
+            )
+        if self.review_task is not None:
+            object.__setattr__(
+                self, "review_task",
+                _bounded_text(self.review_task, "FixLoopRequest.review_task", max_chars=_MAX_TASK_CHARS),
             )
         if (
             isinstance(self.max_fix_attempts, bool)

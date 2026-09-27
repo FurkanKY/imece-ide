@@ -90,6 +90,12 @@ class FixLoopRunner:
                     "REVIEW_NEEDS_FIX trigger's review diff_sha256 does not match the "
                     "current workspace change set; refusing to act on stale reviewer feedback."
                 )
+        elif trigger.kind is FixTriggerKind.USER_FEEDBACK:
+            if current_change.diff_sha256 != trigger.diff_sha256:
+                raise FixLoopInputError(
+                    "USER_FEEDBACK trigger's diff_sha256 does not match the current "
+                    "workspace change set; refusing to act on a stale follow-up instruction."
+                )
 
         recorder = CanonicalFixLoopRecorder(self._runtime, run_id, fix_loop_id=fix_loop_id)
         recorder.start()
@@ -365,8 +371,9 @@ class FixLoopRunner:
         self, request: FixLoopRequest, review_changes: WorkspaceChangeSet, verification_report,
     ) -> ReviewRequest:
         try:
+            task_for_review = request.review_task if request.review_task is not None else request.task
             return ReviewRequest(
-                task=request.task, plan=request.plan, diff=review_changes.diff,
+                task=task_for_review, plan=request.plan, diff=review_changes.diff,
                 verification_report=verification_report,
             )
         except ReviewInputError as exc:

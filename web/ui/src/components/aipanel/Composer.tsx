@@ -210,12 +210,27 @@ export function Composer() {
   const runStage = useRun((s) => s.runStage);
   const start = useRun((s) => s.start);
   const cancel = useRun((s) => s.cancel);
+  const engine = useRun((s) => s.engine);
+  const followUpDraft = useRun((s) => s.followUpDraft);
+  const setFollowUpDraft = useRun((s) => s.setFollowUpDraft);
+  const followUp = useRun((s) => s.followUp);
   const enterToSend = useSettings((s) => s.prefs?.enterToSend ?? true);
   const focusNonce = useUi((s) => s.composerFocusNonce);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const running = status === "running";
   const reviewReady = runStage === "ready";
-  const locked = running || reviewReady;
+  // F2 (takip isteği): "ready" iken -- eğer koşu GERÇEKTEN pipeline
+  // motoruyla yürütüldüyse -- Composer kilitlenmez, bir takip-isteği
+  // kutusuna döner; klasik motorda (veya motor henüz bilinmiyorsa) eski
+  // "kilitli" davranış korunur.
+  const followUpMode = reviewReady && engine === "pipeline";
+  const followUpUnsupported = reviewReady && engine !== "pipeline";
+  const locked = running || followUpUnsupported;
+  // @-mention'lar ve textarea'nın kendisi normal modda `task`'ı, takip-isteği
+  // modunda `followUpDraft`'ı okur/yazar -- aşağıdaki tüm mantık bu ikisi
+  // arasında ayrım yapmadan tek bir "draft" üzerinden çalışır.
+  const draft = followUpMode ? followUpDraft : task;
+  const setDraft = followUpMode ? setFollowUpDraft : setTask;
 
   // ---------------- F6 (@-mentions): "@" tetikleyici ----------------
   const mentionCandidates = useMentionCandidates();
@@ -248,11 +263,11 @@ export function Composer() {
 
   function pickMention(m: MentionMatch) {
     const ta = taRef.current;
-    const caret = ta ? ta.selectionStart : task.length;
-    const before = task.slice(0, mentionAt);
-    const after = task.slice(caret);
-    const nextTask = before + after;
-    setTask(nextTask);
+    const caret = ta ? ta.selectionStart : draft.length;
+    const before = draft.slice(0, mentionAt);
+    const after = draft.slice(caret);
+    const nextDraft = before + after;
+    setDraft(nextDraft);
     closeMentionPopup();
     if (!addMention(m.candidate.path)) {
       toast.info(`En fazla ${MAX_MENTIONS} bahis eklenebilir.`);
@@ -267,7 +282,7 @@ export function Composer() {
 
   const onChangeTask = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    setTask(value);
+    setDraft(value);
     const trigger = detectMentionTrigger(value, e.target.selectionStart);
     if (trigger) {
       setMentionAt(trigger.at);
@@ -308,14 +323,19 @@ export function Composer() {
     : [];
 
   const helper = running
-    ? "Koşu sürüyor. Gerekirse durdurun."
-    : reviewReady
-      ? "İnceleme hazır. Dosyaları uygulayın veya vazgeçin."
+    ? followUpMode
+      ? "Takip isteği sürüyor. Gerekirse durdurun."
+      : "Koşu sürüyor. Gerekirse durdurun."
+    : followUpUnsupported
+      ? "Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın."
       : runStage === "error"
         ? "Koşu tamamlanmadı. Görevi düzenleyip tekrar çalıştırın."
         : null;
 
   const mentionOpen = mentionQuery !== null;
+  // F2: "ready" + pipeline'da Enter/▶ artık run.followUp'a gider; aksi halde
+  // her zamanki run.start.
+  const submit = () => void (followUpMode ? followUp() : start());
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (mentionOpen) {
@@ -342,11 +362,11 @@ export function Composer() {
     }
     if (e.key === "Enter" && !e.shiftKey && enterToSend) {
       e.preventDefault();
-      if (!locked) void start();
+      if (!locked) submit();
     }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      if (!locked) void start();
+      if (!locked) submit();
     }
   };
 
@@ -417,20 +437,28 @@ export function Composer() {
           )}
           <textarea
             ref={taRef}
-            value={task}
+            value={draft}
             onChange={onChangeTask}
             onKeyDown={onKey}
             onBlur={closeMentionPopup}
-            placeholder={locked ? "" : "Görev yazın. @dosya ile referans ekleyin."}
+            placeholder={
+              locked
+                ? ""
+                : followUpMode
+                  ? "Değişiklik iste… (ör. negatif sayıları da ele al)"
+                  : "Görev yazın. @dosya ile referans ekleyin."
+            }
             rows={2}
             spellCheck={false}
             readOnly={locked}
-            aria-label={reviewReady ? "İnceleme tamamlanmayı bekliyor" : "Ekip görevi"}
+            aria-label={
+              followUpMode ? "Takip isteği" : followUpUnsupported ? "İnceleme tamamlanmayı bekliyor" : "Ekip görevi"
+            }
             className="selectable min-h-[54px] w-full resize-none rounded-[var(--r-md)] border border-border-w2 bg-field px-3 py-2 text-text outline-none transition-colors placeholder:text-faint focus:border-accent"
             style={{ fontSize: "var(--t-body)" }}
           />
         </div>
-        {/* üç durum aynı slotta yer değiştirir → hepsi 36px kare Button (ikon-only) */}
+        {/* dört durum aynı slotta yer değiştirir → hepsi 36px kare Button (ikon-only) */}
         {running ? (
           <Button
             variant="danger-outline"
@@ -440,7 +468,7 @@ export function Composer() {
             aria-label="Koşuyu durdur"
             className="w-9 shrink-0 px-0"
           />
-        ) : reviewReady ? (
+        ) : followUpUnsupported ? (
           <Button
             variant="secondary"
             icon={ClipboardCheck}
@@ -449,11 +477,20 @@ export function Composer() {
             aria-label="İnceleme kararı bekleniyor"
             className="w-9 shrink-0 px-0"
           />
+        ) : followUpMode ? (
+          <Button
+            variant="primary"
+            icon={Play}
+            onClick={submit}
+            title="Takip isteği gönder (Enter)"
+            aria-label="Takip isteği gönder"
+            className="w-9 shrink-0 px-0"
+          />
         ) : (
           <Button
             variant="primary"
             icon={Play}
-            onClick={() => void start()}
+            onClick={submit}
             title="Çalıştır (Enter)"
             aria-label="Çalıştır"
             className="w-9 shrink-0 px-0"

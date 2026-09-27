@@ -462,3 +462,196 @@ def test_worker_port_failure_raises_pipeline_execution_error(tmp_path):
 
     with pytest.raises(PipelineExecutionError):
         runner.run(run.run_id, workspace, "Implement X")
+
+
+# ==================== F2 (follow-up on a proposal): continue_with_feedback ====================
+
+
+def test_continue_with_feedback_happy_path_produces_second_proposal(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(
+        runtime, run,
+        verification_statuses=[VerificationStatus.PASS, VerificationStatus.PASS],
+        review_verdicts=[ReviewVerdict.APPROVED, ReviewVerdict.APPROVED],
+    )
+
+    first = runner.run(run.run_id, workspace, "Implement X")
+    assert first.status is PipelineStatus.NEEDS_USER
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+
+    second = runner.continue_with_feedback(
+        run.run_id, workspace, "also handle negative numbers",
+        task="Implement X", plan_report_or_text=first.plan_report,
+    )
+
+    assert second.status is PipelineStatus.NEEDS_USER
+    assert second.reason == "reviewed"
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+    # Both the worker and the reviewer ran a SECOND time.
+    assert len(worker.requests) == 2
+    assert len(reviewer.requests) == 2
+    # The reviewer's second call saw the follow-up in its task context.
+    assert "also handle negative numbers" in reviewer.requests[1].task
+    # The canonical evidence chain: run.resumed sits between the two
+    # WAITING_USER episodes, and the gate settled again with fresh evidence.
+    types = [e.type for e in runtime.events(run.run_id, limit=500).events]
+    assert types.count(RunEventType.RUN_RESUMED) == 1
+    assert types.count(RunEventType.RUN_WAITING_USER) == 2
+    assert types.count(RunEventType.PROPOSAL_READY) == 2
+
+
+def test_continue_with_feedback_verification_fail_then_fix(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(
+        runtime, run,
+        verification_statuses=[VerificationStatus.PASS, VerificationStatus.FAIL, VerificationStatus.PASS],
+        review_verdicts=[ReviewVerdict.APPROVED, ReviewVerdict.APPROVED],
+    )
+
+    first = runner.run(run.run_id, workspace, "Implement X")
+    assert first.status is PipelineStatus.NEEDS_USER
+
+    second = runner.continue_with_feedback(
+        run.run_id, workspace, "also handle negative numbers", task="Implement X",
+    )
+
+    assert second.status is PipelineStatus.NEEDS_USER
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+    assert len(worker.requests) == 3  # initial + follow-up attempt + fix attempt
+    assert len(verification.calls) == 3
+
+
+def test_continue_with_feedback_advisory_path_when_no_verification_plan(tmp_path):
+    # tmp_path has no tests/ dir -> no verification plan detected, for BOTH
+    # the initial run and the follow-up.
+    workspace = FakeWorkspace(tmp_path)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(
+        runtime, run, review_verdicts=[ReviewVerdict.APPROVED, ReviewVerdict.APPROVED],
+    )
+
+    first = runner.run(run.run_id, workspace, "Implement X")
+    assert first.reason == "no_verification_plan_detected"
+
+    second = runner.continue_with_feedback(
+        run.run_id, workspace, "also handle negative numbers", task="Implement X",
+    )
+
+    assert second.status is PipelineStatus.NEEDS_USER
+    assert second.reason == "no_verification_plan_detected"
+    assert verification.calls == []
+    assert len(reviewer.requests) == 2
+    # Advisory review is still verification-less for the follow-up too.
+    assert reviewer.requests[1].verification_report is None
+    assert "also handle negative numbers" in reviewer.requests[1].task
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+
+
+def test_continue_with_feedback_cancel_reports_cancelled(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(
+        runtime, run,
+        verification_statuses=[VerificationStatus.PASS, VerificationStatus.PASS],
+        review_verdicts=[ReviewVerdict.APPROVED, ReviewVerdict.APPROVED],
+    )
+    first = runner.run(run.run_id, workspace, "Implement X")
+    assert first.status is PipelineStatus.NEEDS_USER
+
+    cancel_event = threading.Event()
+    cancel_event.set()  # already cancelled before the follow-up even starts
+
+    second = runner.continue_with_feedback(
+        run.run_id, workspace, "also handle negative numbers", task="Implement X",
+        cancel_event=cancel_event,
+    )
+
+    assert second.status is PipelineStatus.CANCELLED
+    # Cancelled BEFORE run.resumed was ever recorded (the cooperative check
+    # at the top of continue_with_feedback) -- nothing was mutated, so the
+    # Run legitimately stays WAITING_USER (CanonicalPipelineRecorder.
+    # cancelled() is an idempotent no-op unless the Run is RUNNING).
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+    assert len(worker.requests) == 1  # only the initial run's attempt; no follow-up attempt was made
+
+
+def test_continue_with_feedback_cancel_mid_worker_reports_cancelled(tmp_path):
+    """Cancellation observed AFTER run.resumed (mid follow-up worker
+    attempt) -- unlike the pre-resume case above, this DOES mutate the Run
+    to CANCELLED (see fix_runtime.runner.FixLoopRunner._best_effort_interrupt
+    + PipelineRunner.run's own OperationCancelledError handler)."""
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(
+        runtime, run,
+        verification_statuses=[VerificationStatus.PASS],
+        review_verdicts=[ReviewVerdict.APPROVED],
+    )
+    first = runner.run(run.run_id, workspace, "Implement X")
+    assert first.status is PipelineStatus.NEEDS_USER
+
+    cancelling_worker = _CancellingWorkerAttemptRunner(runtime, run.run_id)
+    runner_2 = PipelineRunner(
+        runtime, planner=planner, worker=cancelling_worker, verification=verification, reviewer=reviewer,
+        change_provider=FakeChangeProvider(),
+    )
+
+    second = runner_2.continue_with_feedback(
+        run.run_id, workspace, "also handle negative numbers", task="Implement X",
+        cancel_event=threading.Event(),
+    )
+
+    assert second.status is PipelineStatus.CANCELLED
+    assert runtime.get_run(run.run_id).status is RunStatus.CANCELLED
+    events = [e.type for e in runtime.events(run.run_id, limit=500).events]
+    assert events.count(RunEventType.RUN_RESUMED) == 1
+    assert events.count(RunEventType.RUN_CANCELLED) == 1
+
+
+def test_continue_with_feedback_twice_in_a_row(tmp_path):
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(
+        runtime, run,
+        verification_statuses=[VerificationStatus.PASS] * 3,
+        review_verdicts=[ReviewVerdict.APPROVED] * 3,
+    )
+
+    first = runner.run(run.run_id, workspace, "Implement X")
+    second = runner.continue_with_feedback(
+        run.run_id, workspace, "also handle negative numbers", task="Implement X",
+    )
+    third = runner.continue_with_feedback(
+        run.run_id, workspace, "now rename x to y", task="Implement X",
+    )
+
+    assert first.status is second.status is third.status is PipelineStatus.NEEDS_USER
+    assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
+    assert len(worker.requests) == 3
+    types = [e.type for e in runtime.events(run.run_id, limit=500).events]
+    assert types.count(RunEventType.RUN_RESUMED) == 2
+    assert types.count(RunEventType.PROPOSAL_READY) == 3
+
+
+def test_continue_with_feedback_requires_waiting_user(tmp_path):
+    from run_runtime.errors import InvalidRunStateError
+
+    workspace = FakeWorkspace(tmp_path)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(runtime, run)
+    # Run is still RUNNING (never called run() to reach WAITING_USER).
+
+    with pytest.raises(InvalidRunStateError):
+        runner.continue_with_feedback(run.run_id, workspace, "feedback", task="Implement X")

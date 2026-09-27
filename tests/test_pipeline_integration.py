@@ -463,3 +463,91 @@ def test_pipeline_without_pinned_paths_is_unaffected(tmp_path, repo_workspace):
     events = runtime.events(run.run_id, limit=500).events
     plan_started = next(e for e in events if e.type == RunEventType.PLAN_STARTED)
     assert "pinned_paths" not in plan_started.payload
+
+
+# ==================== F2 (follow-up on a proposal): continue_with_feedback ====================
+
+
+def test_pipeline_continue_with_feedback_end_to_end_real_adapters(tmp_path, repo_workspace):
+    """run() -> APPROVED/WAITING_USER -> continue_with_feedback() with a
+    second worker change -> a second PASS/APPROVED episode, all through the
+    REAL native adapters + the real GitWorktreeWorkspace, never disposed in
+    between (mirrors webhost/api/run.py's F2 worktree-lifecycle decision)."""
+    runtime, run = setup_runtime(tmp_path)
+
+    planner_backend = ScriptedBackend([_completed_turn(_plan_json())])
+    planner = NativePlanAttemptRunner(runtime, run.run_id, planner_backend)
+
+    worker_backend = ScriptedBackend([
+        ModelTurn(
+            "", (ModelToolCall("c1", "write_file", {"path": "a.txt", "content": "fixed\n"}),),
+            ModelStopReason.TOOL_USE, ModelUsage(),
+        ),
+        _completed_turn("Fixed the bug."),
+    ])
+    worker = NativeWorkerAttemptAdapter(runtime, run.run_id, worker_backend)
+
+    verification = NativeVerificationAttemptAdapter(
+        runtime, run.run_id, process_runner=FakeProcessRunner([_process_result(0), _process_result(0)]),
+    )
+
+    review_backend = ScriptedBackend([_completed_turn('{"verdict":"APPROVED","summary":"Good fix.","findings":[]}')])
+    reviewer = NativeReviewAttemptAdapter(runtime, run.run_id, ReviewerRunner(review_backend))
+
+    change_provider = GitWorktreeChangeProvider()
+
+    pipeline = PipelineRunner(
+        runtime, planner=planner, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=change_provider,
+    )
+
+    first = pipeline.run(run.run_id, repo_workspace, "Fix the bug in a.txt")
+    assert first.status is PipelineStatus.NEEDS_USER
+    assert (repo_workspace.root / "a.txt").read_text(encoding="utf-8") == "fixed\n"
+
+    # The worktree is STILL alive (the caller -- webhost in production --
+    # never disposed it while WAITING_USER); continue_with_feedback resumes
+    # from it directly.
+    followup_worker_backend = ScriptedBackend([
+        ModelTurn(
+            "", (ModelToolCall("c2", "write_file", {"path": "a.txt", "content": "fixed and negative-safe\n"}),),
+            ModelStopReason.TOOL_USE, ModelUsage(),
+        ),
+        _completed_turn("Also handled negative numbers."),
+    ])
+    followup_worker = NativeWorkerAttemptAdapter(runtime, run.run_id, followup_worker_backend)
+    followup_review_backend = ScriptedBackend([
+        _completed_turn('{"verdict":"APPROVED","summary":"Handles negatives now.","findings":[]}'),
+    ])
+    followup_reviewer = NativeReviewAttemptAdapter(runtime, run.run_id, ReviewerRunner(followup_review_backend))
+
+    pipeline_2 = PipelineRunner(
+        runtime, planner=planner, worker=followup_worker, verification=verification, reviewer=followup_reviewer,
+        change_provider=change_provider,
+    )
+
+    second = pipeline_2.continue_with_feedback(
+        run.run_id, repo_workspace, "also handle negative numbers",
+        task="Fix the bug in a.txt", plan_report_or_text=first.plan_report,
+    )
+
+    assert second.status is PipelineStatus.NEEDS_USER
+    assert second.reason == "reviewed"
+    assert (repo_workspace.root / "a.txt").read_text(encoding="utf-8") == "fixed and negative-safe\n"
+    assert runtime.get_run(run.run_id).status.value == "waiting_user"
+
+    # Canonical evidence: a SECOND full execution -> verification -> review
+    # episode, with run.resumed marking the boundary between the two.
+    types = [e.type for e in runtime.events(run.run_id, limit=1000).events]
+    assert types.count(RunEventType.RUN_RESUMED) == 1
+    assert types.count(RunEventType.PROPOSAL_READY) == 2
+    assert types.count(RunEventType.RUN_WAITING_USER) == 2
+    assert types.count(RunEventType.EXECUTION_COMPLETED) == 2
+    assert types.count(RunEventType.VERIFICATION_COMPLETED) == 2
+    assert types.count(RunEventType.REVIEW_COMPLETED) == 2
+
+    # The follow-up worker's rendered input carried the feedback in its own
+    # trusted section, not merely dumped into ORIGINAL USER TASK.
+    assert "FOLLOW-UP INSTRUCTION FROM THE USER" in followup_worker_backend.first_user_input_text
+    assert "also handle negative numbers" in followup_worker_backend.first_user_input_text
+

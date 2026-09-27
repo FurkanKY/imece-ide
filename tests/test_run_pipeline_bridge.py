@@ -36,6 +36,7 @@ from pipeline_runtime.native_planner import NativePlanAttemptRunner  # noqa: E40
 from process_runtime.models import ProcessResult  # noqa: E402
 from review_runtime.runner import ReviewerRunner  # noqa: E402
 from run_runtime import RunRuntime, RunStatus, RunStore  # noqa: E402
+from run_runtime.events import RunEventType  # noqa: E402
 from webhost import state  # noqa: E402
 from webhost.bridge import HostBridge  # noqa: E402
 
@@ -254,9 +255,14 @@ def test_pipeline_engine_selected_for_git_repo(bridge, qapp, monkeypatch, git_re
     verdicts = [e for e in evs if e["type"] == "verdict"]
     assert verdicts and verdicts[0]["verdict"] == "APPROVED"
 
-    # worktree, öneri üretildikten SONRA dispose edilmiş olmalı.
+    # F2 (takip isteği): worktree, Run WAITING_USER'da (bekleyen bir
+    # proposal var) kaldığı sürece ARTIK KORUNUR -- bir sonraki
+    # run.followUp AYNI worktree'den devam edebilsin diye (bkz. karar #1).
+    # Yalnızca Apply/Reddet/cancel/yeni run.start/kapanışta dispose edilir.
     from webhost.api import run as run_api
-    assert run_api._active["workspace"] is None
+    assert run_api._active["workspace"] is not None
+    from webhost import state as _state
+    assert _state.get_run_runtime().get_run(run_id).status is RunStatus.WAITING_USER
 
 
 def test_pipeline_apply_writes_file_and_disposes(bridge, qapp, monkeypatch, git_repo):
@@ -780,3 +786,131 @@ def test_run_start_mentions_capped_at_backend_limit(bridge, qapp, monkeypatch, g
     # every one is reported -- proving the cap applies to VALID mentions
     # only, never silently drops the invalid-mention info events themselves.
     assert len(info_texts) >= 25
+
+
+# ==================== F2 (follow-up on a proposal): run.followUp ====================
+
+
+def test_follow_up_produces_second_proposal_and_apply_writes_final_content(bridge, qapp, monkeypatch, git_repo):
+    """run -> proposals -> run.followUp -> new proposals reflect BOTH
+    changes -> Apply writes the final content -> worktree disposed."""
+
+    def factory(runtime, run_id, routing, **kwargs):
+        planner = NativePlanAttemptRunner(runtime, run_id, ScriptedBackend([_completed_turn(_plan_json())]))
+        worker = NativeWorkerAttemptAdapter(runtime, run_id, ScriptedBackend([
+            *_fix_worker_turns(),  # first attempt: a.txt -> "fixed\n"
+            ModelTurn(
+                "", (ModelToolCall("c2", "write_file", {"path": "a.txt", "content": "fixed-and-negative-safe\n"}),),
+                ModelStopReason.TOOL_USE, ModelUsage(),
+            ),
+            _completed_turn("Also handled negative numbers."),
+        ]))
+        reviewer = NativeReviewAttemptAdapter(runtime, run_id, ReviewerRunner(ScriptedBackend([
+            _completed_turn('{"verdict":"APPROVED","summary":"iyi","findings":[]}'),
+            _completed_turn('{"verdict":"APPROVED","summary":"negatifler de tamam","findings":[]}'),
+        ])))
+        verification = NativeVerificationAttemptAdapter(
+            runtime, run_id, process_runner=FakeProcessRunner([
+                ProcessResult(argv=("true",), cwd=".", exit_code=0, timed_out=False, duration_ms=1,
+                              stdout="", stderr="", stdout_truncated=False, stderr_truncated=False,
+                              stdout_bytes=0, stderr_bytes=0),
+                ProcessResult(argv=("true",), cwd=".", exit_code=0, timed_out=False, duration_ms=1,
+                              stdout="", stderr="", stdout_truncated=False, stderr_truncated=False,
+                              stdout_bytes=0, stderr_bytes=0),
+            ]),
+        )
+        return PipelinePorts(
+            planner=planner, worker=worker, reviewer=reviewer,
+            verification=verification, change_provider=GitWorktreeChangeProvider(),
+        )
+
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, factory)
+    from webhost.api import run as run_api
+    assert run_api._active["workspace"] is not None  # kept -- WAITING_USER
+
+    r = rpc(bridge, "run.followUp", {"feedback": "negatif sayıları da ele al"}, call_id=2)
+    assert r["ok"], r
+    assert r["result"]["runId"] == run_id
+
+    events2 = []
+    bridge.event.connect(lambda raw: events2.append(json.loads(raw)))
+
+    def is_finished_again():
+        finished = [e for e in events2 if e["channel"] == "run.finished"]
+        return bool(finished)
+
+    assert _wait_until(is_finished_again, qapp, timeout=10.0), f"olaylar: {events2}"
+    finished2 = [e["payload"] for e in events2 if e["channel"] == "run.finished"][-1]
+    assert finished2["status"] == "done"
+    assert finished2.get("engine") == "pipeline"
+
+    evs2 = _run_ev_payloads(events2, run_id)
+    proposal_events = [e for e in evs2 if e["type"] == "proposal"]
+    assert proposal_events, f"ikinci proposal olayı gelmedi: {evs2}"
+    proposals = proposal_events[-1]["proposals"]
+    assert len(proposals) == 1
+    assert proposals[0]["new"] == "fixed-and-negative-safe\n"
+
+    from webhost import state as _state
+    run_record = _state.get_run_runtime().get_run(run_id)
+    assert run_record.status is RunStatus.WAITING_USER
+    types = [e.type for e in _state.get_run_runtime().events(run_id, limit=1000).events]
+    assert types.count(RunEventType.RUN_RESUMED) == 1
+    assert types.count(RunEventType.PROPOSAL_READY) == 2
+
+    r2 = rpc(bridge, "run.applyProposals", {"paths": ["a.txt"]}, call_id=3)
+    assert r2["ok"], r2
+    assert r2["result"]["applied"] == ["a.txt"]
+    assert (git_repo / "a.txt").read_text(encoding="utf-8") == "fixed-and-negative-safe\n"
+    assert run_api._active["workspace"] is None
+
+
+def test_follow_up_rejected_for_legacy_engine(bridge, qapp, monkeypatch, tmp_path):
+    from webhost.api import run as run_api
+
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    state.set_project(str(plain_dir))
+    monkeypatch.setattr(run_api, "run_project_task", _fake_legacy_generator)
+    events = []
+    bridge.event.connect(lambda raw: events.append(json.loads(raw)))
+    r = rpc(bridge, "run.start", {"task": "x", "routing": _all_native_routing()})
+    assert r["ok"], r
+
+    def is_finished():
+        return any(e["channel"] == "run.finished" for e in events)
+
+    assert _wait_until(is_finished, qapp, timeout=5.0)
+    assert run_api._active["engine"] == "legacy"
+
+    r2 = rpc(bridge, "run.followUp", {"feedback": "x"}, call_id=2)
+    assert not r2["ok"]
+    assert r2["error"]["code"] == "follow_up_unsupported"
+    assert "Klasik motorda" in r2["error"]["message"]
+
+
+def test_follow_up_rejected_when_no_active_run(bridge, qapp, monkeypatch, git_repo):
+    r = rpc(bridge, "run.followUp", {"feedback": "x"}, call_id=1)
+    assert not r["ok"]
+    assert r["error"]["code"] == "follow_up_unsupported"
+
+
+def test_follow_up_rejected_after_reject(bridge, qapp, monkeypatch, git_repo):
+    ports_factory = _make_ports_factory(worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}')
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    r = rpc(bridge, "run.rejectProposals", {}, call_id=2)
+    assert r["ok"], r
+
+    r2 = rpc(bridge, "run.followUp", {"feedback": "x"}, call_id=3)
+    assert not r2["ok"]
+    assert r2["error"]["code"] == "no_active_run"
+
+
+def test_follow_up_rejected_empty_feedback(bridge, qapp, monkeypatch, git_repo):
+    ports_factory = _make_ports_factory(worker_turns=_fix_worker_turns(), review_text='{"verdict":"APPROVED","summary":"iyi","findings":[]}')
+    run_id, events = _drive_run(bridge, qapp, monkeypatch, ports_factory)
+
+    r = rpc(bridge, "run.followUp", {"feedback": "   "}, call_id=2)
+    assert not r["ok"]
+    assert r["error"]["code"] == "empty_feedback"

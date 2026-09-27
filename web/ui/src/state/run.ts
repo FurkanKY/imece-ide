@@ -49,6 +49,10 @@ export interface PlanInfo {
 
 export type RunStatus = "idle" | "running" | "done" | "failed" | "cancelled";
 export type RunStage = "draft" | "planning" | "working" | "reviewing" | "ready" | "applied" | "restored" | "error";
+/** F2 (takip isteği): bir koşunun GERÇEKTE hangi motorla yürütüldüğü —
+    run.finished'ın `engine` alanından gelir; henüz bilinmiyorsa null.
+    Composer, takip isteği modunu yalnızca "pipeline" iken açar. */
+export type RunEngine = "pipeline" | "legacy" | null;
 
 /** F6 (@-mentions) — Composer'da @ ile pinlenen dosya/klasör; sadece bu
     oturum boyunca task taslağıyla birlikte tutulur (kalıcı depoya YAZILMAZ). */
@@ -62,6 +66,10 @@ interface RunState {
   task: string;
   /** F6 (@-mentions): proje-göreli, forward-slash yollar (dosya veya klasör). */
   mentions: string[];
+  /** F2 (takip isteği): bu koşunun motoru (bkz. RunEngine). */
+  engine: RunEngine;
+  /** F2: "ready" (runStage) sırasında Composer'ın takip-isteği kutusunun taslak metni. */
+  followUpDraft: string;
   plan: PlanInfo | null;
   routing: Routing;
   providers: ProviderInfo[];
@@ -85,6 +93,9 @@ interface RunState {
   removeMention: (path: string) => void;
   start: () => Promise<void>;
   cancel: () => Promise<void>;
+  /** F2 (takip isteği): setFollowUpDraft ile yazılan metni run.followUp'a gönderir. */
+  setFollowUpDraft: (text: string) => void;
+  followUp: () => Promise<void>;
   toggleDiff: (path: string) => void;
   apply: () => Promise<void>;
   restoreCheckpoint: (checkpointId?: string) => Promise<void>;
@@ -108,6 +119,8 @@ export const useRun = create<RunState>((set, get) => ({
   runId: null,
   task: "",
   mentions: [],
+  engine: null,
+  followUpDraft: "",
   plan: null,
   routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
   providers: [],
@@ -182,6 +195,7 @@ export const useRun = create<RunState>((set, get) => ({
       totals: null,
       error: null,
       checkpointId: null,
+      engine: null, // F2: bilinmiyor -- run.finished gelince belirlenir
     });
     try {
       const { runId } = await bridge.call("run.start", { task: task.trim(), routing, mentions });
@@ -200,6 +214,32 @@ export const useRun = create<RunState>((set, get) => ({
     const { runId, status } = get();
     if (status !== "running") return;
     await bridge.call("run.cancel", { runId: runId ?? undefined });
+  },
+
+  setFollowUpDraft: (text) => set({ followUpDraft: text }),
+
+  followUp: async () => {
+    const { followUpDraft, mentions, status, runStage, engine } = get();
+    if (status === "running") return;
+    if (runStage !== "ready") return;
+    if (engine !== "pipeline") {
+      toast.info("Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın.");
+      return;
+    }
+    const feedback = followUpDraft.trim();
+    if (!feedback) {
+      toast.info("Takip isteği boş.");
+      return;
+    }
+    try {
+      await bridge.call("run.followUp", { feedback, mentions });
+      // Sunucu, continuation'ı başlatmadan ÖNCE bir "followUpStarted" run.event
+      // yayınlar (bkz. webhost/api/run.py) -- diff/proposal sıfırlama ve
+      // kullanıcı mesajının akışa (flow) eklenmesi ORADA yapılır (consume()),
+      // burada değil; böylece tek bir doğruluk kaynağı olur.
+    } catch (e) {
+      toast.err(e instanceof Error ? e.message : "Takip isteği başarısız.");
+    }
   },
 
   toggleDiff: (path) =>
@@ -316,7 +356,9 @@ export const useRun = create<RunState>((set, get) => ({
     installed = true;
 
     bridge.on("run.event", ({ ev }) => consume(ev, set, get));
-    bridge.on("run.finished", ({ status, error }) => {
+    bridge.on("run.finished", ({ status, error, engine }) => {
+      // F2: `engine`, bu koşunun GERÇEKTE hangi motorla yürütüldüğünü
+      // taşır -- bilinmiyorsa (eski/eksik bir olay) önceki değer korunur.
       if (status === "failed") {
         set((s) => ({
           status: "failed",
@@ -324,6 +366,7 @@ export const useRun = create<RunState>((set, get) => ({
           error: error ?? null,
           stages: failRunning(s.stages),
           flow: [...s.flow, { id: flowId++, kind: "error", text: `Hata: ${error ?? "bilinmiyor"}` }],
+          engine: engine ?? s.engine,
         }));
       } else if (status === "cancelled") {
         set((s) => ({
@@ -331,9 +374,13 @@ export const useRun = create<RunState>((set, get) => ({
           runStage: "draft",
           stages: failRunning(s.stages),
           flow: [...s.flow, { id: flowId++, kind: "info", text: "Koşu durduruldu." }],
+          engine: engine ?? s.engine,
         }));
       } else {
-        set((s) => ({ status: "done", runStage: s.runStage === "ready" ? "ready" : "draft" }));
+        set((s) => ({
+          status: "done", runStage: s.runStage === "ready" ? "ready" : "draft",
+          engine: engine ?? s.engine,
+        }));
       }
     });
   },
@@ -417,6 +464,21 @@ function consume(
           checked: true,
         },
       ],
+    }));
+  } else if (type === "followUpStarted") {
+    // F2 (takip isteği): webhost/api/run.py'nin run.followUp handler'ı bu
+    // olayı continuation başlamadan ÖNCE yayınlar -- diff/proposal durumu
+    // burada sıfırlanır (flow/chat GEÇMİŞİ korunur, yalnızca EKLENİR).
+    set((s) => ({
+      status: "running",
+      runStage: "working",
+      diffs: [],
+      proposals: [],
+      verdict: null,
+      verdictNote: "",
+      checkpointId: null,
+      followUpDraft: "",
+      flow: [...s.flow, { id: flowId++, kind: "task", text: (ev.feedback as string) ?? "" }],
     }));
   } else if (type === "verdict") {
     set(() => ({ verdict: ev.verdict as string, verdictNote: (ev.note as string) ?? "" }));

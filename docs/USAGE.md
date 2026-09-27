@@ -111,6 +111,26 @@ The classic engine skips verification and the fix loop entirely: it goes
 straight from Plan → Code → Review to a proposal, with the Reviewer as the
 only check.
 
+### Follow-up requests
+
+While a proposal is pending (the run is at step 6 above), the composer
+switches to a follow-up box — *"Değişiklik iste… (ör. negatif sayıları da ele
+al)"*. Typing something there and submitting continues the **same run** from
+the **same isolated worktree**, without starting over: the Worker gets another
+bounded attempt with your follow-up instruction, then verification (if any)
+and review run again, and a fresh proposal replaces the old one. Your
+follow-up shows up in the flow as your own message, and the activity feed
+keeps streaming; you can chain as many follow-ups as you like before you
+finally Apply or Reject. `@`-mentions work in a follow-up too, exactly like
+in the original task.
+
+Follow-ups only work for a **pipeline** run that is still waiting on a
+pending proposal — a classic-engine run shows a hint instead ("Klasik motorda
+takip isteği desteklenmiyor; yeni bir görev başlatın.") and disables the box;
+start a new task instead. Apply and Reject stay available while you're not
+mid-follow-up, and Stop cancels a follow-up in progress the same way it
+cancels the initial run.
+
 ### Accounts vs. API keys
 
 Each role (Planner/Worker/Reviewer) can be backed either by an API key

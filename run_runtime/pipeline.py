@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from run_runtime.errors import InvalidRunStateError
 from run_runtime.events import RunEventSpec, RunEventType
 from run_runtime.models import RunStatus
 from run_runtime.service import RunRuntime
@@ -91,6 +92,29 @@ class CanonicalPipelineRecorder:
                 ),
             ),
             expected_last_event_seq=expected_last_event_seq,
+        )
+
+    def resumed(self, *, reason: str = "user_feedback") -> None:
+        """Record run.resumed, transitioning WAITING_USER -> RUNNING (see
+        run_runtime.projector._on_resumed). Used by pipeline_runtime.
+        PipelineRunner.continue_with_feedback (F2, follow-up on a proposal)
+        to resume a Run whose proposal is pending after the user typed a
+        follow-up instruction.
+
+        Unlike this class's other methods, this is NOT an idempotent
+        best-effort no-op: resuming a Run that isn't actually WAITING_USER
+        is a caller bug (e.g. a stale/duplicate follow-up request racing a
+        Reject), not a benign race with an already-finished Run, and must
+        be surfaced rather than silently swallowed.
+        """
+        run = self._runtime.get_run(self._run_id)
+        if run.status is not RunStatus.WAITING_USER:
+            raise InvalidRunStateError(
+                f"Run WAITING_USER durumunda değil (status={run.status}); run.resumed reddedildi."
+            )
+        self._runtime.record(
+            run_id=self._run_id, type=RunEventType.RUN_RESUMED, payload={"reason": reason},
+            source=SOURCE, correlation_id=self._run_id, expected_last_event_seq=run.last_event_seq,
         )
 
     def completed_no_changes(self) -> None:

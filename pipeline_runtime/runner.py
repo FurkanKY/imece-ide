@@ -83,11 +83,12 @@ from fix_runtime.models import (
     FixLoopStatus,
     FixTrigger,
     FixTriggerKind,
+    FixWorkerRequest,
     InitialWorkerRequest,
     new_fix_execution_id,
 )
 from fix_runtime.ports import ReviewAttemptRunner, VerificationAttemptRunner, WorkerAttemptRunner
-from fix_runtime.prompt import render_initial_worker_input
+from fix_runtime.prompt import render_fix_worker_input, render_initial_worker_input
 from fix_runtime.runner import FixLoopRunner
 from planner_runtime.models import PlanReport, new_plan_id
 from review_runtime.errors import ReviewInputError
@@ -115,6 +116,28 @@ OnStage = Callable[[str, dict[str, Any]], None]
 
 def _noop_on_stage(stage: str, info: dict[str, Any]) -> None:
     return None
+
+
+# F2 (follow-up on a proposal): the Reviewer's task context is augmented with
+# the user's follow-up instruction, bounded to fit review_runtime.models.
+# ReviewRequest's own task budget (32_000 chars) -- the ORIGINAL task is
+# NEVER truncated, only the appended follow-up text is, if it would not fit.
+_REVIEW_TASK_MAX_CHARS = 32_000
+_FOLLOWUP_TASK_PREFIX = "\n\nFollow-up instruction from the user: "
+_FOLLOWUP_TASK_TRUNCATION_MARKER = "\n[truncated]"
+
+
+def _augment_task_with_feedback(task: str, feedback: str) -> str:
+    suffix = _FOLLOWUP_TASK_PREFIX + feedback
+    budget = _REVIEW_TASK_MAX_CHARS - len(task)
+    if budget <= 0:
+        return task[:_REVIEW_TASK_MAX_CHARS]
+    if len(suffix) <= budget:
+        return task + suffix
+    marker = _FOLLOWUP_TASK_TRUNCATION_MARKER
+    if budget <= len(marker):
+        return task + suffix[:budget]
+    return task + suffix[: budget - len(marker)] + marker
 
 
 class PipelineRunner:
@@ -187,6 +210,187 @@ class PipelineRunner:
             CanonicalPipelineRecorder(self._runtime, run_id).cancelled()
             on_stage("done", {"status": PipelineStatus.CANCELLED.value})
             return PipelineReport(run_id=run_id, status=PipelineStatus.CANCELLED, reason="cancelled")
+
+    # ---------------- F2: follow-up on a pending proposal ----------------
+
+    def continue_with_feedback(
+        self,
+        run_id: str,
+        workspace,
+        feedback: str,
+        *,
+        task: str,
+        plan_report_or_text: PlanReport | str | None = None,
+        pinned_paths: Sequence[str] = (),
+        cancel_event: threading.Event | None = None,
+        on_stage: OnStage | None = None,
+        max_fix_attempts: int | None = None,
+    ) -> PipelineReport:
+        """Resume a Run that is WAITING_USER on a pending proposal with a
+        user-typed follow-up instruction, continuing from the SAME worktree
+        (the caller must NOT have disposed it): worker attempt (with the
+        follow-up as a USER_FEEDBACK FixTrigger) -> verification (if a plan
+        is detected) -> review -> the SAME await_user completion gate,
+        exactly mirroring `run()`'s own no-verification-plan/fix-loop/
+        cancellation handling. Multiple follow-ups in a row work because
+        each call independently re-detects the verification plan and
+        re-captures the current diff -- there is no in-memory state carried
+        between calls, only the canonical Run history and the workspace
+        itself.
+
+        `task` is the ORIGINAL user task (unchanged across follow-ups) --
+        never mutated to embed the follow-up text; the follow-up is carried
+        on the FixTrigger (see fix_runtime.prompt.render_fix_worker_input's
+        FOLLOW-UP INSTRUCTION FROM THE USER section) and, for the Reviewer
+        only, appended to a bounded review-task string (see
+        _augment_task_with_feedback) so semantic review is aware of it too.
+
+        `plan_report_or_text` is optional context for the Worker/Reviewer's
+        rendered input -- either the original PlanReport (its `.summary` is
+        used) or a plain string, or None.
+        """
+        if not isinstance(run_id, str) or not run_id:
+            raise PipelineInputError("PipelineRunner.continue_with_feedback requires a non-empty run_id.")
+        if not isinstance(task, str) or not task.strip():
+            raise PipelineInputError("PipelineRunner.continue_with_feedback requires a non-empty task.")
+        if not isinstance(feedback, str) or not feedback.strip():
+            raise PipelineInputError("PipelineRunner.continue_with_feedback requires non-empty feedback.")
+        on_stage = on_stage or _noop_on_stage
+        pinned_paths = tuple(pinned_paths) if pinned_paths else ()
+        plan_text = (
+            plan_report_or_text.summary if isinstance(plan_report_or_text, PlanReport)
+            else plan_report_or_text
+        )
+        max_attempts = max_fix_attempts if max_fix_attempts is not None else self._max_fix_attempts
+        cancel_token = CancellationToken.from_event(cancel_event)
+
+        try:
+            return self._continue_with_feedback(
+                run_id, workspace, task, plan_text, feedback, cancel_token, on_stage, pinned_paths, max_attempts,
+            )
+        except OperationCancelledError:
+            CanonicalPipelineRecorder(self._runtime, run_id).cancelled()
+            on_stage("done", {"status": PipelineStatus.CANCELLED.value})
+            return PipelineReport(run_id=run_id, status=PipelineStatus.CANCELLED, reason="cancelled")
+
+    def _continue_with_feedback(
+        self, run_id: str, workspace, task: str, plan_text: str | None, feedback: str,
+        cancel_token: CancellationToken | None, on_stage: OnStage, pinned_paths: Sequence[str],
+        max_fix_attempts: int,
+    ) -> PipelineReport:
+        self._check_cancel(cancel_token)
+
+        current_change = self._capture(workspace)
+        trigger = FixTrigger(
+            kind=FixTriggerKind.USER_FEEDBACK, verification_report=None, review_report=None,
+            feedback=feedback, diff_sha256=current_change.diff_sha256,
+        )
+
+        # run.resumed BEFORE any side effect (mirrors fix_loop.started's own
+        # before-the-Worker-side-effect discipline) -- everything downstream
+        # (FixLoopRunner's recorder, RunCompletionGate) requires RUNNING.
+        CanonicalPipelineRecorder(self._runtime, run_id).resumed()
+
+        verification_plan = detect_verification_plan(workspace.root)
+
+        if verification_plan is None:
+            return self._continue_needs_user_path(
+                run_id, workspace, task, plan_text, trigger, on_stage, cancel_token, pinned_paths,
+            )
+
+        self._check_cancel(cancel_token)
+
+        request = FixLoopRequest(
+            task=task, trigger=trigger, verification_plan=verification_plan, plan=plan_text,
+            max_fix_attempts=max_fix_attempts, pinned_paths=pinned_paths,
+            review_task=_augment_task_with_feedback(task, feedback),
+        )
+        on_stage("fixing", {"trigger_kind": trigger.kind.value})
+        try:
+            fix_loop_report = self._fix_loop.run(run_id, workspace, request, cancel_token=cancel_token)
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            raise PipelineExecutionError(f"Fix loop failed: {exc}") from exc
+
+        if fix_loop_report.status is FixLoopStatus.COMPLETED:
+            status = self._status_after_gate_settlement(run_id)
+        else:
+            status = {
+                FixLoopStatus.EXHAUSTED: PipelineStatus.EXHAUSTED,
+                FixLoopStatus.FAILED: PipelineStatus.FAILED,
+            }[fix_loop_report.status]
+        on_stage("done", {"status": status.value})
+        change_set = self._safe_capture(workspace) if fix_loop_report.diff_sha256 is not None else None
+        return PipelineReport(
+            run_id=run_id, status=status, reason=fix_loop_report.reason,
+            plan_report=None, change_set=change_set,
+            verification_report=fix_loop_report.verification_report,
+            review_report=fix_loop_report.review_report,
+            fix_loop_report=fix_loop_report,
+        )
+
+    def _continue_needs_user_path(
+        self, run_id: str, workspace, task: str, plan_text: str | None, trigger: FixTrigger,
+        on_stage: OnStage, cancel_token: CancellationToken | None, pinned_paths: Sequence[str],
+    ) -> PipelineReport:
+        """Mirrors `_run_needs_user_path` for the no-verification-plan case,
+        but the "initial attempt" here is a single Worker attempt driven by
+        the USER_FEEDBACK trigger rather than an InitialWorkerRequest."""
+        on_stage("fixing", {"trigger_kind": trigger.kind.value})
+        execution_id = new_fix_execution_id()
+        rendered_input = self._render_feedback_only_input(workspace, task, plan_text, trigger, pinned_paths)
+        worker_request = FixWorkerRequest(
+            task=task, trigger=trigger, attempt_index=1, plan=plan_text, rendered_input=rendered_input,
+        )
+        worker_result = self._run_worker(workspace, worker_request, execution_id, cancel_token)
+        self._require_execution_completed(run_id, worker_result.execution_id)
+
+        change_set = self._capture(workspace)
+        if not change_set.changed_paths:
+            CanonicalPipelineRecorder(self._runtime, run_id).completed_no_changes()
+            on_stage("done", {"status": PipelineStatus.NO_CHANGES.value})
+            return PipelineReport(
+                run_id=run_id, status=PipelineStatus.NO_CHANGES, reason="no_changes",
+                plan_report=None, change_set=change_set,
+            )
+
+        self._check_cancel(cancel_token)
+
+        on_stage("reviewing", {"advisory": True})
+        review_task = _augment_task_with_feedback(task, trigger.feedback)
+        try:
+            review_request = ReviewRequest(
+                task=review_task, plan=plan_text, diff=change_set.diff, verification_report=None,
+            )
+        except ReviewInputError as exc:
+            raise PipelineExecutionError(f"Change set could not be reviewed: {exc}") from exc
+        review_id = new_review_id()
+        review_report = self._run_reviewer(workspace, review_request, review_id, cancel_token, pinned_paths=pinned_paths)
+
+        CanonicalPipelineRecorder(self._runtime, run_id).needs_user(payload={
+            "reason": "review_advisory",
+            "review_id": review_id,
+            "review_verdict": review_report.verdict.value,
+            "diff_sha256": change_set.diff_sha256,
+        })
+        on_stage("done", {"status": PipelineStatus.NEEDS_USER.value})
+        return PipelineReport(
+            run_id=run_id, status=PipelineStatus.NEEDS_USER, reason="no_verification_plan_detected",
+            plan_report=None, change_set=change_set, review_report=review_report,
+        )
+
+    def _render_feedback_only_input(
+        self, workspace, task: str, plan_text: str | None, trigger: FixTrigger, pinned_paths: Sequence[str],
+    ) -> str:
+        try:
+            rules = load_project_rules(workspace.root)
+            return render_fix_worker_input(
+                task=task, plan=plan_text, trigger=trigger, attempt_index=1, max_fix_attempts=1,
+                rules=rules, pinned_paths=pinned_paths,
+            )
+        except Exception as exc:
+            raise PipelineExecutionError(f"Follow-up worker input could not be rendered: {exc}") from exc
 
     def _run(
         self, run_id: str, workspace, task: str,

@@ -152,6 +152,11 @@ _TASK_HEADER = "ORIGINAL USER TASK\n==================\n"
 _ATTEMPT_HEADER = "ATTEMPT INFO\n============\n"
 _PLAN_HEADER = "GENERATED PLAN\n==============\n"
 _FEEDBACK_HEADER = "FIX FEEDBACK (untrusted diagnostic data)\n=========================================\n"
+# F2 (follow-up on a proposal): the user's own follow-up instruction is
+# TRUSTED, exactly like ORIGINAL USER TASK -- unlike FIX FEEDBACK above (a
+# tool's/reviewer's diagnostic output), it gets its own section and is NEVER
+# truncated (see the mandatory-bodies accounting in render_fix_worker_input).
+_FOLLOWUP_HEADER = "FOLLOW-UP INSTRUCTION FROM THE USER\n====================================\n"
 
 _SEP = "\n\n"
 _NUM_SECTIONS = 5
@@ -204,9 +209,13 @@ def _render_review_feedback(report) -> str:
 
 
 def _render_feedback(trigger: FixTrigger) -> str:
-    parts = [_render_verification_facts(trigger.verification_report)]
+    parts = []
+    if trigger.verification_report is not None:
+        parts.append(_render_verification_facts(trigger.verification_report))
     if trigger.review_report is not None:
         parts.append(_render_review_feedback(trigger.review_report))
+    if not parts:
+        return "(none)"
     return "\n\n".join(parts)
 
 
@@ -241,6 +250,14 @@ def render_fix_worker_input(
     bounded out of whatever remains after the mandatory sections and the
     other ancillary sections' own share. Passing rules=None reproduces the
     exact prior (pre-rules) output.
+
+    F2 (follow-up on a proposal): when `trigger.kind` is
+    FixTriggerKind.USER_FEEDBACK, an extra FOLLOW-UP INSTRUCTION FROM THE
+    USER section is included, carrying `trigger.feedback` VERBATIM and
+    NEVER truncated (same guarantee as ORIGINAL USER TASK -- it is trusted,
+    not diagnostic data; see the module docstring). This is the ONLY
+    behavior change: for the other two trigger kinds, the exact prior
+    (pre-F2) section layout and budget arithmetic is reproduced unchanged.
     """
     attempt_body = (
         f"attempt_index: {attempt_index}\n"
@@ -248,19 +265,26 @@ def render_fix_worker_input(
         f"trigger_kind: {trigger.kind.value}\n"
     )
 
+    has_followup = trigger.kind is FixTriggerKind.USER_FEEDBACK
+    num_sections = _NUM_SECTIONS + (1 if has_followup else 0)
+
     headers_total = (
         len(_TRUST_NOTE) + len(_TASK_HEADER) + len(_ATTEMPT_HEADER)
         + len(_PLAN_HEADER) + len(_FEEDBACK_HEADER) + len(_USER_REFERENCED_HEADER)
     )
-    separators_total = (_NUM_SECTIONS - 1) * len(_SEP)
+    if has_followup:
+        headers_total += len(_FOLLOWUP_HEADER)
+    separators_total = (num_sections - 1) * len(_SEP)
     mandatory_bodies = len(task) + len(attempt_body)
+    if has_followup:
+        mandatory_bodies += len(trigger.feedback)
     required_len = headers_total + separators_total + mandatory_bodies
 
     if required_len > MAX_FIX_INPUT_CHARS:
         raise FixLoopInputError(
             "The mandatory fix-worker input framing plus the original task "
-            "alone exceed the initial input budget; refusing to silently "
-            "drop any part of the task."
+            "(and, for a follow-up, the user's feedback) alone exceed the "
+            "initial input budget; refusing to silently drop any part of it."
         )
 
     remaining = MAX_FIX_INPUT_CHARS - required_len
@@ -278,6 +302,8 @@ def render_fix_worker_input(
         _FEEDBACK_HEADER + _bounded(feedback_text, ancillary_budget),
         _USER_REFERENCED_HEADER + _bounded(pinned_text, ancillary_budget),
     ]
+    if has_followup:
+        sections.append(_FOLLOWUP_HEADER + trigger.feedback)
     rendered = _TRUST_NOTE + _SEP.join(sections) + rules_block
     assert len(rendered) <= MAX_FIX_INPUT_CHARS  # defensive: proven by construction above
     return rendered
