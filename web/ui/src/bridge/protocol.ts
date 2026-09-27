@@ -393,9 +393,14 @@ export interface Events {
   "run.event": { runId: string; ev: RunEvent };
   /** F2: `engine`, bu koşunun GERÇEKTE hangi motorla yürütüldüğünü taşır
       ("pipeline" | "legacy") -- Composer'ın takip isteği modunu yalnızca
-      pipeline motorunda açması için (bkz. state/run.ts). */
+      pipeline motorunda açması için (bkz. state/run.ts).
+      A5 (hata UX): status "failed" olduğunda `errorCode`/`errorTitle`/
+      `errorDescription`, webhost/api/run.py'nin TEK Türkçe eşleme
+      noktasından (_ERROR_MESSAGES/_error_details) gelir -- `error` ham
+      metin olarak "Ayrıntılar" için saklanır. */
   "run.finished": {
     runId: string; status: "done" | "failed" | "cancelled"; error?: string;
+    errorCode?: string; errorTitle?: string; errorDescription?: string;
     engine?: "pipeline" | "legacy";
   };
   /** F1 (canlı ajan etkinliği) — run_runtime.activity_projection.project_event

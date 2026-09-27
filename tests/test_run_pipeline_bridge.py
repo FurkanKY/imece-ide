@@ -436,6 +436,15 @@ def test_pipeline_review_needs_fix_then_exhausted_reports_failed(bridge, qapp, m
     finished = _finished_payload(events, run_id)
     assert finished["status"] == "failed"
     from webhost.api import run as run_api
+    # A5 (hata UX): terminal hata kartı için TEK Türkçe eşleme noktası
+    # (webhost/api/run.py _error_details/_ERROR_MESSAGES) her "failed"
+    # sonucu için MUTLAKA bir errorCode/Title/Description üretir -- ham
+    # nedene bakılmaksızın (bu senaryoda kanonik error_code
+    # "legacy_worker_error"e düşüyor; tam eşleme davranışı
+    # tests/test_run_error_mapping.py'de ayrıntılı test edilir).
+    assert finished["errorCode"] in run_api._ERROR_MESSAGES
+    assert finished["errorTitle"]
+    assert finished["errorDescription"]
     assert run_api._active["workspace"] is None
 
 
@@ -832,6 +841,14 @@ def test_follow_up_produces_second_proposal_and_apply_writes_final_content(bridg
     run_id, events = _drive_run(bridge, qapp, monkeypatch, factory)
     from webhost.api import run as run_api
     assert run_api._active["workspace"] is not None  # kept -- WAITING_USER
+
+    # A4-A3: run.followUp'a geçirilecek plan bağlamı yalnızca özet (summary)
+    # DEĞİL, Planner'ın ürettiği TÜM plan (adımlar/kabul kriterleri dahil)
+    # olmalı -- bkz. webhost/api/run.py _full_plan_text.
+    stored_plan_text = run_api._active["plan_text"]
+    assert "a.txt düzeltilecek." in stored_plan_text  # summary hâlâ orada
+    assert "Adım 1" in stored_plan_text  # ama artık adımlar da var
+    assert "a.txt fixed yazar" in stored_plan_text  # ve kabul kriterleri de
 
     r = rpc(bridge, "run.followUp", {"feedback": "negatif sayıları da ele al"}, call_id=2)
     assert r["ok"], r

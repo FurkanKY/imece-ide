@@ -41,10 +41,11 @@ webhost/api/checkpoint.py, DEĞİŞTİRİLMEDİ).
 """
 
 import os
+import re
 import threading
 import time
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 
 import ui_prefs
 import engine_factory
@@ -89,6 +90,123 @@ _MAX_MENTIONS = 10
 # kanonik pipeline rolü -> legacy routing anahtarı (bkz. agents.DEFAULT_ROUTING).
 _ROLE_ROUTING_KEY = {"planner": "planner", "worker": "coder", "reviewer": "reviewer"}
 _ROLE_LEGACY_STAGE = {"planner": "plan", "worker": "code", "reviewer": "review"}
+
+# A5 (hata UX): terminal hata kartı için TEK Türkçe eşleme noktası. Bugün her
+# alt katman hatası (agent_runtime/acp_runtime/process_runtime/workspace...)
+# run.py'ye ulaşmadan ÖNCE bir metin dizesine ("str(exc)") düzleştirilir (bkz.
+# _PipelineWorker.run()/_Worker.run()/_FollowUpWorker.run()'ın `except
+# Exception as e: ... str(e)` blokları) -- bu yüzden burada tip bazlı değil,
+# run_runtime.completion.RunCompletionGate'in ZATEN ürettiği kanonik
+# `RunRecord.error_code` (execution_failed/verification_fail/
+# verification_timeout/verification_error/fix_loop_exhausted/
+# fix_loop_failed) ve run_runtime.legacy'nin kendi yerleşim kodları
+# (legacy_worker_error/legacy_lifecycle_start_failed) TEMEL ALINIR;
+# _classify_error bu kaba kodu, ham hata metnindeki tanınabilir anahtar
+# sözcüklerle (best-effort) daha spesifik bir kutuya (auth/hız sınırı/zaman
+# aşımı/...) İNCELTİR. Tanınamayan bir metin, kodun kendi genel mesajına
+# düşer -- ASLA hatasız görünmez.
+_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
+    "provider_not_configured": (
+        "Sağlayıcı yapılandırılmamış",
+        "Seçili rol için API anahtarı veya hesap girişi eksik. Ayarlar'dan sağlayıcıyı "
+        "yapılandırıp görevi tekrar başlatın.",
+    ),
+    "auth_required": (
+        "Kimlik doğrulama gerekiyor",
+        "Sağlayıcı oturumu geçersiz veya süresi dolmuş. Hesapla yeniden giriş yapıp "
+        "tekrar deneyin.",
+    ),
+    "acp_agent_unavailable": (
+        "Ajan başlatılamadı",
+        "Seçili CLI ajanı kurulu değil, bulunamadı ya da çalışırken çöktü. Kurulumu "
+        "kontrol edip tekrar deneyin.",
+    ),
+    "rate_limited": (
+        "Kullanım sınırına ulaşıldı",
+        "Sağlayıcı isteği hız veya kota sınırı nedeniyle reddetti. Biraz bekleyip "
+        "tekrar deneyin.",
+    ),
+    "timeout": (
+        "Zaman aşımı",
+        "İstek beklenen sürede tamamlanmadı. Ağ bağlantınızı kontrol edip tekrar deneyin.",
+    ),
+    "network_error": (
+        "Ağ hatası",
+        "Sağlayıcıya bağlanılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.",
+    ),
+    "verification_tool_missing": (
+        "Doğrulama aracı bulunamadı",
+        "Projenin doğrulama komutu (ör. test veya derleme aracı) sistemde bulunamadı. "
+        "Aracı kurup tekrar deneyin.",
+    ),
+    "worktree_git_failure": (
+        "Çalışma alanı hatası",
+        "İzole git çalışma alanı oluşturulamadı veya bozuldu. Projenin git durumunu "
+        "kontrol edip tekrar deneyin.",
+    ),
+    "fix_loop_exhausted": (
+        "Otomatik düzeltme tükendi",
+        "Doğrulama defalarca başarısız oldu ve otomatik düzeltme deneme hakkı bitti. "
+        "Planı gözden geçirip tekrar deneyin.",
+    ),
+    "provider_unavailable": (
+        "Sağlayıcıya ulaşılamadı",
+        "Seçili model/sağlayıcı isteğe beklenmedik şekilde yanıt veremedi. Tekrar "
+        "deneyin ya da farklı bir sağlayıcı seçin.",
+    ),
+    "generic": (
+        "Koşu tamamlanamadı",
+        "Beklenmeyen bir hata oluştu. Ayrıntılara bakıp tekrar deneyin.",
+    ),
+}
+
+
+def _classify_error(code: str | None, message: str | None) -> str:
+    """Kaba kanonik `error_code`'u (bkz. yukarıdaki modül notu) ham hata
+    metnindeki anahtar sözcüklerle daha spesifik bir _ERROR_MESSAGES
+    anahtarına inceltir. Asla KeyError vermez -- tanınmayan her şey
+    "generic"e düşer."""
+    lower = (message or "").lower()
+    if code == "verification_tool_missing":
+        return code
+    if code == "fix_loop_exhausted":
+        return "fix_loop_exhausted"
+    if "executable not found" in lower or ("bulunamadı" in lower and ("araç" in lower or "komut" in lower)):
+        return "verification_tool_missing"
+    if re.search(r"\b(unauthori[sz]ed|authentication|auth(entication)? required|401)\b", lower) or "kimlik doğrula" in lower:
+        return "auth_required"
+    if re.search(r"\b(rate[ _-]?limit\w*|429)\b", lower) or "kota" in lower:
+        return "rate_limited"
+    if "zaman aşım" in lower or "timeout" in lower:
+        return "timeout"
+    if "acp" in lower and ("başlat" in lower or "spawn" in lower or "bulunamadı" in lower):
+        return "acp_agent_unavailable"
+    if re.search(r"\b(git|worktree)\b", lower):
+        return "worktree_git_failure"
+    if "api anahtarı" in lower or "yapılandırılmadı" in lower or "eksik alan" in lower:
+        return "provider_not_configured"
+    if "bağlan" in lower or "network" in lower or "connection" in lower:
+        return "network_error"
+    if code in ("execution_failed", "legacy_worker_error", "verification_error", "fix_loop_failed"):
+        return "provider_unavailable"
+    return "generic"
+
+
+def _error_details(coordinator, message: str | None) -> dict:
+    """`finish("failed", message)` çağıranların ortak ekidir: kanonik
+    Run'ın (varsa) `error_code`'unu okuyup _classify_error ile inceltir ve
+    run.finished'a eklenecek {errorCode, errorTitle, errorDescription}
+    alanlarını üretir. Kanonik durum okunamazsa (best-effort) code=None ile
+    devam edilir -- bu yüzden ASLA fırlatmaz."""
+    code = None
+    try:
+        if coordinator is not None:
+            code = coordinator.get_run().error_code
+    except Exception:
+        code = None
+    key = _classify_error(code, message)
+    title, description = _ERROR_MESSAGES[key]
+    return {"errorCode": key, "errorTitle": title, "errorDescription": description}
 
 
 class _Worker(QThread):
@@ -475,6 +593,31 @@ def _last_worker_final_message(runtime, run_id: str) -> str | None:
     return _bounded_text(joined) if joined else None
 
 
+def _full_plan_text(plan_report) -> str:
+    """F2 (takip isteği) düzeltmesi: PipelineRunner.continue_with_feedback'e
+    yalnızca `plan_report.summary` (tek cümlelik özet) DEĞİL, Planner'ın
+    ürettiği TÜM plan -- adımlar/kabul kriterleri/riskler dahil -- metin
+    olarak geçirilsin diye. `continue_with_feedback` bir PlanReport
+    aldığında yine de yalnızca `.summary`'sini kullanır (bkz.
+    pipeline_runtime.runner.PipelineRunner.continue_with_feedback
+    docstring'i); bu yüzden zenginleştirme BURADA, çağrı yerinde, düz bir
+    string olarak yapılır -- runner'a DOKUNULMAZ."""
+    lines = [plan_report.summary]
+    if plan_report.steps:
+        lines.append("Adımlar:")
+        for i, step in enumerate(plan_report.steps, start=1):
+            lines.append(f"{i}. {step.title}: {step.objective}")
+    if plan_report.acceptance_criteria:
+        lines.append("Kabul kriterleri:")
+        for c in plan_report.acceptance_criteria:
+            lines.append(f"- {c}")
+    if plan_report.risks:
+        lines.append("Riskler:")
+        for r in plan_report.risks:
+            lines.append(f"- {r}")
+    return "\n".join(lines)
+
+
 def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=None, run_id=None) -> None:
     """PipelineReport'u legacy UI olay sözlüğüne (plan/verdict/info/proposal) çevirir."""
     if report.plan_report is not None:
@@ -590,6 +733,9 @@ def _start(params, ctx):
         payload = {"runId": run_id, "status": status, "engine": _active.get("engine")}
         if error:
             payload["error"] = error
+            if status == "failed":
+                # A5 (hata UX): tek Türkçe eşleme noktası (bkz. _error_details).
+                payload.update(_error_details(coordinator, error))
         bridge.emit_event("run.finished", payload)
 
     # ---------------- motor seçimi (T1.2) ----------------
@@ -771,12 +917,23 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     """Shared stage/finished/failed wiring + F1 activity streaming for BOTH
     _PipelineWorker (run.start) and _FollowUpWorker (run.followUp, F2) --
     they share the exact same stage/finished_ok/failed Signal shapes."""
-    stage_state = {"role": None, "start_ts": None, "last_seq": 0}
+    # A4-A2 (rol başına canlı sayaç): `role_tokens`/`role_cost`/`role_has_usage`
+    # o rolün BAŞLADIĞI andan beri BİRİKTİRİLİR (yalnızca yeni bir role_stage'e
+    # girerken sıfırlanır) -- `_collect_usage_since_last` her çağrıda YALNIZCA
+    # `last_seq`'ten SONRAKİ olayları okur, bu yüzden birikimi BURADA tutmak
+    # gerekir (aksi halde her ara "running" tikinde yalnızca son dilimin
+    # tokenları görünür, rolün TOPLAMI değil). `role_has_usage`, hiç
+    # usage.recorded üretmeyen (ör. ACP/hesap) bir rol için arayüzün "—"
+    # gösterebilmesi içindir -- 0 token ile "hiç veri yok" birbirine
+    # KARIŞTIRILMAZ.
+    stage_state = {
+        "role": None, "start_ts": None, "last_seq": 0,
+        "role_tokens": 0, "role_cost": 0.0, "role_has_usage": False,
+    }
+    metrics_timer = QTimer()
+    metrics_timer.setInterval(1000)
 
-    def flush_role_metrics():
-        role = stage_state["role"]
-        if role is None:
-            return
+    def _collect_usage_since_last() -> tuple[int, float]:
         events = []
         page = runtime.events(run_id, after_seq=stage_state["last_seq"], limit=500)
         events.extend(page.events)
@@ -788,26 +945,59 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
         total_tokens, cost_usd = 0, 0.0
         for e in events:
             if e.type == RunEventType.USAGE_RECORDED:
+                stage_state["role_has_usage"] = True
                 total_tokens += int(e.payload.get("total_tokens") or 0)
                 cost_usd += float(e.payload.get("cost_usd") or 0.0)
+        return total_tokens, cost_usd
+
+    def _emit_role_metric(*, partial: bool) -> None:
+        role = stage_state["role"]
+        if role is None:
+            return
+        tokens, cost = _collect_usage_since_last()
+        stage_state["role_tokens"] += tokens
+        stage_state["role_cost"] += cost
         started = stage_state["start_ts"]
         latency_s = max(0.0, time.monotonic() - started) if started else 0.0
         provider_id = coordinator.routing.get(_ROLE_ROUTING_KEY[role])
-        emit_ui({
+        payload = {
             "type": "metric", "stage": _ROLE_LEGACY_STAGE[role], "provider": provider_id,
-            "model": provider_id, "latency_s": latency_s, "tokens": total_tokens, "cost_usd": cost_usd,
-        })
+            "model": provider_id, "latency_s": latency_s,
+            # ACP/hesap rotasında hiç usage.recorded olmayabilir -- bu
+            # durumda arayüz "—" göstersin diye None (0 DEĞİL) gönderilir.
+            "tokens": stage_state["role_tokens"] if stage_state["role_has_usage"] else None,
+            "cost_usd": stage_state["role_cost"] if stage_state["role_has_usage"] else None,
+        }
+        if partial:
+            payload["partial"] = True
+        emit_ui(payload)
+
+    def flush_role_metrics():
+        _emit_role_metric(partial=False)
+
+    def on_metrics_tick():
+        if ended["flag"]:
+            metrics_timer.stop()
+            return
+        _emit_role_metric(partial=True)
+
+    metrics_timer.timeout.connect(on_metrics_tick)
 
     def enter_role_stage(role: str, legacy_stage: str):
         flush_role_metrics()
         stage_state["role"] = role
         stage_state["start_ts"] = time.monotonic()
+        stage_state["role_tokens"] = 0
+        stage_state["role_cost"] = 0.0
+        stage_state["role_has_usage"] = False
         provider_id = coordinator.routing.get(_ROLE_ROUTING_KEY[role])
         emit_ui({"type": "stage", "stage": legacy_stage, "provider": provider_id})
         entry = provider_registry.get(provider_id) if provider_id else None
         if entry and entry.get("kind") == "cli":
             # ACP (hesap) yolunda ara adım/olay akmaz — bkz. run_runtime.acp.
             emit_ui({"type": "info", "text": f"{entry.get('label', provider_id)} hesap oturumu çalışıyor…"})
+        if not metrics_timer.isActive():
+            metrics_timer.start()
 
     def on_stage(stage: str, info: dict):
         if ended["flag"]:
@@ -832,10 +1022,12 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
                 })
         elif stage == "done":
             flush_role_metrics()
+            metrics_timer.stop()
 
     def on_pipeline_failed(msg: str):
         if ended["flag"]:
             return
+        metrics_timer.stop()
         settle_canonical_failure(msg)
         _dispose_workspace()
         finish("failed", msg)
@@ -843,6 +1035,9 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     def on_pipeline_finished(report):
         if ended["flag"]:
             return
+        # A4-A2: iptal (CANCELLED) "done" aşamasından GEÇMEDEN buraya
+        # ulaşabilir -- zamanlayıcı orada durdurulmamış olabilir.
+        metrics_timer.stop()
         try:
             # Öneri içeriği ("new") worktree'den BURADA okunup proposal
             # sözlüğüne gömülür — Apply daha sonra yalnızca bu sözlükten
@@ -863,13 +1058,17 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
             finish("failed", str(exc))
             return
 
-        # F2: a fresh Planner attempt's summary becomes the plan context for
-        # any SUBSEQUENT follow-up. A follow-up continuation's own report
-        # never carries a plan_report (see PipelineRunner.continue_with_
-        # feedback), so this deliberately does NOT clear plan_text then --
-        # the ORIGINAL plan stays available across multiple follow-ups.
+        # F2: a fresh Planner attempt's plan becomes the context for any
+        # SUBSEQUENT follow-up. A follow-up continuation's own report never
+        # carries a plan_report (see PipelineRunner.continue_with_feedback),
+        # so this deliberately does NOT clear plan_text then -- the ORIGINAL
+        # plan stays available across multiple follow-ups.
+        #
+        # A4-A3: the FULL plan (steps/acceptance criteria/risks), not just
+        # the one-line summary, is stored here -- see _full_plan_text's
+        # docstring for why this has to happen at the call site.
         if report.plan_report is not None:
-            _active["plan_text"] = report.plan_report.summary
+            _active["plan_text"] = _full_plan_text(report.plan_report)
 
         try:
             still_waiting = coordinator.get_run().status == RunStatus.WAITING_USER
@@ -991,6 +1190,8 @@ def _follow_up(params, ctx):
         payload = {"runId": run_id, "status": status, "engine": "pipeline"}
         if error:
             payload["error"] = error
+            if status == "failed":
+                payload.update(_error_details(coordinator, error))
         bridge.emit_event("run.finished", payload)
 
     activity_after_seq = current.last_event_seq

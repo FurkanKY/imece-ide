@@ -21,9 +21,16 @@ function stageStatus(info: StageInfo): { label: string; tone: "neutral" | "accen
   return { label: "Sırada", tone: "neutral" };
 }
 
-function fmtCost(v?: number) {
-  if (v === undefined) return "";
+function fmtCost(v?: number | null) {
+  if (v == null) return "—";
   return v < 0.001 ? `$${v.toFixed(5)}` : `$${v.toFixed(4)}`;
+}
+
+// A4-A2: ACP/hesap rotasında hiç usage.recorded verisi olmayabilir -- bu
+// durumda backend `tokens: null` gönderir (bkz. webhost/api/run.py
+// _emit_role_metric); "0 tok" ile KARIŞTIRILMASIN diye "—" gösterilir.
+function fmtTokens(v?: number | null) {
+  return v == null ? "—" : `${v}tok`;
 }
 
 function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
@@ -58,7 +65,7 @@ function StageCard({ stage, info }: { stage: string; info: StageInfo }) {
         <Badge tone={status.tone} className="shrink-0">{status.label}</Badge>
         {info.state === "done" && info.latency_s !== undefined && (
           <span className="shrink-0 text-faint" style={{ fontSize: "var(--t-caption)" }}>
-            {info.latency_s.toFixed(1)}sn · {info.tokens}tok · {fmtCost(info.cost_usd)}
+            {info.latency_s.toFixed(1)}sn · {fmtTokens(info.tokens)} · {fmtCost(info.cost_usd)}
           </span>
         )}
         {running && <StatusDot tone="accent" pulse size={6} className="text-accent" />}

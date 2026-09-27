@@ -22,8 +22,14 @@ export interface StageInfo {
   output: string;
   model?: string;
   latency_s?: number;
-  tokens?: number;
-  cost_usd?: number;
+  /** A4-A2: null -- rol için hiç kullanım (usage) verisi YOK (ör. ACP/hesap
+      rotası) -- arayüz bunu "—" ile gösterir, "0" ile KARIŞTIRMAZ.
+      undefined -- rol hiç çalışmadı/metrik gelmedi. */
+  tokens?: number | null;
+  cost_usd?: number | null;
+  /** A4-A2: rol "running" olduğu andaki Date.now() -- canlı geçen süre
+      sayacı (Pipeline.tsx) bunu tikleyerek gösterir. */
+  startedAt?: number;
 }
 
 export interface FlowItem {
@@ -60,7 +66,11 @@ export type RunStage =
   /** Koşu tamamlandı ama Worker hiçbir değişiklik üretmedi (pipeline
       "no_changes" veya legacy motorda boş öneri) -- "draft" (hiç başlamamış)
       ile karıştırılmaması için ayrı bir terminal durum. */
-  | "noChanges";
+  | "noChanges"
+  /** A4-A4: kullanıcı koşuyu durdurdu (run.cancel / F7 gerçek iptal) --
+      "draft" (hiç başlamamış) ve "error" (başarısızlık) ile
+      KARIŞTIRILMAMASI için ayrı bir terminal durum. */
+  | "cancelled";
 /** F2 (takip isteği): bir koşunun GERÇEKTE hangi motorla yürütüldüğü —
     run.finished'ın `engine` alanından gelir; henüz bilinmiyorsa null.
     Composer, takip isteği modunu yalnızca "pipeline" iken açar. */
@@ -92,7 +102,15 @@ interface RunState {
   verdict: string | null;
   verdictNote: string;
   totals: { latency_s: number; tokens: number; cost_usd: number } | null;
+  /** Ham hata metni (kanonik `error_code`'dan bağımsız) -- terminal hata
+      kartındaki "Ayrıntılar" açılır bölümünde gösterilir (bkz. AiPanel). */
   error: string | null;
+  /** A5 (hata UX): backend'in TEK Türkçe eşleme noktasından (bkz.
+      webhost/api/run.py _ERROR_MESSAGES/_error_details) gelen kısa başlık +
+      açıklama -- yoksa (ör. eski bir run.finished) AiPanel kendi genel
+      DECISION_META metnine düşer. */
+  errorTitle: string | null;
+  errorDescription: string | null;
   checkpointId: string | null;
   lastRestoredCheckpointId: string | null;
   checkpointBusy: boolean;
@@ -144,6 +162,8 @@ export const useRun = create<RunState>((set, get) => ({
   verdictNote: "",
   totals: null,
   error: null,
+  errorTitle: null,
+  errorDescription: null,
   checkpointId: null,
   lastRestoredCheckpointId: null,
   checkpointBusy: false,
@@ -206,6 +226,8 @@ export const useRun = create<RunState>((set, get) => ({
       verdictNote: "",
       totals: null,
       error: null,
+      errorTitle: null,
+      errorDescription: null,
       checkpointId: null,
       engine: null, // F2: bilinmiyor -- run.finished gelince belirlenir
     });
@@ -368,7 +390,7 @@ export const useRun = create<RunState>((set, get) => ({
     installed = true;
 
     bridge.on("run.event", ({ ev }) => consume(ev, set, get));
-    bridge.on("run.finished", ({ status, error, engine }) => {
+    bridge.on("run.finished", ({ status, error, errorTitle, errorDescription, engine }) => {
       // F2: `engine`, bu koşunun GERÇEKTE hangi motorla yürütüldüğünü
       // taşır -- bilinmiyorsa (eski/eksik bir olay) önceki değer korunur.
       if (status === "failed") {
@@ -376,6 +398,11 @@ export const useRun = create<RunState>((set, get) => ({
           status: "failed",
           runStage: "error",
           error: error ?? null,
+          // A5 (hata UX): backend'in TEK Türkçe eşleme noktasından gelen
+          // kısa başlık/açıklama -- AiPanel'in terminal hata kartı bunu
+          // gösterir; yoksa AiPanel kendi genel metnine düşer.
+          errorTitle: errorTitle ?? null,
+          errorDescription: errorDescription ?? null,
           stages: failRunning(s.stages),
           flow: [...s.flow, { id: flowId++, kind: "error", text: `Hata: ${error ?? "bilinmiyor"}` }],
           engine: engine ?? s.engine,
@@ -383,7 +410,9 @@ export const useRun = create<RunState>((set, get) => ({
       } else if (status === "cancelled") {
         set((s) => ({
           status: "cancelled",
-          runStage: "draft",
+          // A4-A4: "draft" (hiç başlamamış) DEĞİL, ayrı bir terminal durum --
+          // kendi kartı için bkz. AiPanel STAGE_META/DECISION_META.cancelled.
+          runStage: "cancelled",
           stages: failRunning(s.stages),
           flow: [...s.flow, { id: flowId++, kind: "info", text: "Koşu durduruldu." }],
           engine: engine ?? s.engine,
@@ -422,7 +451,14 @@ function consume(
       stages: role
         ? {
             ...markPrevDone(s.stages),
-            [role]: { ...s.stages[role], state: "running", provider },
+            // A4-A2: `startedAt`, Pipeline.tsx'in canlı geçen-süre sayacının
+            // taban noktasıdır -- token/maliyet gibi kalıntı değerler de
+            // burada sıfırlanır (yeni rol, önceki rolün metriklerini
+            // MİRAS ALMAZ).
+            [role]: {
+              ...s.stages[role], state: "running", provider,
+              startedAt: Date.now(), tokens: undefined, cost_usd: undefined, latency_s: undefined,
+            },
           }
         : s.stages,
       flow: [...s.flow, { id: flowId++, kind: "stage", text: provider, stage }],
@@ -450,16 +486,23 @@ function consume(
   } else if (type === "metric") {
     const role = STAGE_ROLE[(ev.stage as string) ?? ""];
     if (role) {
+      // A4-A2 (rol başına canlı sayaç): `partial` -- backend'in rol hâlâ
+      // ÇALIŞIRKEN gönderdiği ara tik (bkz. webhost/api/run.py
+      // _emit_role_metric) -- tokens/cost_usd/latency_s güncellenir ama
+      // `state` DOKUNULMAZ (rol "running" kalır); yalnızca son (partial
+      // OLMAYAN) metric rolü "done"ya taşır. tokens/cost_usd `null` ise
+      // (ör. ACP/hesap rotasında hiç usage yoksa) Pipeline/Chat "—" gösterir.
+      const partial = !!ev.partial;
       set((s) => ({
         stages: {
           ...s.stages,
           [role]: {
             ...s.stages[role],
-            state: "done",
-            model: ev.model as string,
+            state: partial ? s.stages[role].state : "done",
+            model: (ev.model as string) ?? s.stages[role].model,
             latency_s: ev.latency_s as number,
-            tokens: ev.tokens as number,
-            cost_usd: ev.cost_usd as number,
+            tokens: ev.tokens as number | null,
+            cost_usd: ev.cost_usd as number | null,
           },
         },
       }));
