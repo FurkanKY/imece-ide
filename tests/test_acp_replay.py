@@ -207,7 +207,7 @@ def test_worker_replay_allows_in_worktree_edit_end_to_end(tmp_path):
             AcpWorkerLaunchProfile(
                 command=sys.executable,
                 args=(_REPLAY_AGENT,),
-                env={"ACP_REPLAY_TRANSCRIPT": _TRANSCRIPT},
+                env=fixture_child_env({"ACP_REPLAY_TRANSCRIPT": _TRANSCRIPT}),
             ),
             AcpClientRuntime(),
             limits=AcpClientLimits(prompt_timeout_ms=10_000),

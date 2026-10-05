@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -12,6 +13,14 @@ from run_runtime.service import RunRuntime
 from run_runtime.store import RunStore
 from verification_runtime.models import VerificationCheck, VerificationPlan
 from workspace.worktree import GitWorktreeWorkspace
+
+
+def _supports_safe_inventory():
+    return (
+        os.scandir in os.supports_fd
+        and os.open in os.supports_dir_fd
+        and hasattr(os, "O_NOFOLLOW")
+    )
 
 
 class WritingWorker:
@@ -65,7 +74,13 @@ def test_changed_task_waits_for_user_with_verification_pass_or_fail(tmp_path):
                               AgentExecutionRequest("write answer", "provider", workspace,
                                                     verification_plan=plan), ports=ports)
         assert result.status is AgentExecutionStatus.NEEDS_USER
-        assert result.verification_outcome == expected
+        assert result.verification_report.status.value == expected
+        expected_outcome = (
+            "pass" if expected == "pass" and _supports_safe_inventory()
+            else "invalidated" if expected == "pass"
+            else expected
+        )
+        assert result.verification_outcome == expected_outcome
         assert result.changed_paths == ("answer.txt",)
         assert runtime.get_run(run.run_id).status.value == "waiting_user"
         workspace.dispose()
@@ -136,6 +151,7 @@ def test_verification_mutating_unchanged_input_invalidates_pass(tmp_path):
     assert result.verification_report.status.value == "pass"
     assert result.verification_outcome == "invalidated"
     proposal = next(e for e in runtime.events(run.run_id).events if e.type == RunEventType.PROPOSAL_READY)
-    assert proposal.payload["verification"]["changed_content"] is True
+    assert proposal.payload["verification"]["changed_content"] is _supports_safe_inventory()
     assert "base.txt" in proposal.payload["changed_paths"]
+    assert (workspace.root / "base.txt").read_text(encoding="utf-8") == "changed\n"
     workspace.dispose()

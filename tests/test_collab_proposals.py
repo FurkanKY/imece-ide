@@ -122,7 +122,7 @@ def _blob_sha(data: bytes) -> str:
 
 
 def _clone(origin, target):
-    _git(["clone", "-q", str(origin), str(target)], origin)
+    _git(["-c", "core.autocrlf=false", "clone", "-q", str(origin), str(target)], origin)
     _git(["config", "user.name", "Test"], target)
     _git(["config", "user.email", "test@example.com"], target)
     return target

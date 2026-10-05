@@ -181,8 +181,17 @@ def test_run_finished_error_from_failing_native_backend_carries_no_secret(
 _FD_PROC = "/proc/self/fd"
 
 
-def _open_fd_count():
-    return len(os.listdir(_FD_PROC))
+def _owned_fd_count(root):
+    """Count only open descriptors resolving inside the inventoried tree."""
+    count = 0
+    for name in os.listdir(_FD_PROC):
+        try:
+            target = os.readlink(os.path.join(_FD_PROC, name))
+        except OSError:
+            continue
+        if target.startswith(os.fspath(root) + os.sep) or target == os.fspath(root):
+            count += 1
+    return count
 
 
 @pytest.mark.skipif(
@@ -208,12 +217,12 @@ def test_repeated_workspace_inventory_keeps_owned_fd_count_stable(tmp_path):
 
     directories = 4  # root, a, a/b, a/b/c
     gc.collect()
-    before = _open_fd_count()
+    before = _owned_fd_count(root)
     started = time.monotonic()
     for _ in range(10):
         last_paths, last_complete = _workspace_inventory(workspace)
     elapsed = time.monotonic() - started
-    after = _open_fd_count()
+    after = _owned_fd_count(root)
 
     assert set(last_paths) == {"a/f.txt", "a/b/f.txt", "a/b/c/f.txt"}
     assert last_complete is False

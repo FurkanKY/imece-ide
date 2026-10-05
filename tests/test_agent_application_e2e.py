@@ -45,8 +45,20 @@ def isolated_state(tmp_path, monkeypatch, git_repo):
     state.set_run_runtime(RunRuntime(RunStore(tmp_path / "runs.sqlite3")))
     yield
     worker = run_api._active.get("worker")
-    if worker is not None and worker.isRunning():
-        worker.wait(5000)
+    if worker is not None:
+        if worker.isRunning():
+            cancel_event = run_api._active.get("cancel_event")
+            if cancel_event is not None:
+                cancel_event.set()
+            assert worker.wait(5000), "agent worker did not stop after cooperative cancellation"
+        assert not worker.isRunning(), "agent worker must be quiescent before fixture cleanup"
+    qapp = QCoreApplication.instance()
+    if qapp is not None:
+        qapp.processEvents()
+    streamer = run_api._active.get("activity_streamer")
+    run_api._stop_activity_streamer()
+    if streamer is not None:
+        assert streamer.wait(2000), "activity streamer did not stop before fixture cleanup"
     run_api._dispose_workspace()
     run_api._active.update({"worker": None, "coordinator": None, "run_id": None, "proposals": [],
                             "engine": "legacy", "workspace": None, "cancel_event": None})

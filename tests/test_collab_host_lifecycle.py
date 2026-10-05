@@ -302,7 +302,8 @@ def test_activate_starts_the_real_consumer_over_the_approved_baseline(env):
 
     # Exactly one private namespace, one 0600 cursor file (schema 1) and one
     # lease file; the credential never reaches the private namespace.
-    assert env.cursor_root.stat().st_mode & 0o777 == 0o700
+    if os.name == "posix":
+        assert env.cursor_root.stat().st_mode & 0o777 == 0o700
     cursor = _cursor_file(env)
     _lock_file(env)
     payload = json.loads(cursor.read_text(encoding="utf-8"))

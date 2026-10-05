@@ -11,6 +11,7 @@ import pytest
 from acp_runtime.errors import AcpProtocolError
 from acp_runtime.client import AcpClientRuntime
 from acp_runtime.models import AcpClientLimits, AcpRunResult
+from acp_test_support import fixture_child_env
 from change_runtime.models import WorkspaceChangeSet
 from executor_runtime.acp_worker import AcpWorkerAttemptAdapter, AcpWorkerLaunchProfile
 from fix_runtime.models import FixLoopRequest, FixLoopStatus, FixTrigger, FixTriggerKind, FixWorkerRequest
@@ -256,7 +257,7 @@ def _real_adapter(tmp_path, source, mode):
     adapter = AcpWorkerAttemptAdapter(
         runtime, run.run_id,
         AcpWorkerLaunchProfile(
-            command=sys.executable, args=(_FAKE_AGENT, mode), env={},
+            command=sys.executable, args=(_FAKE_AGENT, mode), env=fixture_child_env(),
         ),
         AcpClientRuntime(),
         limits=AcpClientLimits(prompt_timeout_ms=10_000),

@@ -59,7 +59,7 @@ def test_baseline_rerun_sees_pre_change_content_not_current_worktree(tmp_path):
 
     assert result is not None
     assert result.exit_code == 0
-    assert result.stdout == "baseline-content\n"
+    assert result.stdout.splitlines() == ["baseline-content"]
     # the run's own worktree must be untouched by the baseline rerun.
     assert (root / "value.txt").read_text() == "changed-content\n"
 

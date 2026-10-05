@@ -66,14 +66,15 @@ def _init_repo(root):
     _git(["init", "-q"], root)
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
+    _git(["config", "core.autocrlf", "false"], root)
     return root
 
 
 @pytest.fixture
 def repo(tmp_path):
     root = _init_repo(tmp_path / "repo")
-    (root / "foo.py").write_text("A\n", encoding="utf-8")
-    (root / ".gitignore").write_text("ignored.txt\n.env\n.imece/\n", encoding="utf-8")
+    (root / "foo.py").write_text("A\n", encoding="utf-8", newline="\n")
+    (root / ".gitignore").write_text("ignored.txt\n.env\n.imece/\n", encoding="utf-8", newline="\n")
     _git(["add", "-A"], root)
     _git(["commit", "-q", "-m", "initial"], root)
     return root
@@ -247,7 +248,7 @@ def test_clean_repo_shadow_matches_head_and_source_untouched(repo, tmp_path):
 
 
 def test_dirty_tracked_file_shadow_sees_working_copy(repo, tmp_path):
-    (repo / "foo.py").write_text("B\n", encoding="utf-8")
+    (repo / "foo.py").write_text("B\n", encoding="utf-8", newline="\n")
     ws = GitWorktreeWorkspace.create(
         source_root=repo, run_id="run-dirty", base_dir=tmp_path / "workspaces"
     )
@@ -258,7 +259,7 @@ def test_dirty_tracked_file_shadow_sees_working_copy(repo, tmp_path):
 
 
 def test_staged_and_unstaged_resolve_to_working_content(repo, tmp_path):
-    (repo / "foo.py").write_text("B\n", encoding="utf-8")
+    (repo / "foo.py").write_text("B\n", encoding="utf-8", newline="\n")
     _git(["add", "foo.py"], repo)
     (repo / "foo.py").write_text("B2\n", encoding="utf-8")
     ws = GitWorktreeWorkspace.create(
@@ -305,7 +306,7 @@ def test_synthetic_snapshot_baseline_reflects_pre_agent_state(repo, tmp_path):
     olduğunu (A->C DEĞİL) doğrular.
     """
     head_a = _head(repo)
-    (repo / "foo.py").write_text("B\n", encoding="utf-8")
+    (repo / "foo.py").write_text("B\n", encoding="utf-8", newline="\n")
     ws = GitWorktreeWorkspace.create(
         source_root=repo, run_id="run-baseline", base_dir=tmp_path / "workspaces"
     )
