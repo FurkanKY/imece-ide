@@ -66,6 +66,18 @@ POSIX_ONLY_FILES = (":(top)tracked.txt", "ab:c.txt") if os.name != "nt" else ()
 EXEC_FILE = "run.cmd" if os.name == "nt" else "run.sh"
 EXEC_BODY = "@echo off\necho hi\n" if os.name == "nt" else "#!/bin/sh\necho hi\n"
 EXEC_BODY_BYTES = EXEC_BODY.encode("utf-8")
+# On Windows the executable bit is SYNTHESIZED from the PATHEXT name, so the
+# baseline commit is executable there too and chmod(0o755) cannot produce a
+# distinct logical Git mode: the same path is unchanged on every platform.
+# A mode-only change is therefore a POSIX-only scenario; the add/modify/delete
+# and byte captures of the same proposal run everywhere.
+MODE_ONLY_PATH = EXEC_FILE if os.name != "nt" else None
+# The cumulative selection of _mutate_frontend, minus unchanged selections:
+# EXEC_FILE only counts where a mode-only change can exist at all.
+EXPECTED_CAPTURE_PATHS = ["app.py", "gone.txt", "new.py", "nl.txt"] + (
+    [EXEC_FILE] if MODE_ONLY_PATH is not None else []
+)
+EXPECTED_CAPTURE_COUNT = len(EXPECTED_CAPTURE_PATHS)
 
 FE_SCOPES = ["app.py", "gone.txt", "new.py", EXEC_FILE, "nl.txt", "lib.py", *POSIX_ONLY_FILES]
 BE_SCOPES = ["api.py", "db.py"]
@@ -206,15 +218,21 @@ def _mutate_frontend(world):
     if (frontend / "gone.txt").exists():
         (frontend / "gone.txt").unlink()
     _write(frontend, "new.py", "N\n")
-    (frontend / EXEC_FILE).chmod(0o755)
+    if MODE_ONLY_PATH is not None:
+        (frontend / MODE_ONLY_PATH).chmod(0o755)
     _write(frontend, "nl.txt", "x")
     return frontend
 
 
 def _capture_frontend(world, proposal_id="prop-fe-1", paths=None, expected=None):
+    # The mode-only path is selected only where it can actually change, so the
+    # capture list is the same shape on every platform.
+    selection = ["app.py", "gone.txt", "new.py", "nl.txt", "lib.py"]
+    if MODE_ONLY_PATH is not None:
+        selection.insert(3, MODE_ONLY_PATH)
     return capture_proposal(
         world.store_a, world.frontend, proposal_id, "t-fe",
-        paths if paths is not None else ["app.py", "gone.txt", "new.py", EXEC_FILE, "nl.txt", "lib.py"],
+        paths if paths is not None else selection,
         expected if expected is not None else world.rev3,
     )
 
@@ -261,7 +279,9 @@ def test_capture_add_modify_delete_and_mode_only(tmp_path):
     _mutate_frontend(w)
     proposal = _capture_frontend(w)
 
-    assert [f.path for f in proposal.files] == ["app.py", "gone.txt", "new.py", "nl.txt", EXEC_FILE]
+    # The mode-only path is in the selection only where it can change, so the
+    # captured list is the same shape on every platform.
+    assert [f.path for f in proposal.files] == EXPECTED_CAPTURE_PATHS
     assert proposal.out_of_scope_paths == ()
     assert proposal.proposal_id == "prop-fe-1" and proposal.task_id == "t-fe"
     assert proposal.owner == "alice" and proposal.session_id == "demo-1"
@@ -270,7 +290,8 @@ def test_capture_add_modify_delete_and_mode_only(tmp_path):
     assert proposal.context_revision == w.rev2
     assert proposal.context_hash == build_context(**CTX).content_hash
 
-    (app, gone, new, nl, run) = proposal.files
+    captured = {f.path: f for f in proposal.files}
+    app, gone, new, nl = (captured[p] for p in ("app.py", "gone.txt", "new.py", "nl.txt"))
     assert (app.before_oid, app.before_mode) == (_blob_sha(b"A\n"), "100644")
     assert app.after_bytes == b"A2\n" and app.after_mode == "100644"
     # deletion: before present, after both None
@@ -280,9 +301,11 @@ def test_capture_add_modify_delete_and_mode_only(tmp_path):
     assert new.after_bytes == b"N\n" and new.after_mode == "100644"
     # missing final newline is captured accurately
     assert nl.after_bytes == b"x" and nl.before_oid == _blob_sha(b"x\n")
-    # mode-only change: identical content, both modes recorded
-    assert run.before_mode == "100644" and run.after_mode == "100755"
-    assert run.after_bytes == EXEC_BODY_BYTES
+    if MODE_ONLY_PATH is not None:
+        # mode-only change (POSIX-only): identical content, both modes recorded
+        run = captured[MODE_ONLY_PATH]
+        assert run.before_mode == "100644" and run.after_mode == "100755"
+        assert run.after_bytes == EXEC_BODY_BYTES
     # unchanged selection omitted; capture is read-only for the project
     assert (w.frontend / "app.py").read_text(encoding="utf-8") == "A2\n"
 
@@ -377,7 +400,9 @@ def test_publish_and_read_across_clients_roundtrip(tmp_path):
     receipts = list_proposals(w.store_b)
     assert [r.proposal_id for r in receipts] == ["prop-fe-1"]
     receipt = receipts[0]
-    assert (receipt.task_id, receipt.owner, receipt.file_count) == ("t-fe", "alice", 5)
+    assert (receipt.task_id, receipt.owner, receipt.file_count) == (
+        "t-fe", "alice", EXPECTED_CAPTURE_COUNT
+    )
     assert receipt.session_id == "demo-1" and receipt.base_commit == w.base
     assert receipt.context_hash == proposal.context_hash
     assert receipt.commit == root and receipt.context_revision == w.rev2

@@ -1,5 +1,6 @@
 """Focused real-host bridge coverage for explicit single-provider runs."""
 import json
+import os
 import sys
 import time
 
@@ -109,6 +110,16 @@ def _pump_until(app, predicate, timeout=15):
     return False
 
 
+def _supports_safe_inventory():
+    """No-follow file-identity inspection is POSIX-only; without it the run's
+    own check may pass while the delivered evidence is correctly invalidated."""
+    return (
+        os.scandir in os.supports_fd
+        and os.open in os.supports_dir_fd
+        and hasattr(os, "O_NOFOLLOW")
+    )
+
+
 def test_provider_id_runs_one_agent_and_returns_evidence_proposal(monkeypatch, bridge, qapp, git_repo):
     events = []
     bridge.event.connect(lambda raw: events.append(json.loads(raw)))
@@ -212,8 +223,26 @@ def test_provider_bridge_uses_real_native_worker_with_scripted_backend(monkeypat
     assert any(e.get("payload", {}).get("ev", {}).get("type") == "proposal" for e in events)
     evidence = next(e["payload"]["ev"] for e in events
                     if e.get("payload", {}).get("ev", {}).get("type") == "evidence")
-    assert evidence["verification"]["outcome"] == "pass"
     canonical = state.get_run_runtime().events(run_id).events
+    completed_verifications = [event for event in canonical
+                               if event.type == RunEventType.VERIFICATION_COMPLETED]
+    completed_checks = [event for event in canonical
+                        if event.type == RunEventType.VERIFICATION_CHECK_COMPLETED]
+    assert len(completed_verifications) == 1
+    assert completed_verifications[0].payload["status"] == "pass"
+    assert [(event.payload["check_id"], event.payload["status"])
+            for event in completed_checks] == [("native-file", "pass")]
+    # The REAL verification report passes on every platform; the delivered
+    # evidence can only keep that "pass" where the no-follow file-identity
+    # inspection that backs it is supported.
+    verification = evidence["verification"]
+    assert verification["outcome"] == (
+        "pass" if verification["fingerprint_complete"] else "invalidated"
+    )
+    if _supports_safe_inventory():
+        assert verification["fingerprint_complete"] is True
+    else:
+        assert verification["fingerprint_complete"] is False
     assert any(event.type == RunEventType.EXECUTION_COMPLETED for event in canonical)
     assert run_api._active["coordinator"].get_run().status.value == "waiting_user"
 

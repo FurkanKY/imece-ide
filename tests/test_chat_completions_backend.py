@@ -304,7 +304,7 @@ class _FakeAuthenticationError(Exception):
     """Stand-in for openai.AuthenticationError: same propagation contract, no httpx dependency."""
 
 
-def test_sdk_errors_propagate_and_are_wrapped_by_agent_session_like_responses_backend():
+def test_sdk_errors_propagate_and_are_wrapped_by_agent_session_like_responses_backend(tmp_path):
     # The Responses backend does not catch/re-map SDK exceptions itself either — it
     # lets them propagate out of respond(), and AgentSession._respond is what wraps
     # *any* exception into AgentBackendError. This backend follows the same design:
@@ -318,7 +318,7 @@ def test_sdk_errors_propagate_and_are_wrapped_by_agent_session_like_responses_ba
         backend=backend,
         registry=registry,
         policy=policy,
-        context=ToolExecutionContext(LocalWorkspace(Path("/tmp"))),
+        context=ToolExecutionContext(LocalWorkspace(tmp_path)),
     )
     with pytest.raises(AgentBackendError):
         session.start("do something")

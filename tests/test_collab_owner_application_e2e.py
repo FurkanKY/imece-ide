@@ -304,6 +304,19 @@ def _run_check_payloads(w, run_id, kind):
             if event.type == kind]
 
 
+def _pre_fingerprint_incomplete(verification):
+    """Windows has no O_NOFOLLOW file-identity inspection, so the BEFORE
+    fingerprint of a candidate is incomplete and NO check may run: the
+    honest shape is an error with no checks, never a pass (the same contract
+    tests/test_collab_candidates.py relies on)."""
+    return (
+        os.name == "nt"
+        and verification.get("status") == "error"
+        and verification.get("fingerprint_complete") is False
+        and verification.get("checks") == []
+    )
+
+
 # -------------------------------------------------------------------- fixture -
 
 
@@ -443,9 +456,11 @@ def test_owner_create_start_local_preview_run_and_delivery_never_touch_the_sourc
     assert hub.parent.parent == w.private.resolve()
     assert w.source.resolve() != w.private.resolve()
     assert w.source.resolve() not in hub.parents and hub != w.source.resolve()
-    assert stat.S_IMODE(w.private.stat().st_mode) == 0o700
-    assert stat.S_IMODE(hub.parent.stat().st_mode) == 0o700
-    assert hub.stat().st_uid == os.getuid() and store_path.stat().st_uid == os.getuid()
+    if os.name == "posix":
+        # POSIX-only permission/ownership claims: Windows has no 0700 and no uid.
+        assert stat.S_IMODE(w.private.stat().st_mode) == 0o700
+        assert stat.S_IMODE(hub.parent.stat().st_mode) == 0o700
+        assert hub.stat().st_uid == os.getuid() and store_path.stat().st_uid == os.getuid()
     assert _git(["rev-parse", "--is-bare-repository"], hub) == "true"
 
     store = GitStore(store=store_path, remote=str(hub))
@@ -604,15 +619,22 @@ def test_owner_create_start_local_preview_run_and_delivery_never_touch_the_sourc
         "hubPath": created["hubPath"], "proposalIds": [published["proposalId"]],
         "outputPath": str(out / "verified"), "verify": True}, call_id=113)
     receipt = verified["candidate"]
+    verification = receipt["verification"]
     assert verified["conflicts"] == [] and receipt["base_commit"] == w.head
-    assert receipt["verification"]["status"] == "pass"
-    assert receipt["verification"]["plan_id"] is not None
-    assert receipt["verification"]["changed_content"] is False
-    assert receipt["verification"]["fingerprint_complete"] is True
-    assert [(c["check_id"], c["status"], c["exit_code"], c["timed_out"])
-            for c in receipt["verification"]["checks"]] == [("python_pytest", "pass", 0, False)]
-    # The REAL subprocess left its own trace; the fake runner never could.
-    assert (out / "verified" / ".pytest_cache").exists()
+    assert verification["plan_id"] is not None
+    assert verification["changed_content"] is False
+    if _pre_fingerprint_incomplete(verification):
+        # BEFORE evidence is incomplete: no check could run, so no process
+        # effect may be claimed either. Everything else below still holds.
+        assert not (out / "verified" / ".pytest_cache").exists()
+    else:
+        assert verification["status"] == "pass"
+        assert verification["fingerprint_complete"] is True
+        assert [(c["check_id"], c["status"], c["exit_code"], c["timed_out"])
+                for c in verification["checks"]] == [("python_pytest", "pass", 0, False)]
+        # The REAL subprocess left its own trace; the fake runner never could.
+        assert (out / "verified" / ".pytest_cache").exists()
+    # The candidate CONTENT is materialized on every platform.
     assert (out / "verified" / "a.txt").read_text(encoding="utf-8") == FIXED_A
     assert (out / "verified" / "tests" / "test_a.py").read_text(encoding="utf-8") == CONTRACT
     # ...and that same real check is NOT vacuous: on an untouched copy of the

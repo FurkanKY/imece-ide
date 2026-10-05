@@ -452,6 +452,7 @@ class RevisionConsumer:
         connection.response_class = _BoundedResponse
         response: _BoundedResponse | None = None
         sock: socket.socket | None = None
+        interrupt_sock: socket.socket | None = None
         terminal_status: str | None = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -471,6 +472,14 @@ class RevisionConsumer:
                 headers={"Authorization": "Bearer " + self._credential,
                          "Content-Type": "application/json", "Connection": "close"},
             )
+            # HTTPResponse may close the HTTPConnection's socket object while
+            # its makefile reader is still active. Keep a distinct live handle
+            # for lifecycle shutdown so Windows can interrupt that reader.
+            interrupt_sock = sock.dup()
+            with self._condition:
+                if self._stop.is_set():
+                    return "retry"
+                self._socket = interrupt_sock
             response = connection.getresponse()
             headers = self._response_headers(response)
             if response.status in (401, 403):
@@ -520,8 +529,12 @@ class RevisionConsumer:
                         if sock is not None:
                             sock.close()
                     finally:
-                        with self._condition:
-                            self._socket = None
+                        try:
+                            if interrupt_sock is not None:
+                                interrupt_sock.close()
+                        finally:
+                            with self._condition:
+                                self._socket = None
 
     def _accept(self, event: ReplayEvent) -> None:
         with self._condition:

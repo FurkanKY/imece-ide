@@ -301,18 +301,19 @@ def test_activate_starts_the_real_consumer_over_the_approved_baseline(env):
     assert status["code"] is None
 
     # Exactly one private namespace, one 0600 cursor file (schema 1) and one
-    # lease file; the credential never reaches the private namespace.
-    if os.name == "posix":
-        assert env.cursor_root.stat().st_mode & 0o777 == 0o700
+    # lease file; the credential never reaches the private namespace. The mode
+    # bits are a POSIX-only claim: Windows has no 0600/0700.
     cursor = _cursor_file(env)
     _lock_file(env)
+    if os.name == "posix":
+        assert env.cursor_root.stat().st_mode & 0o777 == 0o700
+        assert cursor.stat().st_mode & 0o777 == 0o600
     payload = json.loads(cursor.read_text(encoding="utf-8"))
     assert set(payload) == CURSOR_KEYS
     assert payload["schema"] == 1
     assert payload["consumed_revision"] == preview["revision"]
     assert (payload["session_id"], payload["member_id"]) == (SESSION_ID, MEMBER)
     assert (payload["base_commit"], payload["target_version"]) == (env.head, TARGET_VERSION)
-    assert cursor.stat().st_mode & 0o777 == 0o600
     assert env.credential.encode("ascii") not in cursor.read_bytes()
     for surface in (session.status(), session.snapshot(), session, repr(env.cursor_root)):
         assert env.credential not in repr(surface)

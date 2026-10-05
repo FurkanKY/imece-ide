@@ -164,8 +164,15 @@ def _make_runtime(
 AcpClientRuntime = _make_runtime
 
 
+# The connect seam is faked, so argv[0] never has to exist: it only has to be
+# absolute. sys.executable is absolute on every platform, which keeps these
+# unit tests off the POSIX-only "/usr/bin/..." shape (a rooted path that the
+# Windows absolute-path validator rejects).
+_FAKE_AGENT = sys.executable
+
+
 def _valid_launch():
-    return AcpLaunchSpec(argv=("/usr/bin/fake-agent",))
+    return AcpLaunchSpec(argv=(_FAKE_AGENT,))
 
 
 def _valid_request(tmp_path):
@@ -416,9 +423,9 @@ def test_argv_and_env_passed_to_connect_exactly(tmp_path):
     runtime = AcpClientRuntime(
         _connect=_make_connect(lambda c: _FakeConnection(c, prompt_behavior=_echo_prompt), spawn_calls=spawn_calls)
     )
-    launch = AcpLaunchSpec(argv=("/usr/bin/fake-agent", "--flag"), env={"K": "v"})
+    launch = AcpLaunchSpec(argv=(_FAKE_AGENT, "--flag"), env={"K": "v"})
     asyncio.run(runtime.run(launch, _valid_request(tmp_path)))
-    assert spawn_calls[0]["argv"] == ("/usr/bin/fake-agent", "--flag")
+    assert spawn_calls[0]["argv"] == (_FAKE_AGENT, "--flag")
     assert dict(spawn_calls[0]["env"]) == {"K": "v"}
 
 

@@ -34,6 +34,7 @@ from pipeline_runtime.runner import PipelineRunner
 from process_runtime.models import ProcessResult
 from run_runtime import RunEventType, RunRuntime, RunStore
 from workspace.worktree import GitWorktreeWorkspace
+from acp_test_support import fixture_child_env
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not found")
 
@@ -86,7 +87,12 @@ def _process_result(exit_code=0):
 
 
 def _acp_profile(*, text: str) -> AcpWorkerLaunchProfile:
-    return AcpWorkerLaunchProfile(command=sys.executable, args=(_FAKE_AGENT, "text"), env={"ACP_FAKE_TEXT": text})
+    # AcpLaunchSpec.env is the EXACT child environment; Windows needs its
+    # minimal OS variables present or the Python child never starts.
+    return AcpWorkerLaunchProfile(
+        command=sys.executable, args=(_FAKE_AGENT, "text"),
+        env=fixture_child_env({"ACP_FAKE_TEXT": text}),
+    )
 
 
 def setup_runtime(tmp_path):

@@ -356,7 +356,7 @@ class _FakeAuthenticationError(Exception):
     """Stand-in for anthropic.AuthenticationError: same propagation contract, no network."""
 
 
-def test_sdk_errors_propagate_and_are_wrapped_by_agent_session_like_other_backends():
+def test_sdk_errors_propagate_and_are_wrapped_by_agent_session_like_other_backends(tmp_path):
     # Neither the Responses nor the Chat Completions backend catches/re-maps
     # SDK exceptions themselves — they let them propagate out of respond(),
     # and AgentSession._respond is what wraps any exception into
@@ -369,7 +369,7 @@ def test_sdk_errors_propagate_and_are_wrapped_by_agent_session_like_other_backen
         backend=backend,
         registry=registry,
         policy=policy,
-        context=ToolExecutionContext(LocalWorkspace(Path("/tmp"))),
+        context=ToolExecutionContext(LocalWorkspace(tmp_path)),
     )
     with pytest.raises(AgentBackendError):
         session.start("do something")

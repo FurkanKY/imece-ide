@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from collab_runtime import store as store_module  # noqa: E402
+from collab_runtime import consumer as consumer_module  # noqa: E402
 from collab_runtime.consumer import (  # noqa: E402
     INITIAL_BACKOFF,
     MAX_BACKOFF,
@@ -833,7 +834,8 @@ def test_the_persisted_cursor_is_private_and_carries_no_context_or_credential(
     }
     assert document["schema"] == 1 and document["member_id"] == "alice"
     assert document["session_id"] == SESSION_ID and document["base_commit"] == SHA0
-    assert stat.S_IMODE(cursor.stat().st_mode) == 0o600
+    if POSIX:
+        assert stat.S_IMODE(cursor.stat().st_mode) == 0o600
     for needle in (ALICE, BOB, OTHER, DAVE, "shared goal", "keep it small", "t-ui",
                    str(cursor), "context", "credential"):
         assert needle.encode() not in raw, needle
@@ -1144,6 +1146,121 @@ def test_close_interrupts_a_blocked_read_a_blocked_head_and_a_backoff(
             call()
     assert peer.requests and BEARER in peer.requests[0]
     _silent(caplog, capsys)
+
+
+def test_close_shuts_down_owned_socket_while_getresponse_is_blocked(
+    draft, monkeypatch
+):
+    """The socket remains directly owned while HTTPResponse reads the head.
+
+    In particular, closing HTTPResponse first can wait for its reader lock on
+    Windows. Lifecycle shutdown must reach the retained socket before the
+    worker's response/connection/socket cleanup runs.
+    """
+    entered_getresponse = threading.Event()
+    interrupted = threading.Event()
+    actions = []
+
+    class FakeSocket:
+        def __init__(self, name):
+            self.name = name
+            self.shutdown_called = False
+
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, _address):
+            pass
+
+        def shutdown(self, how):
+            assert how == socket.SHUT_RDWR
+            self.shutdown_called = True
+            actions.append(f"shutdown-{self.name}")
+            if self.name == "twin":
+                interrupted.set()
+
+        def dup(self):
+            twin = FakeSocket("twin")
+            actions.append("dup")
+            return twin
+
+        def close(self):
+            actions.append(f"close-{self.name}")
+
+    fake_socket = FakeSocket("original")
+
+    class FakeConnection:
+        def __init__(self, *_args, **_kwargs):
+            self.sock = None
+            self.response_class = None
+
+        def request(self, *_args, **_kwargs):
+            pass
+
+        def getresponse(self):
+            entered_getresponse.set()
+            # Model http.client closing its socket handle after the HTTP/1.0
+            # close response headers, while the makefile reader is still live.
+            self.sock.close()
+            assert interrupted.wait(2.0), "getresponse was not interrupted by shutdown"
+            assert self.sock is fake_socket
+            assert not fake_socket.shutdown_called
+            raise OSError("socket shut down")
+
+        def close(self):
+            actions.append("connection-close")
+
+    monkeypatch.setattr(consumer_module.socket, "socket", lambda *_a, **_k: fake_socket)
+    monkeypatch.setattr(consumer_module.http.client, "HTTPConnection", FakeConnection)
+    consumer = draft("http://127.0.0.1:1")
+    consumer.start()
+    assert entered_getresponse.wait(2.0), "worker did not enter getresponse"
+
+    assert _prompt(consumer.close, limit=2.5) < 2.5
+    assert actions.index("shutdown-twin") < actions.index("close-twin")
+    assert actions.index("close-original") < actions.index("shutdown-twin")
+    assert not fake_socket.shutdown_called
+    assert consumer.status()["state"] == "closed"
+
+
+def test_interrupt_socket_dup_failure_retries_without_exposing_error(draft, monkeypatch):
+    actions = []
+
+    class FakeSocket:
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, _address):
+            pass
+
+        def shutdown(self, _how):
+            pass
+
+        def dup(self):
+            raise OSError("sensitive socket detail")
+
+        def close(self):
+            actions.append("socket-close")
+
+    class FakeConnection:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def request(self, *_args, **_kwargs):
+            pass
+
+        def close(self):
+            actions.append("connection-close")
+
+    monkeypatch.setattr(consumer_module.socket, "socket", lambda *_a, **_k: FakeSocket())
+    monkeypatch.setattr(consumer_module.http.client, "HTTPConnection", FakeConnection)
+    consumer = draft("http://127.0.0.1:1")
+    consumer.start()
+    _wait_for(consumer, lambda status: status["state"] == "retrying", "bounded retry")
+    assert consumer.status()["code"] == "connection_retry"
+    assert "sensitive socket detail" not in repr(consumer.status())
+    assert "socket-close" in actions and "connection-close" in actions
+    _assert_prompt(consumer)
 
 
 def test_close_is_idempotent_and_serializes_concurrent_closers(draft, wire):

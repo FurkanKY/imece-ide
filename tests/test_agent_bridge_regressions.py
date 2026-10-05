@@ -474,7 +474,11 @@ def test_cancel_of_gated_worker_settles_cancelled_then_disposes_worktree(
 
     assert run_api._active["cancel_event"].is_set(), "cancel must reach the running attempt's token"
     assert worktree.is_dir(), "cancel must not dispose a workspace that is still in use"
-    assert state.get_run_runtime().get_run(run_id).status.value == "running"
+    # The canonical run may already have observed the cancellation and settled:
+    # an early CANCELLED is the same honest outcome as a still-running one. What
+    # this gate really protects is that the worktree survives the gate, i.e. it is
+    # NOT disposed while the gated attempt is still holding it.
+    assert state.get_run_runtime().get_run(run_id).status.value in {"running", "cancelled"}
 
     gate.set()
     assert _pump_until(qapp, lambda: _finished(seen) is not None)
