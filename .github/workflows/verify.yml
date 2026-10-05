@@ -46,6 +46,10 @@ jobs:
   windows-python:
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     env:
       QT_QPA_PLATFORM: offscreen
       IMECE_RUN_LIVE_API_TESTS: "0"
@@ -58,4 +62,19 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      - name: Run complete Windows suite across four deterministic file shards
+        env:
+          IMECE_TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          @'
+          import os
+          import pathlib
+          import subprocess
+          import sys
+          files = sorted(str(path) for path in pathlib.Path("tests").glob("test_*.py"))
+          shard = int(os.environ["IMECE_TEST_SHARD"])
+          selected = files[shard::4]
+          assert selected, "empty test shard"
+          print(f"Windows shard {shard + 1}/4: {len(selected)}/{len(files)} test files", flush=True)
+          raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", "-q", *selected]))
+          '@ | python -

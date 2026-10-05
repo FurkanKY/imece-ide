@@ -92,8 +92,13 @@ def test_event_envelope(bridge):
 
 # ---------------- settings domain'i ----------------
 
-def test_run_providers(bridge):
+def test_run_providers(bridge, monkeypatch):
+    import providers
     import webhost.api.run  # noqa: F401 — handler kaydı
+
+    # CI may have no installed CLI or API keys. Fix availability explicitly
+    # and cover both the single-provider recommendation and documented fallback.
+    monkeypatch.setattr(providers, "is_ready", lambda entry: entry["id"] == "deepseek")
     r = rpc(bridge, "run.providers")
     assert r["ok"]
     ids = {p["id"] for p in r["result"]["providers"]}
@@ -101,7 +106,14 @@ def test_run_providers(bridge):
     routing = r["result"]["recommendedRouting"]
     assert set(routing) == {"planner", "coder", "reviewer"}
     # tek sağlayıcı üç role de atanır (bkz. providers.recommended_routing)
-    assert len(set(routing.values())) == 1
+    assert routing == {"planner": "deepseek", "coder": "deepseek", "reviewer": "deepseek"}
+
+    from agents import DEFAULT_ROUTING
+
+    monkeypatch.setattr(providers, "is_ready", lambda _entry: False)
+    r = rpc(bridge, "run.providers")
+    assert r["ok"]
+    assert r["result"]["recommendedRouting"] == dict(DEFAULT_ROUTING)
 
 
 def test_providers_list_contract(bridge, tmp_path, monkeypatch):

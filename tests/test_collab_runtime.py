@@ -8,6 +8,7 @@ source-checkout immutability, and GIT_* environment scrubbing. No network,
 no user repos, no model providers.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -401,8 +402,29 @@ def test_json_hostile_input_becomes_validation_error():
         parse_json_bytes(b'{"schema":1,"x":Infinity}', what="state")
     with pytest.raises(ValidationError):
         parse_json_bytes(b'{"a":"\\ud800"}', what="state")  # unpaired surrogate escape
+    old_limit = sys.getrecursionlimit()
+    try:
+        sys.setrecursionlimit(max(old_limit, 100_000))
+        with pytest.raises(ValidationError):
+            parse_json_bytes(b"[" * 20000 + b"]" * 20000, what="state")
+    finally:
+        sys.setrecursionlimit(old_limit)
+
+
+def test_json_maximum_depth_boundary_and_string_escaping():
+    from collab_runtime.models import MAX_JSON_DEPTH
+
+    # Quotes and brackets within the string (with escaped quotes/backslashes)
+    # must not contribute to structural nesting.
+    for content in ('{[ "quote" ]} \\ end', '\\"[{}]'):
+        string_value = json.dumps(content).encode("utf-8")
+        at_limit = b"[" * MAX_JSON_DEPTH + string_value + b"]" * MAX_JSON_DEPTH
+        assert parse_json_bytes(at_limit, what="depth probe")
     with pytest.raises(ValidationError):
-        parse_json_bytes(b"[" * 20000 + b"]" * 20000, what="state")  # deep nesting, still bounded
+        parse_json_bytes(
+            b"[" * (MAX_JSON_DEPTH + 1) + b"0" + b"]" * (MAX_JSON_DEPTH + 1),
+            what="depth probe",
+        )
 
 
 def test_builders_validate_raw_types_without_coercion():

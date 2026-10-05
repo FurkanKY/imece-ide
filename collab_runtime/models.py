@@ -50,6 +50,8 @@ from collab_runtime.errors import ValidationError
 
 MAX_JSON_BYTES = 64 * 1024
 MAX_FRAMED_JSON_BYTES = MAX_JSON_BYTES + 256
+# Bound parser work independently of the interpreter's recursion limit.
+MAX_JSON_DEPTH = 64
 MAX_TARGET_VERSION_CHARS = 200
 MAX_GOAL_CHARS = 4_000
 MAX_DECISIONS = 64
@@ -140,6 +142,30 @@ def canonical_json_bytes(obj: Any) -> bytes:
     return canonical_json(obj).encode("utf-8")
 
 
+def _validate_json_depth(text: str, *, what: str) -> None:
+    """Reject excessive structural nesting before json.loads allocates a tree."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValidationError(f"{what} is nested too deeply.")
+        elif char in "]}" and depth:
+            depth -= 1
+
+
 def context_hash_of(context: Mapping[str, Any]) -> str:
     """sha256 over the canonical JSON of a {"goal","decisions","interfaces"} dict."""
     return hashlib.sha256(canonical_json_bytes(dict(context))).hexdigest()
@@ -174,6 +200,7 @@ def parse_json_bytes(raw: bytes, *, what: str, max_bytes: int = MAX_JSON_BYTES) 
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise ValidationError(f"{what} is not valid UTF-8.") from None
+    _validate_json_depth(text, what=what)
     try:
         value = json.loads(text, object_pairs_hook=_pairs, parse_constant=_reject_constant)
     except json.JSONDecodeError:
