@@ -59,6 +59,14 @@ python -m pytest -q
   Windows job is not a demonstration that the evidence fingerprint works
   natively on Windows; see the known limitation in
   [SECURITY.md](../SECURITY.md).
+  Linux runs the complete suite in one process. Windows partitions the collected
+  tests into eight deterministic shards; every collected test belongs to exactly
+  one shard. Local runs without shard options still run the complete suite. To
+  reproduce one shard:
+
+  ```bash
+  python -m pytest --ci-shard-index=0 --ci-shard-count=8
+  ```
 - **The default suite makes no network calls.** Model and backend tests use
   fakes and injected transports; the decision layer's optional real-SDK tests
   run the actual `typesafe-sdk` client against an in-process
