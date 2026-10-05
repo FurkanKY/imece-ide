@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -72,7 +73,8 @@ def _git_env() -> dict[str, str]:
 
 
 def _run_git(
-    args: list[str], *, cwd: Path, env: dict[str, str] | None = None, check: bool = True
+    args: list[str], *, cwd: Path, env: dict[str, str] | None = None, check: bool = True,
+    input_data: bytes | None = None,
 ) -> subprocess.CompletedProcess:
     """git komutunu argüman dizisiyle (shell=True YOK) çalıştırır.
 
@@ -84,7 +86,8 @@ def _run_git(
             ["git", *args],
             cwd=str(cwd),
             capture_output=True,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL if input_data is None else None,
+            input=input_data,
             env=env if env is not None else _git_env(),
             timeout=_GIT_TIMEOUT,
         )
@@ -215,7 +218,8 @@ def _overlay_working_state(
 def _write_synthetic_snapshot(worktree_root: Path, source_head: str) -> str:
     """Bindirilen çalışma durumunu yerel bir sentetik commit olarak dondurur.
 
-    `git add -A` + `write-tree` + `commit-tree` git plumbing'i kullanılır;
+    `hash-object --no-filters` + geçici indeks + `write-tree` + `commit-tree`
+    Git plumbing'i kullanılır;
     normal `git commit` porselen davranışından (kullanıcı hook'ları vb.)
     kaçınılır. Kimlik yalnızca bu alt-süreçlerin ortam değişkenleriyle
     verilir — global/repo git config'i değiştirilmez.
@@ -225,8 +229,57 @@ def _write_synthetic_snapshot(worktree_root: Path, source_head: str) -> str:
     aynen döndürülür.
     """
     env = {**_git_env(), **_SYNTHETIC_IDENTITY}
-    _run_git(["add", "-A"], cwd=worktree_root, env=env)
-    tree = _git_text(["write-tree"], cwd=worktree_root, env=env).strip()
+    # Never let Git's checkout conversion, attributes, or clean filters alter
+    # the captured workspace bytes. Build a private index seeded from HEAD,
+    # then insert raw blob ids for only tracked and non-ignored materialized
+    # paths. In particular, do not use `git add` here.
+    with tempfile.TemporaryDirectory(prefix="imece-snapshot-index-") as temp_dir:
+        index_path = Path(temp_dir) / "index"
+        snapshot_env = {**env, "GIT_INDEX_FILE": str(index_path)}
+        _run_git(["read-tree", source_head], cwd=worktree_root, env=snapshot_env)
+        staged = _run_git(["ls-files", "--stage", "-z"], cwd=worktree_root, env=snapshot_env)
+        original_modes = {}
+        for entry in staged.stdout.split(b"\0"):
+            metadata, separator, path_bytes = entry.partition(b"\t")
+            if separator:
+                original_modes[os.fsdecode(path_bytes)] = metadata.split(b" ", 1)[0].decode("ascii")
+        paths_cp = _run_git(
+            ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=worktree_root,
+            env=snapshot_env,
+        )
+        paths = list(dict.fromkeys(os.fsdecode(path) for path in paths_cp.stdout.split(b"\0") if path))
+        for rel in paths:
+            path = worktree_root / rel
+            if not path.exists() and not path.is_symlink():
+                _run_git(["update-index", "--force-remove", "--", rel], cwd=worktree_root, env=snapshot_env)
+                continue
+
+            if path.is_symlink():
+                mode = "120000"
+                raw = os.fsencode(os.readlink(path))
+            else:
+                file_stat = path.stat()
+                if not stat.S_ISREG(file_stat.st_mode):
+                    _run_git(["update-index", "--force-remove", "--", rel], cwd=worktree_root, env=snapshot_env)
+                    continue
+                if os.name == "nt":
+                    # NT does not expose Git executable bits reliably. Keep
+                    # the tracked mode instead of silently downgrading it.
+                    mode = original_modes.get(rel, "100644")
+                else:
+                    mode = "100755" if file_stat.st_mode & stat.S_IXUSR else "100644"
+                raw = path.read_bytes()
+
+            hash_cp = _run_git(
+                ["hash-object", "-w", "--no-filters", "--stdin"],
+                cwd=worktree_root, env=snapshot_env, input_data=raw,
+            )
+            oid = hash_cp.stdout.strip().decode("ascii")
+            record = f"{mode} {oid}\t".encode("ascii") + os.fsencode(rel) + b"\0"
+            _run_git(["update-index", "-z", "--index-info"], cwd=worktree_root, env=snapshot_env, input_data=record)
+
+        tree = _git_text(["write-tree"], cwd=worktree_root, env=snapshot_env).strip()
     head_tree = _git_text(["rev-parse", f"{source_head}^{{tree}}"], cwd=worktree_root, env=env).strip()
     if tree == head_tree:
         return source_head

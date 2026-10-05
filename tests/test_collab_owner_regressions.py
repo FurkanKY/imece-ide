@@ -10,8 +10,10 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import shutil
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -36,6 +38,18 @@ from collab_runtime.transport import LoopbackServer
 
 def is_sha(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdef" for c in value)
+
+
+def _symlinks_available() -> bool:
+    """Symlink creation needs elevation on Windows; probe it once per session."""
+    probe = tempfile.mkdtemp(prefix="imece-symlink-probe-")
+    try:
+        os.symlink("target", os.path.join(probe, "link"))
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
 
 
 def git(root: Path, *args: str) -> str:
@@ -368,29 +382,34 @@ def test_private_root_rejects_symlinked_ancestor_permissive_root_and_loose_mode(
 
     real = tmp_path / "real"
     real.mkdir(mode=0o700)
-    link = tmp_path / "link"
-    link.symlink_to(real)
-    through_link = OwnerSessionManager(link / "private")
-    preview = through_link.preview_create(root, **request())
-    with pytest.raises(OwnerError, match="unsafe_private_root"):
-        through_link.create(preview["previewId"], root)
-    assert list(real.iterdir()) == []
+    if _symlinks_available():
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        through_link = OwnerSessionManager(link / "private")
+        preview = through_link.preview_create(root, **request())
+        with pytest.raises(OwnerError, match="unsafe_private_root"):
+            through_link.create(preview["previewId"], root)
+        assert list(real.iterdir()) == []
 
-    permissive = tmp_path / "permissive"
-    permissive.mkdir(mode=0o777)
-    wide = OwnerSessionManager(permissive)
-    preview = wide.preview_create(root, **request())
-    with pytest.raises(OwnerError, match="unsafe_private"):
-        wide.create(preview["previewId"], root)
-    assert list(permissive.iterdir()) == []
+    if os.name == "posix":
+        # Mode-based refusals are a POSIX capability: Windows reports no usable
+        # owner-mode triple (production gates the very same check), so a 0777
+        # directory is not evidence of anything there.
+        permissive = tmp_path / "permissive"
+        permissive.mkdir(mode=0o777)
+        wide = OwnerSessionManager(permissive)
+        preview = wide.preview_create(root, **request())
+        with pytest.raises(OwnerError, match="unsafe_private"):
+            wide.create(preview["previewId"], root)
+        assert list(permissive.iterdir()) == []
 
-    loose = tmp_path / "loose"
-    loose.mkdir(mode=0o755)
-    narrow = OwnerSessionManager(loose)
-    preview = narrow.preview_create(root, **request())
-    with pytest.raises(OwnerError, match="unsafe_private"):
-        narrow.create(preview["previewId"], root)
-    assert list(loose.iterdir()) == []
+        loose = tmp_path / "loose"
+        loose.mkdir(mode=0o755)
+        narrow = OwnerSessionManager(loose)
+        preview = narrow.preview_create(root, **request())
+        with pytest.raises(OwnerError, match="unsafe_private"):
+            narrow.create(preview["previewId"], root)
+        assert list(loose.iterdir()) == []
 
     inside_project = OwnerSessionManager(root / "owners")
     with pytest.raises(OwnerError, match="unsafe_private_root"):
@@ -1038,5 +1057,8 @@ def test_configured_paths_are_private_and_source_side_effects_stay_zero(tmp_path
     assert status["epoch"] == 0 and status["endpoint"] is None
     assert is_sha(status["revision"])
     assert source_manifest(root) == before
-    assert stat.S_IMODE(Path(private).stat().st_mode) == 0o700
-    assert Path(status["storePath"]).stat().st_uid == os.getuid()
+    if os.name == "posix":
+        # Owner uid + 0700 are POSIX capabilities; Windows exposes neither, so
+        # only the platform-independent privacy claims above are asserted there.
+        assert stat.S_IMODE(Path(private).stat().st_mode) == 0o700
+        assert Path(status["storePath"]).stat().st_uid == os.getuid()

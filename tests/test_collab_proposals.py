@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,9 +54,37 @@ from collab_runtime.store import GitStore  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git bulunamadı")
 
-FE_SCOPES = ["app.py", "gone.txt", "new.py", "run.sh", "nl.txt", "lib.py", ":(top)tracked.txt", "ab:c.txt"]
+# --- platform capabilities of the temporary world -------------------------
+# ':' and the pathspec magic '(top)' simply cannot be part of a Windows
+# filename, so those two unrepresentable edge-case files (and only the test
+# dedicated to them) are POSIX-only. Every other capture/provenance/CAS/
+# signature path runs on all platforms with legal filenames.
+POSIX_ONLY_FILES = (":(top)tracked.txt", "ab:c.txt") if os.name != "nt" else ()
+# The mode-only fixture needs a name CPython reports as executable: on Windows
+# S_IXUSR is only set for PATHEXT extensions, so a '.sh' file would never look
+# like a mode change there.
+EXEC_FILE = "run.cmd" if os.name == "nt" else "run.sh"
+EXEC_BODY = "@echo off\necho hi\n" if os.name == "nt" else "#!/bin/sh\necho hi\n"
+EXEC_BODY_BYTES = EXEC_BODY.encode("utf-8")
+
+FE_SCOPES = ["app.py", "gone.txt", "new.py", EXEC_FILE, "nl.txt", "lib.py", *POSIX_ONLY_FILES]
 BE_SCOPES = ["api.py", "db.py"]
 CTX = dict(goal="ship it", decisions=["d1"], interfaces={"I": "x"})
+
+
+def _symlinks_available() -> bool:
+    """Symlink creation needs elevation on Windows; probe it once per session."""
+    probe = tempfile.mkdtemp(prefix="imece-symlink-probe-")
+    try:
+        os.symlink("target", os.path.join(probe, "link"))
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+
+SYMLINKS_AVAILABLE = _symlinks_available()
 
 
 def _env():
@@ -119,14 +148,21 @@ def _world(tmp_path):
     _write(origin, "app.py", "A\n")
     _write(origin, "lib.py", "L\n")
     _write(origin, "gone.txt", "G\n")
-    _write(origin, "run.sh", "#!/bin/sh\necho hi\n")
+    _write(origin, EXEC_FILE, EXEC_BODY)
     _write(origin, "nl.txt", "x\n")
     _write(origin, "huge.txt", b"y" * (MAX_FILE_BYTES + 1))
     _write(origin, "sub/keep.txt", "K\n")
-    _write(origin, ":(top)tracked.txt", "T\n")  # pathspec-shaped literal filename
-    _write(origin, "ab:c.txt", "C\n")  # colon filename (cat-file rev:path separator)
-    os.symlink("app.py", str(origin / "linked.py"))
+    for literal in POSIX_ONLY_FILES:
+        # pathspec-shaped and colon literal filenames: POSIX only
+        _write(origin, literal, "T\n" if literal.startswith(":(top)") else "C\n")
+    if SYMLINKS_AVAILABLE:
+        os.symlink("app.py", str(origin / "linked.py"))
     _git(["add", "-A"], origin)
+    if os.name == "nt":
+        # Git for Windows records PATHEXT names as executable in the index, so
+        # the baseline is pinned back to 0644: this fixture is about a MODE
+        # CHANGE, not about whatever the platform index would record by default.
+        _git(["update-index", "--chmod=-x", EXEC_FILE], origin)
     _git(["commit", "-q", "-m", "base"], origin)
     base = _git(["rev-parse", "HEAD"], origin).strip()
 
@@ -170,7 +206,7 @@ def _mutate_frontend(world):
     if (frontend / "gone.txt").exists():
         (frontend / "gone.txt").unlink()
     _write(frontend, "new.py", "N\n")
-    (frontend / "run.sh").chmod(0o755)
+    (frontend / EXEC_FILE).chmod(0o755)
     _write(frontend, "nl.txt", "x")
     return frontend
 
@@ -178,7 +214,7 @@ def _mutate_frontend(world):
 def _capture_frontend(world, proposal_id="prop-fe-1", paths=None, expected=None):
     return capture_proposal(
         world.store_a, world.frontend, proposal_id, "t-fe",
-        paths if paths is not None else ["app.py", "gone.txt", "new.py", "run.sh", "nl.txt", "lib.py"],
+        paths if paths is not None else ["app.py", "gone.txt", "new.py", EXEC_FILE, "nl.txt", "lib.py"],
         expected if expected is not None else world.rev3,
     )
 
@@ -225,7 +261,7 @@ def test_capture_add_modify_delete_and_mode_only(tmp_path):
     _mutate_frontend(w)
     proposal = _capture_frontend(w)
 
-    assert [f.path for f in proposal.files] == ["app.py", "gone.txt", "new.py", "nl.txt", "run.sh"]
+    assert [f.path for f in proposal.files] == ["app.py", "gone.txt", "new.py", "nl.txt", EXEC_FILE]
     assert proposal.out_of_scope_paths == ()
     assert proposal.proposal_id == "prop-fe-1" and proposal.task_id == "t-fe"
     assert proposal.owner == "alice" and proposal.session_id == "demo-1"
@@ -246,7 +282,7 @@ def test_capture_add_modify_delete_and_mode_only(tmp_path):
     assert nl.after_bytes == b"x" and nl.before_oid == _blob_sha(b"x\n")
     # mode-only change: identical content, both modes recorded
     assert run.before_mode == "100644" and run.after_mode == "100755"
-    assert run.after_bytes == b"#!/bin/sh\necho hi\n"
+    assert run.after_bytes == EXEC_BODY_BYTES
     # unchanged selection omitted; capture is read-only for the project
     assert (w.frontend / "app.py").read_text(encoding="utf-8") == "A2\n"
 
@@ -405,7 +441,7 @@ def test_duplicate_proposal_id_rejected_and_ref_immutable(tmp_path):
     proposal = _capture_frontend(w)
     child, root = publish_proposal(w.store_a, proposal, expected_revision=w.rev3)
 
-    (w.frontend / "app.py").write_text("A3\n", encoding="utf-8")
+    (w.frontend / "app.py").write_text("A3\n", encoding="utf-8", newline="\n")
     # the publication child commit is now the head: a fresh token is required
     again = _capture_frontend(w, expected=child)
     with pytest.raises(ValidationError):
@@ -610,10 +646,20 @@ def test_read_and_list_reject_mismatched_ids_and_broken_provenance(tmp_path):
 
 def test_unsafe_and_unsupported_paths_rejected(tmp_path):
     w = _world(tmp_path)
-    os.symlink("/etc/hostname", str(w.frontend / "link.py"))
-    os.symlink("realdir", str(w.frontend / "linkdir"))
-    (w.frontend / "realdir").mkdir()
-    _write(w.frontend, "realdir/f.txt", "F\n")
+    # Symlink cases need the platform capability; the path/contents rejections
+    # below run everywhere either way.
+    symlink_paths = []
+    if SYMLINKS_AVAILABLE:
+        outside = tmp_path / "outside.txt"
+        outside.write_bytes(b"outside the project\n")
+        os.symlink(str(outside), str(w.frontend / "link.py"))
+        os.symlink("realdir", str(w.frontend / "linkdir"))
+        (w.frontend / "realdir").mkdir()
+        _write(w.frontend, "realdir/f.txt", "F\n")
+        symlink_paths = ["link.py", "linkdir/f.txt"]
+        if (w.frontend / "linked.py").is_symlink():
+            # committed in the base tree as a symlink: unsupported v1 shape
+            symlink_paths.append("linked.py")
     _write(w.frontend, "bin.py", b"\x00\x01\x02")
     _write(w.frontend, "bad.py", b"\xff\xfe")
     _write(w.frontend, "big.txt", b"x" * (MAX_FILE_BYTES + 1))
@@ -621,17 +667,20 @@ def test_unsafe_and_unsupported_paths_rejected(tmp_path):
     bad_paths = [
         "../outside.txt", "a/../b.txt", "/absolute.txt", "C:/drive.txt",
         ".git/config", ".gitignore/../../../x", "sub/", "", ".", "a*b", "a?b",
-        "link.py", "linkdir/f.txt", "bin.py", "bad.py", "big.txt",
+        *symlink_paths,
+        "bin.py", "bad.py", "big.txt",
         ".env.production", "host.key", "creds.pem", "credentials.json",
         "a\x00b", "a\nb",
-        # committed in the base tree as a directory / a symlink: unsupported v1 shapes
-        "sub", "linked.py",
+        # committed in the base tree as a directory: unsupported v1 shape
+        "sub",
     ]
     for bad in bad_paths:
         with pytest.raises(ValidationError):
             capture_proposal(w.store_a, w.frontend, "p-bad", "t-fe", [bad], expected_revision=w.rev3)
 
 
+@pytest.mark.skipif(
+    not POSIX_ONLY_FILES, reason="':' and pathspec magic cannot be Windows filenames")
 def test_literal_pathspec_filenames_captured_exactly(tmp_path):
     w = _world(tmp_path)
     _write(w.frontend, ":(top)tracked.txt", "T2\n")

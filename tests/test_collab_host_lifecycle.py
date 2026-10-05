@@ -968,11 +968,13 @@ def test_the_private_namespace_refuses_symlinked_permissive_and_foreign_files(en
 
     permissive = env.trust / "permissive"
     permissive.mkdir(mode=0o755)
-    assert _refused(_private_cursor_dir, permissive).code == "storage"
+    if os.name == "posix":
+        assert _refused(_private_cursor_dir, permissive).code == "storage"
 
     directory = _private_cursor_dir(env.cursor_root)
     assert directory == env.cursor_root
-    assert directory.stat().st_mode & 0o777 == 0o700
+    if os.name == "posix":
+        assert directory.stat().st_mode & 0o777 == 0o700
     path = directory / "checkpoint.lock"
 
     path.mkdir()
@@ -996,7 +998,8 @@ def test_the_private_namespace_refuses_symlinked_permissive_and_foreign_files(en
 
     path.write_bytes(b"")
     path.chmod(0o644)
-    assert _refused(_CheckpointLease, path).code == "storage"
+    if os.name == "posix":
+        assert _refused(_CheckpointLease, path).code == "storage"
     path.chmod(0o600)
 
     lease = _CheckpointLease(path)

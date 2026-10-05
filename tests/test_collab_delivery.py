@@ -20,6 +20,12 @@ def git(args, cwd):
                                "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@local"}).stdout.decode().strip()
 
 
+def _write(path, text):
+    """LF bytes only: capture preserves file bytes verbatim, and the tests
+    assert exactly those bytes survive the roundtrip."""
+    return path.write_text(text, encoding="utf-8", newline="\n")
+
+
 @pytest.fixture
 def world(tmp_path):
     root = tmp_path / "project"
@@ -27,12 +33,15 @@ def world(tmp_path):
     git(["init", "-q"], root)
     git(["config", "user.name", "Test"], root)
     git(["config", "user.email", "test@local"], root)
-    (root / "app.py").write_text("base\n")
-    (root / "other.py").write_text("untouched\n")
+    # temp repository only: keep the checked-out bytes free of any smudge/clean
+    # newline translation so the byte-exact capture assertions hold on Windows
+    git(["config", "core.autocrlf", "false"], root)
+    _write(root / "app.py", "base\n")
+    _write(root / "other.py", "untouched\n")
     git(["add", "-A"], root)
     git(["commit", "-qm", "base"], root)
     base = git(["rev-parse", "HEAD"], root)
-    (root / "app.py").write_text("source-only WIP\n")
+    _write(root / "app.py", "source-only WIP\n")
     workspace = GitWorktreeWorkspace.create(
         source_root=root, run_id="delivery-run", base_dir=tmp_path / "worktrees")
     hub = GitStore.create_bare(tmp_path / "hub.git")
@@ -66,8 +75,8 @@ def source_state(root):
 def test_preview_is_explicit_no_publish_and_confirm_uses_frozen_capture(world):
     service = SharedDeliveryService()
     workroot = world.workspace.root
-    (workroot / "app.py").write_text("captured\n")
-    (workroot / "other.py").write_text("not selected\n")
+    _write(workroot / "app.py", "captured\n")
+    _write(workroot / "other.py", "not selected\n")
     before_source = source_state(world.root)
     before = world.store.fetch_state()[0]
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
@@ -75,7 +84,7 @@ def test_preview_is_explicit_no_publish_and_confirm_uses_frozen_capture(world):
     assert world.store.fetch_state()[0] == before
     assert preview["paths"] == ["app.py"] and "fileContent" not in preview
     assert not world.store.remote_proposal_head(preview["proposalId"])
-    (workroot / "app.py").write_text("changed after preview\n")
+    _write(workroot / "app.py", "changed after preview\n")
     published = service.confirm_publication(preview["previewId"], run_id="run-1", project_root=world.root)
     assert published["proposalId"] == preview["proposalId"]
     artifact = world.store.fetch_proposal_ref(preview["proposalId"])[1]
@@ -100,7 +109,7 @@ def test_requires_successfully_accepted_binding_and_idle_run(world):
 
 
 def test_empty_capture_is_invalid_not_a_context_drift(world):
-    (world.workspace.root / "app.py").write_text("base\n")
+    _write(world.workspace.root / "app.py", "base\n")
     with pytest.raises(DeliveryError) as error:
         SharedDeliveryService().preview_publication(
             world.session, world.workspace, store_path=world.store_dir,
@@ -111,7 +120,7 @@ def test_empty_capture_is_invalid_not_a_context_drift(world):
 
 def test_out_of_scope_requires_explicit_confirmation_and_failure_discards_ticket(world):
     service = SharedDeliveryService()
-    (world.workspace.root / "other.py").write_text("changed\n")
+    _write(world.workspace.root / "other.py", "changed\n")
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
         hub_path=world.hub, paths=["other.py"])
     assert preview["outOfScopePaths"] == ["other.py"]
@@ -134,7 +143,7 @@ def test_unsafe_selection_rejected(world, path):
 def test_ticket_ttl_and_run_root_binding(world):
     clock = [10.0]
     service = SharedDeliveryService(clock=lambda: clock[0], ttl_seconds=3)
-    (world.workspace.root / "app.py").write_text("changed\n")
+    _write(world.workspace.root / "app.py", "changed\n")
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
         hub_path=world.hub, paths=["app.py"])
     with pytest.raises(DeliveryError):
@@ -149,7 +158,7 @@ def test_ticket_ttl_and_run_root_binding(world):
 
 def test_listing_metadata_only_and_candidate_no_verification_by_default(world):
     service = SharedDeliveryService()
-    (world.workspace.root / "app.py").write_text("change\n")
+    _write(world.workspace.root / "app.py", "change\n")
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
         hub_path=world.hub, paths=["app.py"])
     service.confirm_publication(preview["previewId"], run_id="run-1", project_root=world.root)
@@ -166,7 +175,7 @@ def test_listing_metadata_only_and_candidate_no_verification_by_default(world):
 
 def test_context_mutation_stales_publication_without_orphan_ref(world):
     service = SharedDeliveryService()
-    (world.workspace.root / "app.py").write_text("change\n")
+    _write(world.workspace.root / "app.py", "change\n")
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
         hub_path=world.hub, paths=["app.py"])
     head = world.store.fetch_state()[0]
@@ -179,10 +188,10 @@ def test_context_mutation_stales_publication_without_orphan_ref(world):
 
 def test_source_commit_after_preview_rejects_without_publication(world):
     service = SharedDeliveryService()
-    (world.workspace.root / "app.py").write_text("captured\n")
+    _write(world.workspace.root / "app.py", "captured\n")
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
         hub_path=world.hub, paths=["app.py"])
-    (world.root / "new-source-file.txt").write_text("user commit\n")
+    _write(world.root / "new-source-file.txt", "user commit\n")
     git(["add", "new-source-file.txt"], world.root)
     git(["commit", "-qm", "user commit"], world.root)
     with pytest.raises(DeliveryError) as error:
@@ -199,7 +208,7 @@ def test_constructor_and_verification_flag_are_strict(world):
             SharedDeliveryService(ttl_seconds=invalid_ttl)
     with pytest.raises(ValueError):
         SharedDeliveryService(clock=None)
-    (world.workspace.root / "app.py").write_text("change\n")
+    _write(world.workspace.root / "app.py", "change\n")
     service = SharedDeliveryService()
     preview = service.preview_publication(world.session, world.workspace, store_path=world.store_dir,
         hub_path=world.hub, paths=["app.py"])

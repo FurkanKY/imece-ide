@@ -364,7 +364,10 @@ def execute_task(
         after_verification, after_complete = _workspace_fingerprint(request.workspace, original_paths)
         fingerprint_complete = before_complete and after_complete
         changed_during_verification = before_verification != after_verification
-        if not fingerprint_complete or (changed_during_verification and outcome == "pass"):
+        # Incomplete or changed evidence can only revoke a claimed pass. Keep
+        # real fail/not_run/error outcomes intact so the displayed reason is
+        # not replaced by an evidence-quality classification.
+        if outcome == "pass" and (not fingerprint_complete or changed_during_verification):
             outcome = "invalidated"
         # Checks can modify unchanged inputs; capture final proposal after checks.
         change_set = ports.change_provider.capture(request.workspace)

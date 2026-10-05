@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
+
 import pytest
 
 from collab_runtime.coordinator import Snapshot
@@ -10,6 +14,21 @@ from collab_runtime.models import SharedContext, Task, SessionState
 HEAD = "a" * 40
 REV = "b" * 40
 SECRET = "secretcredential_not_for_output_123456"
+
+
+def _symlinks_available() -> bool:
+    """Symlink creation needs elevation on Windows; probe it once per session."""
+    probe = tempfile.mkdtemp(prefix="imece-symlink-probe-")
+    try:
+        os.symlink("target", os.path.join(probe, "link"))
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+
+SYMLINKS_AVAILABLE = _symlinks_available()
 
 
 def _snapshot():
@@ -96,8 +115,12 @@ def test_changed_head_prevents_approval(tmp_path):
 def test_cursor_namespace_is_private_and_symlinks_are_rejected(tmp_path):
     root = tmp_path / "cursor"
     assert _private_cursor_dir(root) == root
-    assert root.stat().st_mode & 0o777 == 0o700
-    link = tmp_path / "link"
-    link.symlink_to(root, target_is_directory=True)
-    with pytest.raises(HostCollaborationError):
-        _private_cursor_dir(link)
+    if os.name == "posix":
+        # The 0700 proof is a POSIX capability; Windows has no such mode (and
+        # production gates the same check), so it is not pretended there.
+        assert root.stat().st_mode & 0o777 == 0o700
+    if SYMLINKS_AVAILABLE:
+        link = tmp_path / "link"
+        link.symlink_to(root, target_is_directory=True)
+        with pytest.raises(HostCollaborationError):
+            _private_cursor_dir(link)

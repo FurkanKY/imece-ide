@@ -21,15 +21,32 @@ def _git(args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-@pytest.fixture
-def repo(tmp_path):
-    source = tmp_path / "repo"
-    source.mkdir()
-    _git(["init", "-q"], source)
+def _init_repo(source, *, extra_args=()):
+    """A TEMPORARY repo with deterministic bytes.
+
+    ``core.autocrlf=false`` is set on the temp repository only (never in a user
+    or global git config): the provider compares raw working-tree bytes against
+    immutable blobs, so a smudge/clean newline translation would invent phantom
+    changes on Windows.
+    """
+    source.mkdir(exist_ok=True)
+    _git(["init", "-q", *extra_args], source)
     _git(["config", "user.name", "T"], source)
     _git(["config", "user.email", "t@example.com"], source)
-    (source / "a.txt").write_text("hello\n", encoding="utf-8")
-    (source / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    _git(["config", "core.autocrlf", "false"], source)
+    return source
+
+
+def _write(path, text):
+    """LF bytes only: text mode would hand CRLF to the byte-exact capture."""
+    return path.write_text(text, encoding="utf-8", newline="\n")
+
+
+@pytest.fixture
+def repo(tmp_path):
+    source = _init_repo(tmp_path / "repo")
+    _write(source / "a.txt", "hello\n")
+    _write(source / ".gitignore", "ignored.txt\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
     return source
@@ -55,7 +72,7 @@ def test_clean_snapshot_yields_empty_change_set(provider, workspace):
 
 
 def test_tracked_modification_is_captured(provider, workspace):
-    (workspace.root / "a.txt").write_text("hello\nworld\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "hello\nworld\n")
     change = provider.capture(workspace)
     assert change.changed_paths == ("a.txt",)
     assert "+world" in change.diff
@@ -63,7 +80,7 @@ def test_tracked_modification_is_captured(provider, workspace):
 
 
 def test_staged_modification_is_visible(provider, workspace):
-    (workspace.root / "a.txt").write_text("staged content\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "staged content\n")
     _git(["add", "a.txt"], workspace.root)
     change = provider.capture(workspace)
     assert "staged content" in change.diff
@@ -78,7 +95,7 @@ def test_tracked_deletion_is_captured(provider, workspace):
 
 
 def test_new_untracked_utf8_file_is_captured(provider, workspace):
-    (workspace.root / "new.txt").write_text("brand new\n", encoding="utf-8")
+    _write(workspace.root / "new.txt", "brand new\n")
     change = provider.capture(workspace)
     assert "new.txt" in change.changed_paths
     assert "brand new" in change.diff
@@ -86,31 +103,27 @@ def test_new_untracked_utf8_file_is_captured(provider, workspace):
 
 
 def test_ignored_untracked_file_is_excluded(provider, workspace):
-    (workspace.root / "ignored.txt").write_text("should not appear\n", encoding="utf-8")
+    _write(workspace.root / "ignored.txt", "should not appear\n")
     change = provider.capture(workspace)
     assert change.changed_paths == ()
     assert change.diff == ""
 
 
 def test_multiple_changed_paths_sorted_deterministically(provider, workspace):
-    (workspace.root / "z.txt").write_text("z\n", encoding="utf-8")
-    (workspace.root / "b.txt").write_text("b\n", encoding="utf-8")
-    (workspace.root / "a.txt").write_text("hello\nmodified\n", encoding="utf-8")
+    _write(workspace.root / "z.txt", "z\n")
+    _write(workspace.root / "b.txt", "b\n")
+    _write(workspace.root / "a.txt", "hello\nmodified\n")
     change = provider.capture(workspace)
     assert change.changed_paths == ("a.txt", "b.txt", "z.txt")
     assert list(change.changed_paths) == sorted(change.changed_paths)
 
 
 def test_nested_project_root_excludes_repository_siblings(tmp_path):
-    repo_root = tmp_path / "monorepo"
-    repo_root.mkdir()
-    _git(["init", "-q"], repo_root)
-    _git(["config", "user.name", "T"], repo_root)
-    _git(["config", "user.email", "t@example.com"], repo_root)
+    repo_root = _init_repo(tmp_path / "monorepo")
     (repo_root / "project").mkdir()
-    (repo_root / "project" / "in.txt").write_text("in\n", encoding="utf-8")
+    _write(repo_root / "project" / "in.txt", "in\n")
     (repo_root / "sibling").mkdir()
-    (repo_root / "sibling" / "out.txt").write_text("out\n", encoding="utf-8")
+    _write(repo_root / "sibling" / "out.txt", "out\n")
     _git(["add", "-A"], repo_root)
     _git(["commit", "-q", "-m", "init"], repo_root)
 
@@ -118,8 +131,8 @@ def test_nested_project_root_excludes_repository_siblings(tmp_path):
         source_root=repo_root / "project", run_id="nested-test", base_dir=tmp_path / "workspaces",
     )
     try:
-        (ws.root / "in.txt").write_text("in\nchanged\n", encoding="utf-8")
-        (Path(ws.root).parent / "sibling" / "out.txt").write_text("out\nchanged\n", encoding="utf-8")
+        _write(ws.root / "in.txt", "in\nchanged\n")
+        _write(Path(ws.root).parent / "sibling" / "out.txt", "out\nchanged\n")
         change = GitWorktreeChangeProvider().capture(ws)
         assert change.changed_paths == ("in.txt",)
         assert "sibling" not in change.diff
@@ -128,11 +141,11 @@ def test_nested_project_root_excludes_repository_siblings(tmp_path):
 
 
 def test_final_newline_difference_changes_representation_and_sha(provider, workspace):
-    (workspace.root / "a.txt").write_text("hello\nworld", encoding="utf-8")  # no trailing newline
+    _write(workspace.root / "a.txt", "hello\nworld")  # no trailing newline
     no_newline = provider.capture(workspace)
     assert "\\ No newline at end of file" in no_newline.diff
 
-    (workspace.root / "a.txt").write_text("hello\nworld\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "hello\nworld\n")
     with_newline = provider.capture(workspace)
     assert "\\ No newline at end of file" not in with_newline.diff
     assert no_newline.diff_sha256 != with_newline.diff_sha256
@@ -170,8 +183,8 @@ def test_untracked_symlink_target_represented_without_dereferencing(provider, wo
 
 
 def test_capture_does_not_alter_git_status_index_or_head(provider, workspace, repo):
-    (workspace.root / "a.txt").write_text("hello\nmutated\n", encoding="utf-8")
-    (workspace.root / "untracked.txt").write_text("u\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "hello\nmutated\n")
+    _write(workspace.root / "untracked.txt", "u\n")
 
     status_before = subprocess.run(
         ["git", "status", "--porcelain"], cwd=workspace.root, capture_output=True, text=True,
@@ -199,7 +212,7 @@ def test_capture_does_not_alter_git_status_index_or_head(provider, workspace, re
 
 
 def test_repeated_unchanged_capture_is_identical(provider, workspace):
-    (workspace.root / "a.txt").write_text("hello\nstable\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "hello\nstable\n")
     first = provider.capture(workspace)
     second = provider.capture(workspace)
     assert first.diff == second.diff
@@ -209,9 +222,9 @@ def test_repeated_unchanged_capture_is_identical(provider, workspace):
 
 def test_change_then_revert_to_snapshot_returns_empty_change_set(provider, workspace):
     original = (workspace.root / "a.txt").read_text(encoding="utf-8")
-    (workspace.root / "a.txt").write_text("temporary\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "temporary\n")
     assert provider.capture(workspace).diff != ""
-    (workspace.root / "a.txt").write_text(original, encoding="utf-8")
+    _write(workspace.root / "a.txt", original)
     reverted = provider.capture(workspace)
     assert reverted.diff == ""
     assert reverted.changed_paths == ()
@@ -268,25 +281,22 @@ def test_clean_filter_is_never_executed_during_capture(tmp_path):
     runs a working-tree `git diff` during creation — configuring the filter
     only afterward guarantees the marker can only fire from capture())."""
     source = tmp_path / "repo"
-    source.mkdir()
-    _git(["init", "-q"], source)
-    _git(["config", "user.name", "T"], source)
-    _git(["config", "user.email", "t@example.com"], source)
-    (source / "tracked.txt").write_text("original\n", encoding="utf-8")
+    _init_repo(source)
+    _write(source / "tracked.txt", "original\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
 
     ws = GitWorktreeWorkspace.create(source_root=source, run_id="filter-test", base_dir=tmp_path / "workspaces")
     try:
         marker = tmp_path / "clean-filter-ran.marker"
-        (ws.root / ".gitattributes").write_text("tracked.txt filter=evil\n", encoding="utf-8")
+        _write(ws.root / ".gitattributes", "tracked.txt filter=evil\n")
         script = ws.root / "evil-clean.sh"
-        script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+        _write(script, f"#!/bin/sh\ntouch {marker}\ncat\n")
         script.chmod(0o755)
         _git(["config", "filter.evil.clean", str(script) + " %f"], ws.root)
         _git(["config", "filter.evil.required", "true"], ws.root)
 
-        (ws.root / "tracked.txt").write_text("modified\n", encoding="utf-8")
+        _write(ws.root / "tracked.txt", "modified\n")
         change = GitWorktreeChangeProvider().capture(ws)
         assert not marker.exists(), "filter.evil.clean executed during capture()"
         assert "modified" in change.diff
@@ -303,25 +313,22 @@ def test_process_filter_is_never_executed_during_capture(tmp_path):
     which never runs `git add`/`git diff` against the working tree, so it
     can never trigger the process-filter protocol handshake at all."""
     source = tmp_path / "repo"
-    source.mkdir()
-    _git(["init", "-q"], source)
-    _git(["config", "user.name", "T"], source)
-    _git(["config", "user.email", "t@example.com"], source)
-    (source / "tracked.txt").write_text("original\n", encoding="utf-8")
+    _init_repo(source)
+    _write(source / "tracked.txt", "original\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
 
     ws = GitWorktreeWorkspace.create(source_root=source, run_id="process-filter-test", base_dir=tmp_path / "workspaces")
     try:
         marker = tmp_path / "process-filter-ran.marker"
-        (ws.root / ".gitattributes").write_text("tracked.txt filter=evilproc\n", encoding="utf-8")
+        _write(ws.root / ".gitattributes", "tracked.txt filter=evilproc\n")
         script = ws.root / "evil-process.sh"
-        script.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n", encoding="utf-8")
+        _write(script, f"#!/bin/sh\ntouch {marker}\nexit 1\n")
         script.chmod(0o755)
         _git(["config", "filter.evilproc.process", str(script)], ws.root)
         _git(["config", "filter.evilproc.required", "true"], ws.root)
 
-        (ws.root / "tracked.txt").write_text("modified\n", encoding="utf-8")
+        _write(ws.root / "tracked.txt", "modified\n")
         GitWorktreeChangeProvider().capture(ws)
         assert not marker.exists(), "filter.evilproc.process executed during capture()"
     finally:
@@ -334,11 +341,8 @@ def test_core_fsmonitor_hook_is_never_executed_during_capture(tmp_path):
     Registered after workspace creation, for the same isolation reason as
     the filter tests above."""
     source = tmp_path / "repo"
-    source.mkdir()
-    _git(["init", "-q"], source)
-    _git(["config", "user.name", "T"], source)
-    _git(["config", "user.email", "t@example.com"], source)
-    (source / "a.txt").write_text("hello\n", encoding="utf-8")
+    _init_repo(source)
+    _write(source / "a.txt", "hello\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
 
@@ -346,12 +350,12 @@ def test_core_fsmonitor_hook_is_never_executed_during_capture(tmp_path):
     try:
         marker = tmp_path / "fsmonitor-ran.marker"
         script = ws.root / "evil-fsmonitor.sh"
-        script.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n", encoding="utf-8")
+        _write(script, f"#!/bin/sh\ntouch {marker}\nexit 1\n")
         script.chmod(0o755)
         _git(["config", "core.fsmonitor", str(script)], ws.root)
 
-        (ws.root / "a.txt").write_text("hello\nworld\n", encoding="utf-8")
-        (ws.root / "new.txt").write_text("new\n", encoding="utf-8")
+        _write(ws.root / "a.txt", "hello\nworld\n")
+        _write(ws.root / "new.txt", "new\n")
         GitWorktreeChangeProvider().capture(ws)
         assert not marker.exists(), "core.fsmonitor executed during capture()"
     finally:
@@ -361,7 +365,7 @@ def test_core_fsmonitor_hook_is_never_executed_during_capture(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable bit only")
 def test_untracked_executable_mode_is_preserved_and_changes_the_sha(provider, workspace):
     script = workspace.root / "new-script.sh"
-    script.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    _write(script, "#!/bin/sh\necho hi\n")
     script.chmod(0o644)
     change_a = provider.capture(workspace)
     assert "new file mode 100644" in change_a.diff
@@ -391,7 +395,8 @@ def sha256_repo(tmp_path):
         pytest.skip("bu git sürümü --object-format=sha256 desteklemiyor")
     _git(["config", "user.name", "T"], source)
     _git(["config", "user.email", "t@example.com"], source)
-    (source / "a.txt").write_text("hello\n", encoding="utf-8")
+    _git(["config", "core.autocrlf", "false"], source)
+    _write(source / "a.txt", "hello\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
     return source
@@ -419,7 +424,7 @@ def test_sha256_repo_clean_snapshot_yields_empty_change_set(provider, sha256_wor
 
 def test_sha256_repo_tracked_modification_is_captured(provider, sha256_workspace):
     """1.B."""
-    (sha256_workspace.root / "a.txt").write_text("hello\nworld\n", encoding="utf-8")
+    _write(sha256_workspace.root / "a.txt", "hello\nworld\n")
     change = provider.capture(sha256_workspace)
     assert change.changed_paths == ("a.txt",)
     assert "+world" in change.diff
@@ -432,7 +437,7 @@ def test_sha1_repo_clean_and_modified_behavior_unchanged(provider, workspace):
     """1.C: ordinary SHA-1 repositories (the default fixture) are unaffected."""
     clean = provider.capture(workspace)
     assert clean.diff == ""
-    (workspace.root / "a.txt").write_text("hello\nworld\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "hello\nworld\n")
     modified = provider.capture(workspace)
     assert modified.changed_paths == ("a.txt",)
     assert "+world" in modified.diff
@@ -495,18 +500,15 @@ def test_ancestor_symlink_directory_never_dereferenced_root_level(tmp_path):
     """2: a single-component ancestor symlink (`dir -> outside`) must never
     be traversed to read the tracked descendant's current content."""
     source = tmp_path / "repo"
-    source.mkdir()
-    _git(["init", "-q"], source)
-    _git(["config", "user.name", "T"], source)
-    _git(["config", "user.email", "t@example.com"], source)
+    _init_repo(source)
     (source / "dir").mkdir()
-    (source / "dir" / "file.txt").write_text("baseline\n", encoding="utf-8")
+    _write(source / "dir" / "file.txt", "baseline\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
 
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "file.txt").write_text("OUTSIDE_SECRET_UNIQUE_MARKER\n", encoding="utf-8")
+    _write(outside / "file.txt", "OUTSIDE_SECRET_UNIQUE_MARKER\n")
 
     ws = GitWorktreeWorkspace.create(source_root=source, run_id="symlink-root-test", base_dir=tmp_path / "workspaces")
     try:
@@ -526,18 +528,15 @@ def test_ancestor_symlink_directory_never_dereferenced_nested(tmp_path):
     """2: nested ancestor symlink (`a/b -> outside`, tracked path `a/b/file.txt`)
     — protection must not be root-level only."""
     source = tmp_path / "repo"
-    source.mkdir()
-    _git(["init", "-q"], source)
-    _git(["config", "user.name", "T"], source)
-    _git(["config", "user.email", "t@example.com"], source)
+    _init_repo(source)
     (source / "a" / "b").mkdir(parents=True)
-    (source / "a" / "b" / "file.txt").write_text("baseline\n", encoding="utf-8")
+    _write(source / "a" / "b" / "file.txt", "baseline\n")
     _git(["add", "-A"], source)
     _git(["commit", "-q", "-m", "init"], source)
 
     outside = tmp_path / "outside-nested"
     outside.mkdir()
-    (outside / "file.txt").write_text("OUTSIDE_SECRET_UNIQUE_MARKER_NESTED\n", encoding="utf-8")
+    _write(outside / "file.txt", "OUTSIDE_SECRET_UNIQUE_MARKER_NESTED\n")
 
     ws = GitWorktreeWorkspace.create(source_root=source, run_id="symlink-nested-test", base_dir=tmp_path / "workspaces")
     try:
@@ -578,8 +577,8 @@ def test_capture_does_not_alter_the_actual_index_file_bytes(provider, workspace,
     before_sha = hashlib.sha256(index_path.read_bytes()).hexdigest()
     before_stat = index_path.stat()
 
-    (workspace.root / "a.txt").write_text("hello\nmutated\n", encoding="utf-8")
-    (workspace.root / "untracked.txt").write_text("u\n", encoding="utf-8")
+    _write(workspace.root / "a.txt", "hello\nmutated\n")
+    _write(workspace.root / "untracked.txt", "u\n")
     provider.capture(workspace)
     provider.capture(workspace)
 

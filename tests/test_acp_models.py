@@ -28,67 +28,67 @@ def test_empty_argv_rejected():
 
 def test_empty_argv_member_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("/usr/bin/agent", ""))
+        AcpLaunchSpec(argv=(sys.executable, ""))
 
 
 def test_relative_argv0_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("agent",))
+        AcpLaunchSpec(argv=("relative/agent",))
 
 
 def test_nul_in_argv_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("/usr/bin/agent", "x\x00y"))
+        AcpLaunchSpec(argv=(sys.executable, "x\x00y"))
 
 
 def test_invalid_env_key_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("/usr/bin/agent",), env={1: "v"})
+        AcpLaunchSpec(argv=(sys.executable,), env={1: "v"})
 
 
 def test_invalid_env_value_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("/usr/bin/agent",), env={"K": 1})
+        AcpLaunchSpec(argv=(sys.executable,), env={"K": 1})
 
 
 def test_nul_in_env_key_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("/usr/bin/agent",), env={"K\x00": "v"})
+        AcpLaunchSpec(argv=(sys.executable,), env={"K\x00": "v"})
 
 
 def test_nul_in_env_value_rejected():
     with pytest.raises(AcpInputError):
-        AcpLaunchSpec(argv=("/usr/bin/agent",), env={"K": "v\x00"})
+        AcpLaunchSpec(argv=(sys.executable,), env={"K": "v\x00"})
 
 
 def test_env_not_visible_in_repr():
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent",), env={"SECRET": "shh"})
+    spec = AcpLaunchSpec(argv=(sys.executable,), env={"SECRET": "shh"})
     assert "shh" not in repr(spec)
     assert "SECRET" not in repr(spec)
 
 
 def test_caller_env_mutation_after_construction_does_not_mutate_spec():
     env = {"K": "v1"}
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent",), env=env)
+    spec = AcpLaunchSpec(argv=(sys.executable,), env=env)
     env["K"] = "v2"
     env["NEW"] = "x"
     assert dict(spec.env) == {"K": "v1"}
 
 
 def test_env_is_read_only_mapping_proxy():
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent",), env={"K": "v1"})
+    spec = AcpLaunchSpec(argv=(sys.executable,), env={"K": "v1"})
     assert isinstance(spec.env, MappingProxyType)
 
 
 def test_mutation_through_spec_env_raises():
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent",), env={"A": "1"})
+    spec = AcpLaunchSpec(argv=(sys.executable,), env={"A": "1"})
     with pytest.raises(TypeError):
         spec.env["A"] = "2"
     assert dict(spec.env) == {"A": "1"}
 
 
 def test_dict_of_spec_env_still_works_for_subprocess_launch():
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent",), env={"A": "1", "B": "2"})
+    spec = AcpLaunchSpec(argv=(sys.executable,), env={"A": "1", "B": "2"})
     materialized = dict(spec.env)
     assert materialized == {"A": "1", "B": "2"}
     materialized["A"] = "mutated-copy-only"
@@ -120,13 +120,13 @@ def test_posix_windows_style_path_not_treated_as_absolute():
 
 
 def test_valid_launch_spec_accepted():
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent", "--flag"), env={"K": "v"})
-    assert spec.argv == ("/usr/bin/agent", "--flag")
+    spec = AcpLaunchSpec(argv=(sys.executable, "--flag"), env={"K": "v"})
+    assert spec.argv == (sys.executable, "--flag")
     assert dict(spec.env) == {"K": "v"}
 
 
 def test_default_env_is_empty():
-    spec = AcpLaunchSpec(argv=("/usr/bin/agent",))
+    spec = AcpLaunchSpec(argv=(sys.executable,))
     assert dict(spec.env) == {}
 
 
@@ -150,29 +150,29 @@ def test_windows_drive_rooted_cwd_accepted():
     assert request.cwd == r"C:\Users\someone"
 
 
-def test_empty_prompt_rejected():
+def test_empty_prompt_rejected(tmp_path):
     with pytest.raises(AcpInputError):
-        AcpPromptRequest(cwd="/tmp", prompt="")
+        AcpPromptRequest(cwd=str(tmp_path), prompt="")
 
 
-def test_whitespace_only_prompt_rejected():
+def test_whitespace_only_prompt_rejected(tmp_path):
     with pytest.raises(AcpInputError):
-        AcpPromptRequest(cwd="/tmp", prompt="   \n\t  ")
+        AcpPromptRequest(cwd=str(tmp_path), prompt="   \n\t  ")
 
 
-def test_nul_in_cwd_rejected():
+def test_nul_in_cwd_rejected(tmp_path):
     with pytest.raises(AcpInputError):
-        AcpPromptRequest(cwd="/tmp/x\x00y", prompt="task")
+        AcpPromptRequest(cwd=f"{tmp_path}/x\x00y", prompt="task")
 
 
-def test_prompt_not_visible_in_repr():
-    request = AcpPromptRequest(cwd="/tmp", prompt="super secret task body")
+def test_prompt_not_visible_in_repr(tmp_path):
+    request = AcpPromptRequest(cwd=str(tmp_path), prompt="super secret task body")
     assert "super secret task body" not in repr(request)
 
 
-def test_valid_prompt_request_accepted():
-    request = AcpPromptRequest(cwd="/tmp", prompt="do the thing")
-    assert request.cwd == "/tmp"
+def test_valid_prompt_request_accepted(tmp_path):
+    request = AcpPromptRequest(cwd=str(tmp_path), prompt="do the thing")
+    assert request.cwd == str(tmp_path)
     assert request.prompt == "do the thing"
 
 

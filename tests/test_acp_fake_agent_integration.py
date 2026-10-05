@@ -16,12 +16,24 @@ from acp_runtime.client import AcpClientRuntime  # noqa: E402
 from acp_runtime.errors import AcpCleanupError, AcpProtocolError, AcpTimeoutError  # noqa: E402
 from acp_runtime.events import AcpPermissionRequested, AcpPermissionResolved, AcpSessionUpdateObserved  # noqa: E402
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest  # noqa: E402
+from acp_test_support import fixture_child_env  # noqa: E402
 
 _FAKE_AGENT = str(Path(__file__).resolve().parent / "fixtures" / "acp_fake_agent.py")
 
 
+def test_fixture_launch_env_remains_isolated(monkeypatch):
+    monkeypatch.setenv("ACP_TEST_HOST_SECRET", "must-not-inherit")
+    env = fixture_child_env({"ONLY": "provided"})
+    assert "ACP_TEST_HOST_SECRET" not in env
+    assert env["ONLY"] == "provided"
+    if os.name == "nt":
+        for name in ("SystemRoot", "SystemDrive", "TEMP"):
+            if name in os.environ:
+                assert env[name] == os.environ[name]
+
+
 def _launch(mode: str, *, env: dict[str, str] | None = None) -> AcpLaunchSpec:
-    return AcpLaunchSpec(argv=(sys.executable, _FAKE_AGENT, mode), env=env or {})
+    return AcpLaunchSpec(argv=(sys.executable, _FAKE_AGENT, mode), env=fixture_child_env(env))
 
 
 class _RecordingSink:

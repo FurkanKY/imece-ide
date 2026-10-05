@@ -26,6 +26,7 @@ The shared task goal deliberately contains no configuration token, so every
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -609,7 +610,9 @@ def test_approved_run_binds_each_attempt_once_and_never_leaks_the_credential(
     assert _lock_is_free(ctx), "OS kilidi çalışan bir tüketiciye devredildi"
     assert len(_cursor_files(ctx)) == 1 and len(_lock_files(ctx)) == 1
     assert _consumed(ctx) == box["latest"]
-    assert ctx.cursor_root.stat().st_mode & 0o777 == 0o700
+    if os.name == "posix":
+        # 0700 is a POSIX capability only (production gates the same check).
+        assert ctx.cursor_root.stat().st_mode & 0o777 == 0o700
 
     # The user's checkout never moved: HEAD, index and file content identical.
     assert _source_state(ctx) == (ctx.head, "", "buggy\n")

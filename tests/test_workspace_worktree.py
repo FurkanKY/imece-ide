@@ -36,12 +36,17 @@ def _env():
 
 
 def _git(args, cwd, check=True):
+    return _git_bytes(args, cwd, check=check).decode("utf-8", "replace")
+
+
+def _git_bytes(args, cwd, check=True, input_data=None):
     cp = subprocess.run(
-        ["git", *args], cwd=str(cwd), env=_env(), capture_output=True, timeout=30
+        ["git", *args], cwd=str(cwd), env=_env(), capture_output=True,
+        stdin=subprocess.DEVNULL if input_data is None else None, input=input_data, timeout=30,
     )
     if check and cp.returncode != 0:
         raise AssertionError(f"git {args} failed: {cp.stderr.decode('utf-8', 'replace')}")
-    return cp.stdout.decode("utf-8", "replace")
+    return cp.stdout
 
 
 def _head(repo):
@@ -342,6 +347,75 @@ def test_clean_working_tree_reuses_head_as_snapshot(repo, tmp_path):
         assert ws.snapshot.snapshot_commit == ws.snapshot.source_head
     finally:
         ws.dispose()
+
+
+def test_synthetic_snapshot_preserves_raw_bytes_without_running_clean_filters(repo, tmp_path, monkeypatch):
+    import workspace.worktree as wt_mod
+    from change_runtime.git import GitWorktreeChangeProvider
+
+    marker = tmp_path / "clean-filter-ran"
+    _git(["config", "core.autocrlf", "true"], repo)
+    (repo / ".gitattributes").write_text(
+        "*.txt text eol=crlf\n*.filter filter=poison\n", encoding="utf-8"
+    )
+    (repo / "a.txt").write_bytes(b"committed\n")
+    (repo / "filtered.filter").write_bytes(b"committed filter\n")
+    _git(["add", "-A"], repo)
+    _git(["commit", "-q", "-m", "attributes"], repo)
+    _git(["config", "filter.poison.clean", f"touch {marker}"], repo)
+
+    raw_text = b"WIP with CRLF\r\nsecond line\r\n"
+    raw_filter = b"raw filtered bytes\x00\xff\n"
+    untracked = b"untracked raw bytes\r\n\x00"
+    (repo / "a.txt").write_bytes(raw_text)
+    (repo / "filtered.filter").write_bytes(raw_filter)
+    (repo / "new.bin").write_bytes(untracked)
+    source_head = _head(repo)
+    source_branch = _branch(repo)
+    source_status = _status(repo)
+    source_index = Path(_git(["rev-parse", "--git-path", "index"], repo).strip())
+    if not source_index.is_absolute():
+        source_index = repo / source_index
+    before_index = source_index.read_bytes()
+    before_config = (repo / ".git" / "config").read_bytes()
+    before_files = {name: (repo / name).read_bytes() for name in ("a.txt", "filtered.filter", "new.bin")}
+    # `git status` above can legitimately consult a clean filter while
+    # describing source changes; from this point on the synthetic snapshot
+    # path itself must not invoke it.
+    marker.unlink(missing_ok=True)
+    original_git_paths = wt_mod._git_paths
+
+    def paths_without_filtering(args, *, cwd):
+        # `git diff` itself asks Git to run clean filters. Supply the same
+        # dirty-path result so this test isolates the synthetic snapshot path.
+        if args[:1] == ["diff"]:
+            return ["a.txt", "filtered.filter"]
+        return original_git_paths(args, cwd=cwd)
+
+    monkeypatch.setattr(wt_mod, "_git_paths", paths_without_filtering)
+
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-raw-snapshot", base_dir=tmp_path / "workspaces")
+    try:
+        for rel, raw in (("a.txt", raw_text), ("filtered.filter", raw_filter), ("new.bin", untracked)):
+            oid = _git(["rev-parse", f"{ws.snapshot.snapshot_commit}:{rel}"], repo).strip()
+            assert _git_bytes(["cat-file", "-p", oid], repo) == raw
+            expected_oid = _git_bytes(["hash-object", "--no-filters", "--stdin"], repo, input_data=raw).decode().strip()
+            assert oid == expected_oid
+
+        provider = GitWorktreeChangeProvider()
+        assert provider.capture(ws).changed_paths == ()
+        (ws.root / "a.txt").write_bytes(b"agent change\r\n")
+        assert provider.capture(ws).changed_paths == ("a.txt",)
+        assert not marker.exists(), "synthetic snapshot must never invoke clean filters"
+    finally:
+        ws.dispose()
+
+    assert _head(repo) == source_head
+    assert _branch(repo) == source_branch
+    assert _status(repo) == source_status
+    assert source_index.read_bytes() == before_index
+    assert (repo / ".git" / "config").read_bytes() == before_config
+    assert {name: (repo / name).read_bytes() for name in before_files} == before_files
 
 
 def test_nested_project_root_maps_correctly(tmp_path):

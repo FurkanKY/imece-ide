@@ -76,5 +76,5 @@ jobs:
           selected = files[shard::4]
           assert selected, "empty test shard"
           print(f"Windows shard {shard + 1}/4: {len(selected)}/{len(files)} test files", flush=True)
-          raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", "-q", *selected]))
+          raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", "-v", "-o", "faulthandler_timeout=90", *selected]))
           '@ | python -

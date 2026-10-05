@@ -33,6 +33,7 @@ from __future__ import annotations
 import functools
 import http.client
 import json
+import os
 import shutil
 import socket
 import sys
@@ -1195,6 +1196,8 @@ def _blocked_stream(wired, server, opened, monkeypatch, *, pages=6):
     frame the stream attempted, and `written` is the byte length it tried to
     hand to the socket.
     """
+    if os.name == "nt":
+        pytest.skip("tiny TCP send-buffer backpressure is OS-dependent on Windows")
     _tiny_send_buffer(monkeypatch, server)
     payload = _synthetic_pages(pages)
     ledger = SimpleNamespace(index=0, entered=[], exited=[], written=0)

@@ -35,6 +35,7 @@ from verification_runtime.models import (  # noqa: E402
     VerificationStatus,
 )
 from workspace.worktree import GitWorktreeWorkspace  # noqa: E402
+from acp_test_support import fixture_child_env  # noqa: E402
 
 _REPLAY_AGENT = str(Path(__file__).resolve().parent / "fixtures" / "acp_replay_agent.py")
 _TRANSCRIPT = str(Path(__file__).resolve().parent / "fixtures" / "acp_replay" / "calc_average_fix.jsonl")
@@ -59,7 +60,7 @@ def _launch(*, outside: str | None = None) -> AcpLaunchSpec:
     env = {"ACP_REPLAY_TRANSCRIPT": _TRANSCRIPT}
     if outside is not None:
         env["ACP_REPLAY_OUTSIDE"] = outside
-    return AcpLaunchSpec(argv=(sys.executable, _REPLAY_AGENT), env=env)
+    return AcpLaunchSpec(argv=(sys.executable, _REPLAY_AGENT), env=fixture_child_env(env))
 
 
 def test_replay_allows_in_worktree_edit_and_rejects_execute_and_outside_path(tmp_path):

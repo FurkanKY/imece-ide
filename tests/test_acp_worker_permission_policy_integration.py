@@ -29,6 +29,7 @@ from verification_runtime.models import (
     VerificationStatus,
 )
 from workspace.worktree import GitWorktreeWorkspace
+from acp_test_support import fixture_child_env
 
 _FAKE_AGENT = str(Path(__file__).resolve().parent / "fixtures" / "acp_permission_worker_agent.py")
 
@@ -90,7 +91,7 @@ def _adapter(tmp_path: Path, source: Path, mode: str, run_id_suffix: str, *, env
     )
     adapter = AcpWorkerAttemptAdapter(
         runtime, run.run_id,
-        AcpWorkerLaunchProfile(command=sys.executable, args=(_FAKE_AGENT, mode), env=dict(env or {})),
+        AcpWorkerLaunchProfile(command=sys.executable, args=(_FAKE_AGENT, mode), env=fixture_child_env(env)),
         AcpClientRuntime(),
         limits=AcpClientLimits(prompt_timeout_ms=10_000),
     )

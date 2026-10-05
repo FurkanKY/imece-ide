@@ -11,8 +11,9 @@ from PySide6.QtCore import QCoreApplication
 
 from collab_runtime.host import ParticipantCommandError
 from webhost import state
+from webhost.api import collab as collab_api
 from webhost.api import run as run_api
-from webhost.bridge import HostBridge
+from webhost.bridge import HostBridge, handler
 
 
 @pytest.fixture(scope="session")
@@ -22,6 +23,15 @@ def qapp():
 
 @pytest.fixture
 def bridge_world(monkeypatch, tmp_path, qapp):
+    # Other bridge tests may temporarily replace the process-global registry.
+    # Restore only this module's participant handlers; don't clear/reset the
+    # registry or depend on test/module import order.
+    for method, function in (
+        ("collab.taskStatus.preview", collab_api._participant_preview),
+        ("collab.taskStatus.confirm", collab_api._participant_confirm),
+        ("collab.taskStatus.discard", collab_api._participant_discard),
+    ):
+        handler(method)(function)
     app = qapp
     root = tmp_path.resolve()
     project = SimpleNamespace(root=str(root))

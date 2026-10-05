@@ -203,7 +203,18 @@ def test_real_pytest_generated_cache_does_not_invalidate_pass(tmp_path):
         and os.open in os.supports_dir_fd
         and hasattr(os, "O_NOFOLLOW")
     )
+    assert result.verification_report.status.value == "pass"
     assert result.verification_outcome == ("pass" if supports_safe_inventory else "invalidated")
+
+
+def test_incomplete_fingerprint_preserves_failed_verification_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_execution, "_workspace_fingerprint", lambda *_args: (None, False))
+    result = _run_execution(
+        tmp_path, lambda workspace: workspace.write_text("answer.txt", "done"),
+        lambda runtime, run_id: NativeVerificationAttemptAdapter(runtime, run_id),
+        (sys.executable, "-c", "raise SystemExit(1)"),
+    )
+    assert result.verification_outcome == "fail"
 
 
 @pytest.mark.parametrize("mutation", ("verification_id", "plan_id", "check_id", "unrecorded"))

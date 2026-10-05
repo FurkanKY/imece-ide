@@ -25,6 +25,7 @@ from planner_runtime.models import PlanReport
 from review_runtime.models import ReviewReport, ReviewRequest, ReviewVerdict
 from run_runtime import RunEventType, RunRuntime, RunStore
 from workspace.worktree import GitWorktreeWorkspace
+from acp_test_support import fixture_child_env
 
 _FAKE_AGENT = str(Path(__file__).resolve().parent / "fixtures" / "acp_plan_review_fake_agent.py")
 
@@ -68,7 +69,7 @@ def _profile(mode: str, *, text: str | None = None) -> AcpWorkerLaunchProfile:
     the test process's own os.environ -- see acp_runtime.models), so the
     fixture's ACP_FAKE_TEXT must be passed here, not via monkeypatch.setenv
     on the pytest process."""
-    env = {"ACP_FAKE_TEXT": text} if text is not None else {}
+    env = fixture_child_env({"ACP_FAKE_TEXT": text} if text is not None else {})
     return AcpWorkerLaunchProfile(command=sys.executable, args=(_FAKE_AGENT, mode), env=env)
 
 

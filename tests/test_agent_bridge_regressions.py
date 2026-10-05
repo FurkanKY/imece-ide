@@ -77,25 +77,37 @@ def _git(args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-@pytest.fixture
-def git_repo(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
+def _write(path, text):
+    """LF bytes only: change capture compares raw working-tree bytes with
+    immutable blobs, so a CRLF smudge would invent a phantom ``a.txt``."""
+    return path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def _init_repo(repo):
+    """A TEMPORARY repo without newline translation (never a user/global config)."""
+    repo.mkdir(exist_ok=True)
     _git(["init", "-q"], repo)
     _git(["config", "user.name", "T"], repo)
     _git(["config", "user.email", "t@example.com"], repo)
-    (repo / "a.txt").write_text("old\n", encoding="utf-8")
+    _git(["config", "core.autocrlf", "false"], repo)
+    return repo
+
+
+@pytest.fixture
+def git_repo(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _write(repo / "a.txt", "old\n")
     _git(["add", "-A"], repo)
     _git(["commit", "-q", "-m", "init"], repo)
     # the user's uncommitted work must survive every agent run/apply/reject:
-    (repo / "a.txt").write_text("dirty\n", encoding="utf-8")
+    _write(repo / "a.txt", "dirty\n")
     return repo
 
 
 def _commit_verification(repo, checks):
     """Commit `.imece/verify.json` so the worktree gets a detected plan."""
     (repo / ".imece").mkdir(exist_ok=True)
-    (repo / ".imece" / "verify.json").write_text(json.dumps(checks), encoding="utf-8")
+    _write(repo / ".imece" / "verify.json", json.dumps(checks))
     _git(["add", "-A"], repo)
     _git(["commit", "-q", "-m", "verification fixture"], repo)
 
@@ -491,12 +503,8 @@ def test_follow_up_refused_after_project_switch_never_touches_original_worktree(
     original_worktree = _worktree(run_id, tmp_path)
     assert original_worktree.is_dir()
 
-    other = tmp_path / "other-repo"
-    other.mkdir()
-    _git(["init", "-q"], other)
-    _git(["config", "user.name", "T"], other)
-    _git(["config", "user.email", "t@example.com"], other)
-    (other / "b.txt").write_text("other\n", encoding="utf-8")
+    other = _init_repo(tmp_path / "other-repo")
+    _write(other / "b.txt", "other\n")
     _git(["add", "-A"], other)
     _git(["commit", "-q", "-m", "init"], other)
     state.set_project(str(other))
@@ -553,7 +561,7 @@ def test_stale_apply_after_new_source_wip_is_refused_without_checkpoint(
     _await_proposal(qapp, run_id)
 
     # the user creates the same path in the source project while the run waits:
-    (git_repo / "agent.txt").write_text("user wip\n", encoding="utf-8")
+    _write(git_repo / "agent.txt", "user wip\n")
     result = rpc(bridge, "run.applyProposals", {"paths": ["agent.txt"]})["result"]
 
     assert result["applied"] == []
