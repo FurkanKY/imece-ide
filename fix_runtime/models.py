@@ -23,6 +23,9 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DEFAULT_MAX_FIX_ATTEMPTS = 2
 MIN_MAX_FIX_ATTEMPTS = 1
 MAX_MAX_FIX_ATTEMPTS = 5
+_MAX_RENDER_PATHS = 256
+_MAX_RENDER_PATH_CHARS = 1_024
+_MAX_RENDER_CLASSIFICATION_CHARS = 128
 
 
 def _stable_id(value: Any, field: str) -> str:
@@ -168,15 +171,92 @@ class FixTrigger:
 
 
 @dataclass(frozen=True, slots=True)
+class InitialWorkerRenderContext:
+    """Detached, bounded recipe for canonical initial-input rebinding."""
+
+    verification_preview: str
+    pinned_paths: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        from fix_runtime.prompt import MAX_FIX_INPUT_CHARS
+
+        object.__setattr__(self, "verification_preview", _bounded_text(
+            self.verification_preview, "InitialWorkerRenderContext.verification_preview",
+            max_chars=MAX_FIX_INPUT_CHARS, allow_empty=True,
+        ))
+        if not isinstance(self.pinned_paths, (tuple, list)) or len(self.pinned_paths) > _MAX_RENDER_PATHS:
+            raise FixLoopInputError("InitialWorkerRenderContext.pinned_paths must be a bounded sequence.")
+        paths = tuple(self.pinned_paths)
+        for path in paths:
+            _bounded_text(path, "InitialWorkerRenderContext.pinned_path", max_chars=_MAX_RENDER_PATH_CHARS)
+        object.__setattr__(self, "pinned_paths", paths)
+
+
+@dataclass(frozen=True, slots=True)
+class FixWorkerRenderContext:
+    """Detached, bounded recipe for this exact fix-attempt input."""
+
+    max_fix_attempts: int
+    pinned_paths: tuple[str, ...] = ()
+    classification: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.max_fix_attempts) is not int or not MIN_MAX_FIX_ATTEMPTS <= self.max_fix_attempts <= MAX_MAX_FIX_ATTEMPTS:
+            raise FixLoopInputError("FixWorkerRenderContext.max_fix_attempts is out of bounds.")
+        if not isinstance(self.pinned_paths, (tuple, list)) or len(self.pinned_paths) > _MAX_RENDER_PATHS:
+            raise FixLoopInputError("FixWorkerRenderContext.pinned_paths must be a bounded sequence.")
+        paths = tuple(self.pinned_paths)
+        for path in paths:
+            _bounded_text(path, "FixWorkerRenderContext.pinned_path", max_chars=_MAX_RENDER_PATH_CHARS)
+        object.__setattr__(self, "pinned_paths", paths)
+        if self.classification is not None:
+            object.__setattr__(self, "classification", _bounded_text(
+                self.classification, "FixWorkerRenderContext.classification",
+                max_chars=_MAX_RENDER_CLASSIFICATION_CHARS,
+                allow_empty=True,
+            ))
+
+
+def _capture_initial_worker_render_context(
+    verification_preview: str, pinned_paths,
+) -> InitialWorkerRenderContext | None:
+    """Best-effort bounded recipe capture; never changes rendered-input success."""
+    try:
+        return InitialWorkerRenderContext(verification_preview, tuple(pinned_paths))
+    except FixLoopInputError:
+        return None
+
+
+def _capture_fix_worker_render_context(
+    max_fix_attempts: int, pinned_paths, classification: str | None,
+) -> FixWorkerRenderContext | None:
+    """Capture only context representable within metadata bounds.
+
+    Match the fix renderer's display semantics for classification: empty is
+    valid and longer labels are displayed as their first 128 characters.
+    """
+    display_classification = (
+        classification[:_MAX_RENDER_CLASSIFICATION_CHARS]
+        if classification is not None else None
+    )
+    try:
+        return FixWorkerRenderContext(max_fix_attempts, tuple(pinned_paths), display_classification)
+    except FixLoopInputError:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class FixWorkerRequest:
     """The bounded fix instruction actually handed to the Worker port.
 
     `rendered_input` IS the trust-boundary-enforced string produced by
     fix_runtime.prompt.render_fix_worker_input() for this exact attempt —
     FixLoopRunner never renders it merely for validation and then lets an
-    adapter reconstruct its own prompt from the raw trigger. A concrete
-    WorkerAttemptRunner MUST treat `rendered_input` as the actual fix
-    instruction/input it feeds to the underlying harness.
+    adapter reconstruct its own prompt from the raw trigger. It remains the
+    input of record unless an opted-in verified collaboration safe point
+    replaces it using `render_context`; absent metadata means no such rebind
+    can occur. A concrete WorkerAttemptRunner MUST treat `rendered_input` as
+    the actual fix instruction/input it feeds to the underlying harness.
     """
 
     task: str
@@ -184,6 +264,7 @@ class FixWorkerRequest:
     attempt_index: int
     rendered_input: str
     plan: str | None = None
+    render_context: FixWorkerRenderContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task", _bounded_text(self.task, "FixWorkerRequest.task", max_chars=_MAX_TASK_CHARS))
@@ -204,6 +285,14 @@ class FixWorkerRequest:
                 self, "plan",
                 _bounded_text(self.plan, "FixWorkerRequest.plan", max_chars=_MAX_PLAN_CHARS, allow_empty=True),
             )
+        if self.render_context is not None:
+            if not isinstance(self.render_context, FixWorkerRenderContext):
+                raise FixLoopInputError("FixWorkerRequest.render_context must be FixWorkerRenderContext or None.")
+            object.__setattr__(self, "render_context", FixWorkerRenderContext(
+                self.render_context.max_fix_attempts,
+                self.render_context.pinned_paths,
+                self.render_context.classification,
+            ))
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,12 +305,15 @@ class InitialWorkerRequest:
     fix_runtime.prompt.render_initial_worker_input() for this exact attempt.
     A concrete WorkerAttemptRunner MUST treat `rendered_input` as the actual
     input it feeds to the underlying harness, exactly as it does for a
-    FixWorkerRequest — see fix_runtime.ports.WorkerAttemptRunner.
+    FixWorkerRequest. Only an opted-in verified collaboration safe point may
+    replace it using `render_context`; absent metadata prevents such a rebind.
+    See fix_runtime.ports.WorkerAttemptRunner.
     """
 
     task: str
     rendered_input: str
     plan: str | None = None
+    render_context: InitialWorkerRenderContext | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -240,6 +332,13 @@ class InitialWorkerRequest:
                 self, "plan",
                 _bounded_text(self.plan, "InitialWorkerRequest.plan", max_chars=_MAX_PLAN_CHARS, allow_empty=True),
             )
+        if self.render_context is not None:
+            if not isinstance(self.render_context, InitialWorkerRenderContext):
+                raise FixLoopInputError("InitialWorkerRequest.render_context must be InitialWorkerRenderContext or None.")
+            object.__setattr__(self, "render_context", InitialWorkerRenderContext(
+                self.render_context.verification_preview,
+                self.render_context.pinned_paths,
+            ))
 
 
 @dataclass(frozen=True, slots=True)

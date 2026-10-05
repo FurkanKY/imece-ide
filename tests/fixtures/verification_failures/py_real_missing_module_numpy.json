@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "name": "py_real_missing_module_numpy",
+  "origin": "real_capture",
+  "language": "python",
+  "tool": "python",
+  "command": [
+    "python",
+    "-m",
+    "py_compile",
+    "src/"
+  ],
+  "provenance": "real capture produced by the S1b agent in a scratch repo under /tmp/opencode (no user content); see real_capture for a reproducible cmd and tool version",
+  "real_capture": {
+    "cmd": "python -c \"import numpy\" (scratch check; the same traceback surfaces in pytest collection)",
+    "source": "captured by the S1b fixture agent in /tmp/opencode/s1b-captures (scratch dir, no user content)",
+    "tool_version": "CPython 3.12.3",
+    "captured_at": "2026-10-02",
+    "sanitization": "none needed (output contains no paths/user data)"
+  },
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'numpy'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/compute.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "missing_dependency",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "missing_dependency",
+  "gold_action": "needs_user",
+  "note": "REAL capture: numpy is genuinely absent from the venv used"
+}

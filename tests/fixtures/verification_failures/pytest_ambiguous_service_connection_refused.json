@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "pytest_ambiguous_service_connection_refused",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"tests/test_client.py\", line 12, in test_send\n    client.send(payload)\n  File \"src/client.py\", line 55, in send\n    raise ConnectionError('Connection refused by service')\nConnectionError: Connection refused by service\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/client.py",
+    "tests/test_client.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user",
+  "note": "the local orders service is simply not running; nothing in the error text is a strong deterministic signal, so the rule backend falls through to the code_bug default — a known gap"
+}

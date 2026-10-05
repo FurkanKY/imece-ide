@@ -33,6 +33,7 @@ from fix_runtime.models import (
     FixTrigger,
     FixTriggerKind,
     FixWorkerRequest,
+    _capture_fix_worker_render_context,
     new_fix_attempt_id,
     new_fix_execution_id,
     new_fix_loop_id,
@@ -155,10 +156,14 @@ class FixLoopRunner:
             rendered_input = self._render_worker_input(
                 workspace, request, current_trigger, attempt_index, current_classification,
             )
+            attempt_classification = current_classification
             current_classification = None  # consumed: only applies to the attempt it was set for
             worker_request = FixWorkerRequest(
                 task=request.task, trigger=current_trigger, attempt_index=attempt_index, plan=request.plan,
                 rendered_input=rendered_input,
+                render_context=_capture_fix_worker_render_context(
+                    request.max_fix_attempts, request.pinned_paths, attempt_classification,
+                ),
             )
             worker_result = self._run_worker(workspace, worker_request, worker_execution_id, cancel_token)
             self._require_execution_completed(run_id, worker_result.execution_id)

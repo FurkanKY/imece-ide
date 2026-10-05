@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -328,6 +329,17 @@ def test_smoke_construct_real_anthropic_client_through_factory():
     assert backend.model == "claude-opus-5"
 
 
+# Opt-in gate for the single test that talks to the real Anthropic API. The key
+# below is a deliberately invalid placeholder (never a real secret), but the call
+# still leaves the machine, so the default suite stays offline/deterministic.
+# Run it explicitly with: IMECE_RUN_LIVE_API_TESTS=1 pytest tests/test_anthropic_messages_backend.py
+_RUN_LIVE_API_TESTS = os.environ.get("IMECE_RUN_LIVE_API_TESTS") == "1"
+
+
+@pytest.mark.skipif(
+    not _RUN_LIVE_API_TESTS,
+    reason="live Anthropic API call (opt-in): set IMECE_RUN_LIVE_API_TESTS=1 to run",
+)
 def test_real_invalid_key_request_raises_authentication_error():
     import anthropic
 

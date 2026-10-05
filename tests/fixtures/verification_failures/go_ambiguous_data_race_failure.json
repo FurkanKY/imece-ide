@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "go_ambiguous_data_race_failure",
+  "origin": "synthetic",
+  "language": "go",
+  "tool": "go test",
+  "command": [
+    "go",
+    "test",
+    "./..."
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "WARNING: DATA RACE\nWrite at 0x00c0000a4000 by goroutine 7\n--- FAIL: TestConcurrentIncrement (0.02s)\nFAIL\n",
+  "stderr": "",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "internal/counter/counter.go",
+    "internal/counter/counter_test.go"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once",
+  "note": "ambiguous: a data race is nondeterministic (fails under load, passes alone), so gold leans flaky; it can equally be a real concurrency bug — rules have no signal either way"
+}

@@ -7,10 +7,13 @@ worktree üzerinde çalışır. Yaşam döngüsü:
   1. Kaynak repo/HEAD doğrulanır (bkz. _discover_repository, _check_no_conflicts).
   2. `git worktree add --detach <hedef> <source_head>` ile HEAD'e sabitli,
      dallanmamış bir linked worktree oluşturulur.
-  3. Kullanıcının o anki Git-görünür çalışma durumu (staged + unstaged +
-     tracked silmeler + ignore edilmeyen untracked dosyalar) shadow
-     worktree'ye bindirilir (bkz. _overlay_working_state). Ignore edilen
-     dosyalar (.env, node_modules, .venv, build çıktıları, ...) KOPYALANMAZ.
+   3. Kullanıcının o anki Git-görünür çalışma durumu (staged + unstaged +
+      tracked silmeler + ignore edilmeyen untracked dosyalar) shadow
+      worktree'ye bindirilir (bkz. _overlay_working_state). Ignore edilen
+      dosyalar (.env, node_modules, .venv, build çıktıları, ...) KOPYALANMAZ.
+      Tek istisna: snapshot alındıktan sonra, her iki tarafta ignore edildiği
+      doğrulanmış `.imece/shared-context.json` collab bağlama artifact'ı
+      kopyalanır (bkz. _copy_shared_binding).
   4. Bindirilen durum, `git add -A` + `write-tree` + `commit-tree` plumbing
      komutlarıyla yerel/geçici bir "sentetik snapshot" commit'i olarak
      kaydedilir ve shadow worktree'nin HEAD'i bu commit'e taşınır. Bu commit
@@ -33,13 +36,17 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from collab_runtime.context import parse_snapshot_bytes, read_regular_file_bounded
+from collab_runtime.errors import ValidationError
 from runtime_paths import workspaces_dir
-from workspace.base import Workspace
+from workspace.base import Workspace, resolve_within_workspace
 from workspace.errors import (
     UnsupportedRepositoryStateError,
+    WorkspaceBoundaryError,
     WorkspaceCleanupError,
     WorkspaceCreationError,
     WorkspaceError,
@@ -50,6 +57,7 @@ from workspace.snapshot import WorkspaceSnapshot
 _GIT_TIMEOUT = 30  # sn
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SYNTHETIC_MESSAGE = "Imece IDE synthetic workspace snapshot"
+_BINDING_ARTIFACT = ".imece/shared-context.json"
 _SYNTHETIC_IDENTITY = {
     "GIT_AUTHOR_NAME": "Imece IDE",
     "GIT_AUTHOR_EMAIL": "imece@local",
@@ -235,6 +243,79 @@ def _write_synthetic_snapshot(worktree_root: Path, source_head: str) -> str:
     return commit
 
 
+def _check_ignore(repo_root: Path, rel: str) -> bool:
+    """Plain `git check-ignore` (never --no-index) against the real repo:
+    tracked paths and rule misses report as NOT ignored. Read-only."""
+    cp = _run_git(["check-ignore", "-q", "--", rel], cwd=repo_root, check=False)
+    return cp.returncode == 0
+
+
+def _copy_shared_binding(
+    source_root: Path, repo_root: Path, source_head: str, worktree_dir: Path, project_relative: Path
+) -> None:
+    """Sentetik snapshot ALINDIKTAN sonra, doğrulanmış collab bağlama
+    artifact'ını (.imece/shared-context.json) kaynak proje kökünden shadow
+    worktree'deki karşılık gelen proje köküne kopyalar.
+
+    Sadece bu TEK artifact kopyalanır (.env/diğer ignore edilen dosyalar
+    asla): kaynak ve hedef tarafta sıradan `git check-ignore` ile ignore
+    edildiği DOĞRULANIR (--no-index kullanılmaz), symlink'li bileşenler
+    (.imece dahil) izlenmez ve snapshot, katı collab doğrulayıcıdan geçen
+    sınırlı baytların aynen taşınmasıdır. Bayat (STALE) bağlama tüketilmez:
+    artifact'ın state.base_commit'i, worktree'nin oluşturulduğu source_head
+    ile aynı olmak zorundadır. Geçersiz/eksik artifact da sessizce atlanır
+    (hata yok, sıcak yenileme yok). Kopya nokta zamanlı bir yakalamadır:
+    dosya sistemine erişimi olan yerel bir aktör artifact'ı sonradan yine
+    de değiştirebilir — bu, donmuş/değiştirilemez bir depo değildir. Yazma
+    atomiktir (aynı dizinde geçici dosya + os.replace); hata halinde geçici
+    dosya silinir, hedef ya eski halinde kalır ya da hiç yazılmaz. Ignore edildiği
+    için kopya sentetik snapshot'ta ve sonraki değişiklik yakalamada
+    görünmez kalır.
+    """
+    prefix_parts = () if project_relative == Path(".") else project_relative.parts
+    rel = "/".join((*prefix_parts, ".imece", "shared-context.json"))
+
+    # Kaynak: güvenli yol + normal dosya + sınırlı okuma + katı doğrulama.
+    try:
+        src = resolve_within_workspace(source_root, _BINDING_ARTIFACT, reject_symlinks=True)
+        raw = read_regular_file_bounded(src, what="shared context snapshot")
+        snapshot = parse_snapshot_bytes(raw)
+    except (ValidationError, WorkspaceBoundaryError, OSError):
+        return
+    # Bayat bağlama: worktree HEAD'e bağlı; eski base_commit'li snapshot
+    # tüketilmez (source_head, create() sırasında zaten yakalanmıştı).
+    if snapshot.state.base_commit != source_head:
+        return
+    if not _check_ignore(repo_root, rel):
+        return
+    if not _check_ignore(worktree_dir, rel):
+        return
+
+    # Hedef: shadow proje kökü; yine symlink'siz çözüm, atomik yazma
+    # (mkstemp: özel izinler + O_EXCL; hata halinde geçici dosya temizlenir).
+    dst_project = worktree_dir / project_relative
+    try:
+        dst = resolve_within_workspace(dst_project, _BINDING_ARTIFACT, reject_symlinks=True)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=".shared-context.json.", suffix=".tmp", dir=str(dst.parent))
+    except (WorkspaceBoundaryError, OSError):
+        return
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(raw)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, dst)
+    except OSError:
+        pass  # kopya en iyi çabadır: hata loglanmaz, hedef eski halinde kalır
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _remove_worktree(repo_root: Path, worktree_dir: Path) -> None:
     if not worktree_dir.exists():
         _run_git(["worktree", "prune"], cwd=repo_root, check=False)
@@ -323,6 +404,10 @@ class GitWorktreeWorkspace(Workspace):
             untracked = _git_paths(["ls-files", "--others", "--exclude-standard", "-z"], cwd=repo_root)
             _overlay_working_state(repo_root, worktree_dir, dirty, untracked)
             snapshot_commit = _write_synthetic_snapshot(worktree_dir, source_head)
+            # Snapshot'tan SONRA: bağlama artifact'ı snapshot'a ve değişiklik
+            # yakalamaya sızmaz (ignore edildiği doğrulanarak, base_commit
+            # source_head ile eşleşiyorsa kopyalanır).
+            _copy_shared_binding(source_root, repo_root, source_head, worktree_dir, project_relative)
         except Exception as exc:
             _best_effort_cleanup(repo_root, worktree_dir, registered)
             if isinstance(exc, WorkspaceError):

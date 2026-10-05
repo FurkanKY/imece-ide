@@ -102,6 +102,299 @@ def test_run_id_property_exposes_constructor_value(tmp_path):
     assert adapter.run_id == run.run_id
 
 
+def test_opt_in_safe_point_binds_canonical_snapshot_before_worker_start(tmp_path, git_worktree_workspace):
+    from dataclasses import replace
+
+    from collab_runtime.context import render_snapshot_block
+    from collab_runtime.coordinator import Snapshot
+    from collab_runtime.models import SessionState, SharedContext, Task
+    from collab_runtime.safe_point import NativeWorkerSafePoint
+
+    revision = "a" * 40
+    # The safe point only accepts a session bound to the worktree's own head.
+    base = git_worktree_workspace.snapshot.source_head
+    task = Task("task-1", "alice", "fix the bug", ("src",), "queued", revision)
+    state = SessionState("session-1", "v1", base, SharedContext("shared", (), ()), {task.id: task})
+    snapshot = Snapshot(revision, state)
+
+    class Consumer:
+        session_identity = ("session-1", base, "v1")
+        member_id = "alice"
+
+        def __init__(self):
+            self.pending = ()
+            self.acks = []
+
+        def status(self):
+            return {"state": "streaming", "consumed_revision": revision}
+
+        def peek(self):
+            return self.pending
+
+        def acknowledge_at_safe_point(self, target):
+            self.acks.append(target)
+
+    consumer = Consumer()
+
+    def bind(shared, request, workspace):
+        # Existing rendered content is preserved; canonical context is added
+        # exactly once through the bounded snapshot renderer.
+        return replace(request, rendered_input=request.rendered_input + "\n\n" + render_snapshot_block(shared))
+
+    safe_point = NativeWorkerSafePoint(
+        consumer, lambda: snapshot, initial_snapshot=snapshot, member_id="alice",
+        approved_task=task, bind_input=bind,
+    )
+    runtime, run = setup_runtime(tmp_path)
+    backend = ScriptedBackend([_completed_turn()])
+    adapter = NativeWorkerAttemptAdapter(runtime, run.run_id, backend, safe_point=safe_point)
+    request = _valid_worker_request()
+
+    adapter.run(git_worktree_workspace, request, execution_id="exec_safe_point")
+
+    assert backend.session.inputs[0][0].text.startswith(request.rendered_input)
+    assert backend.session.inputs[0][0].text.count("SHARED COLLABORATION SNAPSHOT") == 1
+    assert consumer.acks == []
+
+
+def test_opt_in_safe_point_acknowledges_captured_tail_after_session_creation(
+    tmp_path, git_worktree_workspace, monkeypatch,
+):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from collab_runtime.context import render_snapshot_block
+    from collab_runtime.coordinator import Snapshot
+    from collab_runtime.models import SessionState, SharedContext, Task
+    from collab_runtime.safe_point import NativeWorkerSafePoint
+
+    start, tail = "a" * 40, "c" * 40
+    base = git_worktree_workspace.snapshot.source_head
+    task = Task("task-1", "alice", "fix the bug", ("src",), "running", start)
+    state = SessionState("session-1", "v1", base, SharedContext("shared", (), ()), {task.id: task})
+    initial = Snapshot(start, state)
+    authoritative = Snapshot(tail, state)
+
+    class Consumer:
+        session_identity = ("session-1", base, "v1")
+        member_id = "alice"
+        pending = (SimpleNamespace(revision="b" * 40), SimpleNamespace(revision=tail))
+        acks = []
+
+        def status(self):
+            return {"state": "streaming", "consumed_revision": start}
+
+        def peek(self):
+            return self.pending
+
+        def acknowledge_at_safe_point(self, revision):
+            self.acks.append(revision)
+
+    consumer = Consumer()
+    safe_point = NativeWorkerSafePoint(
+        consumer, lambda: authoritative, initial_snapshot=initial, member_id="alice",
+        approved_task=task,
+        bind_input=lambda shared, request, workspace: replace(
+            request, rendered_input=request.rendered_input + "\n\n" + render_snapshot_block(shared)
+        ),
+    )
+    runtime, run = setup_runtime(tmp_path)
+    backend = ScriptedBackend([_completed_turn()])
+    adapter = NativeWorkerAttemptAdapter(runtime, run.run_id, backend, safe_point=safe_point)
+
+    from agent_runtime.session import AgentSession as RealAgentSession
+
+    class ObserveOrdering:
+        def __init__(self, **kwargs):
+            assert consumer.acks == []
+            self.session = RealAgentSession(**kwargs)
+
+        def start(self, rendered):
+            assert consumer.acks == [tail]
+            return self.session.start(rendered)
+
+    monkeypatch.setattr("executor_runtime.native_worker.AgentSession", ObserveOrdering)
+
+    adapter.run(git_worktree_workspace, _valid_worker_request(), execution_id="exec_safe_ack")
+
+    assert consumer.acks == [tail]
+    assert len(backend.open_session_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "change", ["removed", "reassigned", "goal", "scopes", "done", "session", "base", "version", "ahead"]
+)
+def test_safe_point_rejects_unapproved_snapshot_changes_before_binding(tmp_path, change):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from collab_runtime.context import render_snapshot_block
+    from collab_runtime.coordinator import Snapshot
+    from collab_runtime.models import SessionState, SharedContext, Task
+    from collab_runtime.safe_point import NativeWorkerSafePoint, SafePointError
+
+    revision = "a" * 40
+    approved_base = "b" * 40
+    task = Task("task-1", "alice", "approved goal", ("src",), "queued", revision)
+    initial_state = SessionState("session-1", "v1", approved_base, SharedContext("", (), ()), {task.id: task})
+    initial = Snapshot(revision, initial_state)
+    selected = task
+    session_id, base, version = "session-1", approved_base, "v1"
+    if change == "removed":
+        tasks = {}
+    else:
+        mutations = {
+            "reassigned": {"owner": "bob"}, "goal": {"goal": "retargeted"},
+            "scopes": {"scopes": ("other",)}, "done": {"status": "done"},
+        }
+        if change in mutations:
+            selected = replace(task, **mutations[change])
+        tasks = {task.id: selected}
+    if change == "session":
+        session_id = "other-session"
+    elif change == "base":
+        base = "c" * 40
+    elif change == "version":
+        version = "v2"
+    snapshot_revision = "c" * 40 if change == "ahead" else revision
+    current = Snapshot(snapshot_revision, SessionState(
+        session_id, version, base, initial_state.context, tasks,
+    ))
+
+    class Consumer:
+        session_identity = ("session-1", "b" * 40, "v1")
+        member_id = "alice"
+
+        def status(self):
+            return {"state": "streaming", "consumed_revision": revision}
+
+        def peek(self):
+            return (type("Event", (), {"revision": "b" * 40})(),) if change == "ahead" else ()
+
+        def acknowledge_at_safe_point(self, _revision):
+            pytest.fail("a rejected snapshot must not be acknowledged")
+
+    bound = []
+    helper = NativeWorkerSafePoint(
+        Consumer(), lambda: current, initial_snapshot=initial, member_id="alice", approved_task=task,
+        bind_input=lambda snapshot, request, workspace: bound.append(snapshot) or replace(
+            request, rendered_input=request.rendered_input + "\n\n" + render_snapshot_block(snapshot)
+        ),
+    )
+    workspace = SimpleNamespace(
+        snapshot=SimpleNamespace(source_head=approved_base), root=tmp_path,
+    )
+    with pytest.raises(SafePointError):
+        helper.prepare(_valid_worker_request(), workspace)
+    assert bound == []
+
+
+def test_safe_point_persistence_failure_prevents_model_call_and_preserves_inbox(
+    tmp_path, git_worktree_workspace,
+):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from collab_runtime.context import render_snapshot_block
+    from collab_runtime.coordinator import Snapshot
+    from collab_runtime.models import SessionState, SharedContext, Task
+    from collab_runtime.safe_point import SAFE_POINT_ERROR, NativeWorkerSafePoint
+
+    consumed, tail = "a" * 40, "c" * 40
+    base = git_worktree_workspace.snapshot.source_head
+    task = Task("task-1", "alice", "fix the bug", ("src",), "running", consumed)
+    state = SessionState("session-1", "v1", base, SharedContext("shared", (), ()), {task.id: task})
+    initial, authoritative = Snapshot(consumed, state), Snapshot(tail, state)
+
+    class Consumer:
+        session_identity = ("session-1", base, "v1")
+        member_id = "alice"
+        pending = (SimpleNamespace(revision=tail),)
+
+        def status(self):
+            return {"state": "streaming", "consumed_revision": consumed}
+
+        def peek(self):
+            return self.pending
+
+        def acknowledge_at_safe_point(self, _revision):
+            raise OSError("private checkpoint path")
+
+    consumer = Consumer()
+    helper = NativeWorkerSafePoint(
+        consumer, lambda: authoritative, initial_snapshot=initial, member_id="alice", approved_task=task,
+        bind_input=lambda shared, request, workspace: replace(
+            request, rendered_input=request.rendered_input + "\n\n" + render_snapshot_block(shared)
+        ),
+    )
+    runtime, run = setup_runtime(tmp_path)
+    backend = ScriptedBackend([_completed_turn()])
+    adapter = NativeWorkerAttemptAdapter(runtime, run.run_id, backend, safe_point=helper)
+
+    with pytest.raises(ExecutorAdapterInputError, match=SAFE_POINT_ERROR):
+        adapter.run(git_worktree_workspace, _valid_worker_request(), execution_id="exec_safe_persist")
+
+    assert consumer.pending[0].revision == tail
+    assert backend.open_session_calls == []
+
+
+def test_safe_point_workspace_base_mismatch_blocks_before_ack_and_model(
+    tmp_path, git_worktree_workspace,
+):
+    """A session whose base commit is not the worktree's own head is refused at
+    the adapter boundary: no bind, no acknowledgement, no model session."""
+    from dataclasses import replace
+
+    from collab_runtime.context import render_snapshot_block
+    from collab_runtime.coordinator import Snapshot
+    from collab_runtime.models import SessionState, SharedContext, Task
+    from collab_runtime.safe_point import SAFE_POINT_ERROR, NativeWorkerSafePoint
+
+    revision = "a" * 40
+    approved_base = git_worktree_workspace.snapshot.source_head
+    other_base = "d" * 40
+    assert other_base != approved_base
+    task = Task("task-1", "alice", "fix the bug", ("src",), "queued", revision)
+    initial_state = SessionState("session-1", "v1", other_base, SharedContext("shared", (), ()), {task.id: task})
+    snapshot = Snapshot(revision, initial_state)
+
+    class Consumer:
+        session_identity = ("session-1", other_base, "v1")
+        member_id = "alice"
+
+        def __init__(self):
+            self.acks = []
+
+        def status(self):
+            return {"state": "streaming", "consumed_revision": revision}
+
+        def peek(self):
+            return ()
+
+        def acknowledge_at_safe_point(self, target):
+            self.acks.append(target)
+
+    consumer = Consumer()
+    bound = []
+    helper = NativeWorkerSafePoint(
+        consumer, lambda: snapshot, initial_snapshot=snapshot, member_id="alice",
+        approved_task=task,
+        bind_input=lambda shared, request, workspace: bound.append(shared) or replace(
+            request, rendered_input=request.rendered_input + "\n\n" + render_snapshot_block(shared)
+        ),
+    )
+    runtime, run = setup_runtime(tmp_path)
+    backend = ScriptedBackend([_completed_turn()])
+    adapter = NativeWorkerAttemptAdapter(runtime, run.run_id, backend, safe_point=helper)
+
+    with pytest.raises(ExecutorAdapterInputError, match=SAFE_POINT_ERROR):
+        adapter.run(git_worktree_workspace, _valid_worker_request(), execution_id="exec_base_mismatch")
+
+    assert bound == []
+    assert consumer.acks == []
+    assert backend.open_session_calls == []
+
+
 def test_non_fix_worker_request_rejected_before_model_open(tmp_path):
     runtime, run = setup_runtime(tmp_path)
     adapter = NativeWorkerAttemptAdapter(runtime, run.run_id, NeverOpenedBackend())

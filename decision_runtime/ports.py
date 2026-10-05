@@ -1,10 +1,11 @@
 """DecisionPort — the seam every decision backend implements.
 
-Kept deliberately tiny (one method) so a future `JevDecisionBackend`
-(typesafe-sdk, real API calls) is a drop-in alongside `RuleDecisionBackend`
-and `FakeDecisionBackend` — see docs/JEV-DESIGN.md "Architecture". No such
-backend exists yet in this slice (S1a is fully offline); nothing here
-imports typesafe-sdk or reads TYPESAFE_API_KEY.
+Kept deliberately tiny (one method) so the backends are interchangeable:
+`RuleDecisionBackend` (deterministic fallback), `FakeDecisionBackend`
+(tests) and — since Spike S1b — the real `JevDecisionBackend`
+(typesafe-sdk, optional dependency; see docs/JEV-DESIGN.md "Architecture").
+JevDecisionBackend imports its SDK and reads TYPESAFE_API_KEY lazily, only
+inside decide(); nothing here imports typesafe-sdk or reads TYPESAFE_API_KEY.
 """
 
 from __future__ import annotations

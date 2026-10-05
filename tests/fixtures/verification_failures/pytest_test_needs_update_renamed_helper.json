@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "pytest_test_needs_update_renamed_helper",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "tests/test_math.py::test_add FAILED\n\ndef test_add():\n>       assert add(2, 2) == 5\nE       AttributeError: module 'src.math' has no attribute 'add'\nE        +  where src.math = <module 'src.math' from 'src/math.py'>\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/math.py",
+    "tests/test_math.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "test_needs_update",
+  "gold_action": "continue_fix_loop",
+  "note": "the task itself renamed add() to sum_values(); the test must follow the task — a rule can only see an AttributeError and defaults to code_bug at LOW confidence"
+}

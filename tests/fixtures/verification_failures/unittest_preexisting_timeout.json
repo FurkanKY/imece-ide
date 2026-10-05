@@ -1,6 +1,19 @@
 {
+  "schema_version": 2,
   "name": "unittest_preexisting_timeout",
+  "origin": "synthetic",
+  "language": "python",
   "tool": "unittest",
+  "command": [
+    "python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "Ran 10 tests\nFAILED (errors=1)\n",
   "exit_code": 1,
@@ -9,5 +22,11 @@
     "app/unrelated.py"
   ],
   "baseline_status": "timeout",
-  "expected_label": "unrelated_preexisting"
+  "baseline_exit_code": 1,
+  "expected_rule_kind": "unrelated_preexisting",
+  "expected_rule_action": "mark_pre_existing",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "unrelated_preexisting",
+  "gold_action": "continue_fix_loop",
+  "note": "gold continue_fix_loop under ideal gate semantics: MARK_PRE_EXISTING is authorized only when the baseline rerun itself FAILED ('fail'); for an inconclusive baseline ('timeout'/'error') the S1b gate guard (decision_runtime.gate._guard_pre_existing) downgrades the rule backend's mark_pre_existing to continue_fix_loop — the eval harness mirrors the guard, so expected_gate_action records the pipeline action while expected_rule_action records the raw rule helper behaviour"
 }

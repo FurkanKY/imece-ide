@@ -1,5 +1,57 @@
 # Architecture
 
+## Current default: role-free single-agent run
+
+> **This section describes what the default path does today.** The
+> **"AI engine (pipeline)"** and **"Legacy engine (fallback)"** sections further
+> down are retained as the **compatibility backend description** — they document
+> the Planner/Worker/Reviewer trio, which still exists but is **not the default**
+> and is not planned for v1.
+
+The default path has **no roles**: no planner, no reviewer, no role chain, no
+role chooser. One task plus **one** selected provider goes in, and a single
+independent agent owns it end to end.
+
+| Concern | Where it lives |
+|---|---|
+| Run admission / routing | `AgentRunCoordinator` + the factory in `engine_factory.py` (per-run provider selection; unsupported providers are **refused with a reason**, never silently substituted) |
+| The one agent that does the work | `_AgentWorker` (`webhost/api/run.py`), driven through the `agent_execution_runtime/` ports — runs only inside its own isolated Git worktree, never the user's tree |
+| Canonical run record / audit trail | `run_runtime/` — canonical Run + event history in SQLite, durable, with paginated history |
+| Deterministic verification evidence | `verification_runtime/` + the evidence rules in `agent_execution_runtime/execution.py` (`_workspace_inventory`, `_workspace_fingerprint`, `_canonical_verification_matches`) — status may be `pass`, `fail` **or** `not_run`; a Result is never "verified" by definition |
+| No-follow evidence fingerprint | pre-verification inventory pinned and the **same originals** compared before/after verification; an incomplete inventory **cannot** prove a PASS |
+| Final diff capture | captured after verification; a mismatch against the displayed receipt **invalidates** the PASS |
+| UI evidence surface | the panel's **Çalışma / Sonuç / Etkinlik** (work / result / activity) views — **no Plan tab** |
+
+Evidence rules worth stating once, because the UI depends on them: any input
+mutation, any mode change, or an incomplete inventory invalidates a PASS; a
+displayed PASS additionally requires a canonically matching receipt plus matching
+plan checks. Model and execution failures surface as **fixed canonical
+messages**, never raw provider exception text, so a secret-bearing exception
+cannot reach persisted events.
+
+**Known platform limit:** on platforms without the required no-follow
+directory-handle capability (notably Windows natively), the input inventory is
+incomplete and a PASS cannot be proven. This is a documented limitation, **not**
+a claim that Windows behaviour is CI-verified. See [SECURITY.md](../SECURITY.md).
+
+### Concurrency: the current global assumption and the M2 target
+
+Today there is a **single global active run**: one run at a time, addressed by
+a global "current run" rather than by ID. That assumption is what **M2** replaces
+with a **run-ID registry** — a bounded concurrency ceiling, **independent leases
+per run**, and explicit **cancel** and **apply** addressed to one run by ID, so
+two independent Executions can be live at once in their own worktrees and be
+independently completed. That is the **authorized, in-progress target**, not a
+description of shipped behaviour. See
+[PRODUCT-PLAN.md](PRODUCT-PLAN.md#m2--task-first-main-screen-real-concurrency--authorized-implementation-starting).
+
+---
+
+**Everything below this line documents the legacy Planner/Worker/Reviewer
+engines** — the **compatibility backend and historical record**, not the default
+and not planned for v1. It is kept because the backend still runs; it is not the
+product.
+
 ## Overview
 
 For an existing local project, a run goes through one of two engines,
@@ -366,6 +418,28 @@ available, and whether the new engine supports it. On first start
 three roles (accounts first: Claude Code, Codex, Gemini CLI; then API
 providers); the user's choice is persisted in the UI preferences. The
 "AI engine" setting (Auto / Classic) lives in the Settings dialog.
+
+### Decision layer
+
+Optional, experimental (`off` by default): when a verification check FAILs,
+`decision_runtime.gate.VerificationFailureGate` triages it *before* the fix loop
+spends an attempt. It extracts the deterministic facts in code (exit code,
+timeout flag, argv, a short error block, changed paths, and a best-effort
+rerun of the same check on the pre-change baseline in a throwaway detached
+worktree), asks a `DecisionPort` backend, and maps the answer to an action.
+
+The backend is either the offline `RuleDecisionBackend` (`rules`) or the
+TypeSafe/Jev `JevDecisionBackend` (`jev`, optional `typesafe-sdk` dependency).
+Any backend failure falls back to the deterministic rules with
+`fallback_used=True`; low confidence maps to the current fix-loop behaviour.
+`fix_runtime.FixLoopRunner` / `pipeline_runtime.PipelineRunner` only ever see
+this one gate class, so the question set and rules stay replaceable, and every
+call is recorded as a canonical `decision.made` event (ignored by the
+projector/gate, like `agent.activity`).
+
+See [DECISION-LAYER.md](DECISION-LAYER.md) for the modes, the exact allowlist
+and redaction contract, the key/SDK setup, the pinned runtime contract, the
+evaluation numbers and the pending live evaluation.
 
 ---
 

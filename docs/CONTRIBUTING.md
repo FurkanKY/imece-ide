@@ -4,6 +4,32 @@ Thanks for your interest in Imece IDE. This document explains how to get a
 working dev environment, how changes are verified, and the few rules the
 codebase holds strictly.
 
+## What this project is right now
+
+Imece is a **local-first, source-only** desktop coding workspace. The default
+flow is **role-free**: one task, one selected provider, one independent coding
+agent working in an isolated Git worktree, deterministic verification evidence
+behind the result, and an explicit apply/reject decision by you. The legacy
+Planner/Worker/Reviewer trio remains only as a compatibility backend.
+
+That vertical is **implemented and verified by local fixture end-to-end runs**,
+and it is **not closed**: real-provider and supported-platform acceptance is an
+outstanding gate, tracked as validation debt in
+[PRODUCT-PLAN.md](PRODUCT-PLAN.md). Two rules follow, and they are binding on
+how anything is written here:
+
+- **No percentages, no ETAs, no "X% done", no day counts.** Tests are not the
+  progress metric — a green suite is not milestone closure.
+- **"Offline/local" is not "accepted".** Fixture, mock-bridge and offline
+  regression results are real engineering evidence, but they never substitute
+  for a real-provider run or for supported-platform acceptance. Describe which
+  kind of evidence you have, and keep the gap visible.
+
+These documents are the **public application and contributor docs**. Internal
+planning, product-strategy, design-work and agent-session/journey records stay
+local and unpublished — keep that narration (session roles, review choreography,
+per-run case counts) out of the published set.
+
 ## Dev environment
 
 Follow [SETUP.md](SETUP.md). In short: Python 3.14 venv +
@@ -27,8 +53,36 @@ python -m pytest -q
   `python shell.py --dev`.
 - **Bridge/engine changes:** `python -m pytest tests/test_bridge.py -q` runs
   the contract tests without a webview.
-- CI runs the same typecheck/build (Ubuntu) and pytest (Windows) on every
-  push and PR, plus a gitleaks secret scan.
+- CI runs the same typecheck/build and pytest on every push and PR (Ubuntu for
+  the frontend build and the suite, plus a Windows pytest job), and a gitleaks
+  secret scan. **A green CI is not platform acceptance** — in particular the
+  Windows job is not a demonstration that the evidence fingerprint works
+  natively on Windows; see the known limitation in
+  [SECURITY.md](../SECURITY.md).
+- **The default suite makes no network calls.** Model and backend tests use
+  fakes and injected transports; the decision layer's optional real-SDK tests
+  run the actual `typesafe-sdk` client against an in-process
+  `httpx2.MockTransport` (still no network) and skip themselves when the SDK
+  is not installed. Tests that really call a provider API are opt-in only and
+  stay skipped unless you explicitly ask for them, because they spend your
+  quota:
+
+  ```bash
+  IMECE_RUN_LIVE_API_TESTS=1 python -m pytest -q
+  ```
+
+  Leave that variable unset for normal work and in CI.
+- **"Offline" does not mean "identical on every machine."** Some areas are
+  environment-dependent by nature: ACP/process tests spawn local processes and
+  can be sensitive to what is installed locally, and individual cases are
+  skipped or specialized for `git` on `PATH`, symlink support and
+  Windows/POSIX path semantics. Expect a local run to differ from CI in
+  coverage, not necessarily in outcome — report platform-specific failures with
+  the OS and tool versions.
+- **On Linux**, a `PYTHONPATH` exported by an unrelated toolchain (e.g. ROS)
+  can break pytest's plugin loading; run the suite as
+  `env -u PYTHONPATH QT_QPA_PLATFORM=offscreen PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q`
+  (see [SETUP.md](SETUP.md#pre-set-pythonpath-from-another-toolchain-breaks-pytest)).
 
 ## Documentation rule
 
@@ -43,6 +97,9 @@ the same PR — otherwise it isn't done:
 | New UI feature or usage pattern | `docs/USAGE.md` |
 | Install, dependency or environment note | `docs/SETUP.md` + `requirements*.txt` |
 | User-visible release impact | `docs/CHANGELOG.md` |
+| Milestone scope, status or acceptance change | `docs/PRODUCT-PLAN.md` (authoritative) |
+| Collaboration/session/proposal behaviour | `docs/COLLABORATION.md` |
+| Decision-layer modes, allowlist or fallback | `docs/DECISION-LAYER.md` + `PRIVACY.md` |
 | Keys, file writes, command execution or data leaving the machine | `PRIVACY.md` and, if needed, `SECURITY.md` |
 
 ## Code rules

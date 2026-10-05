@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "name": "jest_code_bug_local_import_not_listed",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "FAIL tests/app.test.js\n  ● Test suite failed to run\n\n    Cannot find module './format' from 'src/app.js'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/app.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "the change (src/app.js) imports './format' which the same change failed to create — local specifier, so the rule backend ACTs on code_bug; the deleted/missing file is not even listed in changed_paths (deletion-listing gap scenario)"
+}

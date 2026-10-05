@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "jest_preexisting_failure",
+  "origin": "synthetic",
+  "language": "javascript",
   "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "FAIL tests/legacy.test.js\n  ✕ old flaky assertion\n\n    Expected: 2\n    Received: 1\n",
   "exit_code": 1,
@@ -9,5 +18,10 @@
     "src/other.js"
   ],
   "baseline_status": "fail",
-  "expected_label": "unrelated_preexisting"
+  "baseline_exit_code": 1,
+  "expected_rule_kind": "unrelated_preexisting",
+  "expected_rule_action": "mark_pre_existing",
+  "expected_gate_action": "mark_pre_existing",
+  "gold_kind": "unrelated_preexisting",
+  "gold_action": "mark_pre_existing"
 }

@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "name": "pytest_env_wrong_working_directory",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "ERROR: file or directory not found: tests/\n",
+  "exit_code": 4,
+  "timed_out": false,
+  "changed_paths": [
+    "Makefile"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user",
+  "note": "pytest was invoked from the wrong working directory (the checkout lacks tests/ there) — an invocation/environment problem, not a code change"
+}

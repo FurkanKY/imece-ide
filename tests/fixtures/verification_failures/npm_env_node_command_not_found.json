@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "name": "npm_env_node_command_not_found",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "npm",
+  "command": [
+    "npm",
+    "test"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "sh: 1: node: command not found\nnpm ERR! Test failed.  See above for more details.\n",
+  "exit_code": 127,
+  "timed_out": false,
+  "changed_paths": [
+    "package.json"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "environment_or_tooling",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user",
+  "note": "node itself is missing from PATH while running npm test — the tooling is absent, not the code"
+}

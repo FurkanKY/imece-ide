@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "npm_missing_module_chalk",
+  "origin": "synthetic",
+  "language": "javascript",
   "tool": "npm",
+  "command": [
+    "npm",
+    "test"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "internal/modules/cjs/loader.js:883\n  throw err;\n  ^\n\nError: Cannot find module 'chalk'\nRequire stack:\n- /repo/bin/cli.js\n",
   "exit_code": 1,
@@ -9,5 +18,10 @@
     "bin/cli.js"
   ],
   "baseline_status": null,
-  "expected_label": "missing_dependency"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "missing_dependency",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "missing_dependency",
+  "gold_action": "needs_user"
 }

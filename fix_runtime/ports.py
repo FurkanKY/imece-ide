@@ -48,7 +48,11 @@ class WorkerAttemptRunner(Protocol):
         FixWorkerRequest) or fix_runtime.prompt.render_initial_worker_input()
         (for an InitialWorkerRequest) — it must not be discarded, and the
         adapter must not reconstruct an unrelated prompt from
-        `request.trigger` instead. Structured fields on `request`
+        `request.trigger` instead. At the explicit verified collaboration
+        safe point only, that string may be replaced by a canonical rerender
+        from validated shared context and the request's immutable render
+        metadata; the returned `rendered_input` remains the input of record.
+        Structured fields on `request`
         (task/trigger/attempt_index/plan, where present) MAY additionally be
         used as metadata, but `rendered_input` is the input of record for
         BOTH request shapes.

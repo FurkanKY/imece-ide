@@ -44,6 +44,8 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Signal
 
@@ -56,7 +58,13 @@ import providers as provider_registry
 from agents import DEFAULT_ROUTING
 from run_runtime.events import RunEventType
 from run_runtime.legacy import LegacyRunCoordinator
+from run_runtime.pipeline import CanonicalPipelineRecorder
 from run_runtime.models import RunStatus
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
+from agent_execution_runtime import (
+    AgentExecutionRequest, AgentExecutionStatus, AgentRunCoordinator, build_agent_ports, execute_task,
+)
+from context_runtime import load_project_rules
 from webhost import state
 from webhost.api.activity import ActivityStreamer
 from webhost.bridge import handler, BridgeError
@@ -86,11 +94,340 @@ _active: dict = {
     # VerificationFailureGate | None -- run.followUp AYNI kapıyı yeniden
     # kullanır (bkz. _follow_up).
     "decision_gate": None,
+    "collab_session": None,
 }
+
+
+def _execute_with_collaboration(worker, operation):
+    """Run one pipeline execution under a worker-thread-owned collaboration lease."""
+    session = worker.collab_session
+    if session is None:
+        try:
+            worker.finished_ok.emit(operation())
+        except Exception as exc:
+            worker.failed.emit(str(exc))
+        return
+    from pipeline_runtime.models import PipelineReport
+    report = None
+    error = None
+    cleanup_failed = False
+    try:
+        try:
+            session.activate(worker.workspace, cancel_token=CancellationToken.from_event(worker.cancel_event))
+            report = operation()
+        except OperationCancelledError:
+            report = PipelineReport(worker.run_id, PipelineStatus.CANCELLED, "cancelled")
+        except Exception as exc:
+            error = "collab_activation_failed" if exc.__class__.__name__ == "HostCollaborationError" else "collab_run_failed"
+    finally:
+        try:
+            session.deactivate()
+        except Exception:
+            cleanup_failed = True
+    if cleanup_failed:
+        worker.failed.emit("collab_cleanup_failed")
+        return
+    if report is not None:
+        worker.finished_ok.emit(report)
+    elif error is not None:
+        worker.failed.emit(error)
+
+
+def get_collaboration_status(run_id=None):
+    """Return the in-memory, credential-free collaboration status for a run."""
+    session = _active.get("collab_session")
+    current_id = _active.get("run_id")
+    if run_id is not None and run_id != current_id:
+        return None
+    cached = state.get_collaboration_status_cache(run_id)
+    if cached and cached.get("state") == "cleanup_failed":
+        return {**cached, "runId": current_id}
+    if session is None:
+        return {**cached, "runId": current_id} if cached else None
+    try:
+        live = dict(session.status())
+        if cached and cached.get("state") in _COLLAB_TERMINAL_STATES and live.get("state") not in _COLLAB_TERMINAL_STATES:
+            live = cached
+        return {**live, "runId": current_id}
+    except Exception:
+        return {**_unavailable_collaboration_status(cached), "runId": current_id}
 
 # F6 (@-mentions): backend cap independent of (and enforced regardless of)
 # the Composer's own UI-level cap — a client is never trusted blindly.
 _MAX_MENTIONS = 10
+_draining_workers: list[tuple[object, object, object, str | None]] = []
+_delivery_lock = threading.RLock()
+_delivery_leases: dict[tuple[int, str], int] = {}
+_delivery_closing: set[tuple[int, str]] = set()
+
+
+def _delivery_is_busy(session=None, run_id=None):
+    with _delivery_lock:
+        keys = set(_delivery_closing) | {key for key, count in _delivery_leases.items() if count}
+        return any((session is None or key[0] == id(session)) and
+                   (run_id is None or key[1] == run_id) for key in keys)
+
+
+@contextmanager
+def borrow_delivery_context(run_id):
+    """Lease the immutable native-run inputs while delivery reads/captures them."""
+    borrowed, session, key = _capture_delivery_context(run_id)
+    with _delivery_lock:
+        if key in _delivery_closing:
+            raise RuntimeError("busy")
+        _delivery_leases[key] = _delivery_leases.get(key, 0) + 1
+    try:
+        # Recheck after acquiring the lease: a shutdown drain may have won the
+        # narrow interval between the first check and the lease registration.
+        _validate_delivery_context(run_id, borrowed, session)
+        yield borrowed
+    finally:
+        with _delivery_lock:
+            remaining = _delivery_leases.get(key, 0) - 1
+            if remaining > 0:
+                _delivery_leases[key] = remaining
+            else:
+                _delivery_leases.pop(key, None)
+        if any(entry[1] is session and entry[3] == run_id for entry in list(_draining_workers)):
+            _drain_collaboration_resources()
+
+
+@contextmanager
+def borrow_participant_context(run_id):
+    """Lease an accepted, idle pipeline run for a private participant command."""
+    with borrow_delivery_context(run_id) as borrowed:
+        project = state.get_project()
+        if (project is None or state.project_generation() != borrowed["generation"] or
+                Path(project.root).resolve(strict=True) != borrowed["project_root"]):
+            raise RuntimeError("stale")
+        yield borrowed
+
+
+def _capture_delivery_context(run_id):
+    from collab_runtime.context import SharedSnapshot
+
+    project = state.get_project()
+    session = _active.get("collab_session")
+    worker = _active.get("worker")
+    workspace = _active.get("workspace")
+    binding = session.accepted_binding if session is not None else None
+    if (project is None or type(run_id) is not str or not run_id or
+            _active.get("run_id") != run_id or _active.get("engine") != "pipeline" or
+            session is None or workspace is None or not isinstance(binding, SharedSnapshot)):
+        raise RuntimeError("invalid")
+    try:
+        root = Path(project.root).resolve(strict=True)
+        if root != Path(session.project_root).resolve(strict=True):
+            raise RuntimeError("stale")
+        if not Path(workspace.root).is_dir() or (worker is not None and not _worker_is_finished(worker)):
+            raise RuntimeError("busy")
+        current = _active["coordinator"].get_run()
+        if current.status != RunStatus.WAITING_USER:
+            raise RuntimeError("busy")
+    except RuntimeError:
+        raise
+    except Exception:
+        raise RuntimeError("invalid") from None
+    key = (id(session), run_id)
+    return ({"session": session, "workspace": workspace, "binding": binding,
+             "binding_data": binding.to_dict(),
+             "project_root": root, "generation": state.project_generation(), "run_id": run_id,
+             "available_paths": tuple(p.get("path") for p in (_active.get("proposals") or [])
+                                       if isinstance(p, dict) and isinstance(p.get("path"), str))},
+            session, key)
+
+
+def _validate_delivery_context(run_id, borrowed, session):
+    from collab_runtime.context import SharedSnapshot
+
+    project = state.get_project()
+    if (project is None or _active.get("run_id") != run_id or
+            _active.get("collab_session") is not session or
+            _active.get("workspace") is not borrowed["workspace"]):
+        raise RuntimeError("stale")
+    try:
+        binding = borrowed["session"].accepted_binding
+        if (Path(project.root).resolve(strict=True) != borrowed["project_root"] or
+                not Path(borrowed["workspace"].root).is_dir() or
+                not isinstance(binding, SharedSnapshot) or binding.to_dict() != borrowed["binding_data"]):
+            raise RuntimeError("stale")
+        worker = _active.get("worker")
+        if worker is not None and not _worker_is_finished(worker):
+            raise RuntimeError("busy")
+        if _active["coordinator"].get_run().status != RunStatus.WAITING_USER:
+            raise RuntimeError("busy")
+    except RuntimeError:
+        raise
+    except Exception:
+        raise RuntimeError("invalid") from None
+_collaboration_cleanup_lock = threading.RLock()
+_collaboration_cleanup_codes: dict[tuple[int, str | None], str] = {}
+_COLLAB_TERMINAL_STATES = {"access_denied", "resnapshot_required", "protocol_error", "server_error"}
+
+
+def _retain_collaboration(session, workspace, run_id, worker=None, terminal_code="run_finished"):
+    with _collaboration_cleanup_lock:
+        key = (id(session), run_id)
+        existing = next((item for item in _draining_workers
+                         if item[1] is session and item[3] == run_id), None)
+        if existing is None:
+            _draining_workers.append((worker, session, workspace, run_id))
+        elif existing[0] is None and worker is not None:
+            _draining_workers[_draining_workers.index(existing)] = (worker, session, workspace, run_id)
+        _collaboration_cleanup_codes.setdefault(key, terminal_code)
+
+
+def _cache_collaboration_status(session, run_id, state_name, code):
+    if _active.get("run_id") != run_id or _active.get("collab_session") is not session:
+        return
+    try:
+        status = dict(session.status())
+        previous = state.get_collaboration_status_cache(run_id)
+        previous_terminal = None
+        if previous:
+            if previous.get("state") in _COLLAB_TERMINAL_STATES:
+                previous_terminal = (previous["state"], previous.get("code"))
+            elif previous.get("recoveryState") in _COLLAB_TERMINAL_STATES:
+                previous_terminal = (previous["recoveryState"], previous.get("recoveryCode"))
+        if previous_terminal:
+            status["recoveryState"], status["recoveryCode"] = previous_terminal
+        if state_name == "cleanup_failed":
+            if status.get("state") in _COLLAB_TERMINAL_STATES:
+                status["recoveryState"] = status["state"]
+                status["recoveryCode"] = status.get("code")
+            status["state"], status["code"] = "cleanup_failed", "cleanup_failed"
+        elif previous_terminal and status.get("state") not in _COLLAB_TERMINAL_STATES:
+            status["state"], status["code"] = previous_terminal
+        elif status.get("state") not in _COLLAB_TERMINAL_STATES:
+            status["state"], status["code"] = state_name, code
+        state.set_collaboration_status_cache({
+            "runId": run_id, "projectRoot": str(session.project_root), "status": status,
+        })
+    except Exception:
+        state.set_collaboration_status_cache({
+            "runId": run_id, "projectRoot": str(getattr(session, "project_root", "")),
+            "status": _unavailable_collaboration_status(state.get_collaboration_status_cache(run_id)),
+        })
+
+
+def _unavailable_collaboration_status(cached=None):
+    status = dict(cached or {})
+    if status.get("state") in _COLLAB_TERMINAL_STATES:
+        status["recoveryState"], status["recoveryCode"] = status["state"], status.get("code")
+    status.update({
+        "state": "unavailable", "code": "unavailable",
+        "consumedRevision": status.get("consumedRevision"),
+        "receivedRevision": status.get("receivedRevision"),
+        "pendingCount": status.get("pendingCount", 0),
+        "sessionId": status.get("sessionId", ""),
+        "taskId": status.get("taskId", ""),
+        "memberId": status.get("memberId", ""),
+        "active": status.get("active"),
+    })
+    return status
+
+
+def _worker_is_finished(worker):
+    if worker is None:
+        return True
+    try:
+        return bool(worker.isFinished())
+    except Exception:
+        return False
+
+
+def _drain_collaboration_resources():
+    """Retry only quiescent retained resources; active workers keep ownership."""
+    with _collaboration_cleanup_lock:
+        entries = list(_draining_workers)
+        for entry in entries:
+            worker, session, workspace, run_id = entry
+            with _delivery_lock:
+                if not _worker_is_finished(worker) or _delivery_is_busy(session, run_id):
+                    continue
+                key = (id(session), run_id)
+                _delivery_closing.add(key)
+            try:
+                try:
+                    session.close()
+                except Exception:
+                    _cache_collaboration_status(session, run_id, "cleanup_failed", "cleanup_failed")
+                    continue
+                if workspace is not None:
+                    try:
+                        workspace.dispose()
+                    except Exception:
+                        _cache_collaboration_status(session, run_id, "cleanup_failed", "cleanup_failed")
+                        continue
+                terminal_code = _collaboration_cleanup_codes.get(key, "run_finished")
+                _cache_collaboration_status(session, run_id, "closed", terminal_code)
+                _draining_workers.remove(entry)
+                _collaboration_cleanup_codes.pop(key, None)
+                if _active.get("run_id") == run_id and _active.get("collab_session") is session:
+                    _active["collab_session"] = None
+                    if _active.get("workspace") is workspace:
+                        _active["workspace"] = None
+            finally:
+                with _delivery_lock:
+                    _delivery_closing.discard(key)
+
+
+def _cleanup_after_collaboration_decision(session, run_id, terminal_code):
+    """Keep a committed apply/reject result successful while cleanup is retriable."""
+    workspace = _active.get("workspace")
+    if session is None:
+        if _active.get("engine") == "agent":
+            _dispose_agent_workspace(workspace)
+        else:
+            _dispose_workspace()
+        return
+    if _delivery_is_busy(session, run_id):
+        _retain_collaboration(session, workspace, run_id, terminal_code=terminal_code)
+        return
+    try:
+        session.close()
+    except Exception:
+        _retain_collaboration(session, workspace, run_id, terminal_code=terminal_code)
+        _cache_collaboration_status(session, run_id, "cleanup_failed", "cleanup_failed")
+        return
+    if workspace is not None:
+        try:
+            workspace.dispose()
+        except Exception:
+            _retain_collaboration(session, workspace, run_id, terminal_code=terminal_code)
+            _cache_collaboration_status(session, run_id, "cleanup_failed", "cleanup_failed")
+            return
+    _cache_collaboration_status(session, run_id, "closed", terminal_code)
+    if _active.get("run_id") == run_id and _active.get("collab_session") is session:
+        _active["collab_session"] = None
+        if _active.get("workspace") is workspace:
+            _active["workspace"] = None
+
+
+def _retire_collaboration_after_worker(worker, session, workspace, run_id, terminal_code="run_finished"):
+    """Keep worker-owned resources alive until QThread has actually exited."""
+    if session is None:
+        return
+    with _collaboration_cleanup_lock:
+        entry = next((item for item in _draining_workers
+                      if item[1] is session and item[3] == run_id), None)
+        if entry is None:
+            entry = (worker, session, workspace, run_id)
+            _draining_workers.append(entry)
+        _collaboration_cleanup_codes.setdefault((id(session), run_id), terminal_code)
+
+    def cleanup():
+        if not _worker_is_finished(worker):
+            return
+        _drain_collaboration_resources()
+
+    if _worker_is_finished(worker):
+        cleanup()
+    else:
+        worker.finished.connect(cleanup)
+        # Close the check/connect race where QThread exits between the two.
+        if _worker_is_finished(worker):
+            cleanup()
 
 # kanonik pipeline rolü -> legacy routing anahtarı (bkz. agents.DEFAULT_ROUTING).
 _ROLE_ROUTING_KEY = {"planner": "planner", "worker": "coder", "reviewer": "reviewer"}
@@ -253,7 +590,7 @@ class _PipelineWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=None,
-                 decision_gate=None):
+                 decision_gate=None, collab_session=None):
         super().__init__()
         self.runtime = runtime
         self.run_id = run_id
@@ -263,9 +600,10 @@ class _PipelineWorker(QThread):
         self.cancel_event = cancel_event
         self.pinned_paths = pinned_paths or []
         self.decision_gate = decision_gate
+        self.collab_session = collab_session
 
     def run(self):
-        try:
+        def execute():
             pipeline = PipelineRunner(
                 self.runtime,
                 planner=self.ports.planner, worker=self.ports.worker,
@@ -273,15 +611,13 @@ class _PipelineWorker(QThread):
                 change_provider=self.ports.change_provider,
                 decision_gate=self.decision_gate,
             )
-            report = pipeline.run(
+            return pipeline.run(
                 self.run_id, self.workspace, self.task,
                 cancel_event=self.cancel_event,
                 on_stage=lambda s, info: self.stage.emit(s, dict(info)),
                 pinned_paths=self.pinned_paths,
             )
-            self.finished_ok.emit(report)
-        except Exception as e:  # motor hatası UI'a düzgün gitsin
-            self.failed.emit(str(e))
+        _execute_with_collaboration(self, execute)
 
 
 class _FollowUpWorker(QThread):
@@ -295,7 +631,7 @@ class _FollowUpWorker(QThread):
 
     def __init__(
         self, runtime, run_id, workspace, ports, task, feedback, plan_text, cancel_event,
-        pinned_paths=None, max_fix_attempts=None, decision_gate=None,
+        pinned_paths=None, max_fix_attempts=None, decision_gate=None, collab_session=None,
     ):
         super().__init__()
         self.runtime = runtime
@@ -309,9 +645,10 @@ class _FollowUpWorker(QThread):
         self.pinned_paths = pinned_paths or []
         self.max_fix_attempts = max_fix_attempts
         self.decision_gate = decision_gate
+        self.collab_session = collab_session
 
     def run(self):
-        try:
+        def execute():
             pipeline = PipelineRunner(
                 self.runtime,
                 planner=self.ports.planner, worker=self.ports.worker,
@@ -322,16 +659,47 @@ class _FollowUpWorker(QThread):
             kwargs = {}
             if self.max_fix_attempts is not None:
                 kwargs["max_fix_attempts"] = self.max_fix_attempts
-            report = pipeline.continue_with_feedback(
+            return pipeline.continue_with_feedback(
                 self.run_id, self.workspace, self.feedback,
                 task=self.task, plan_report_or_text=self.plan_text, pinned_paths=self.pinned_paths,
                 cancel_event=self.cancel_event,
                 on_stage=lambda s, info: self.stage.emit(s, dict(info)),
                 **kwargs,
             )
-            self.finished_ok.emit(report)
-        except Exception as e:  # motor hatası UI'a düzgün gitsin
-            self.failed.emit(str(e))
+        _execute_with_collaboration(self, execute)
+
+
+class _AgentWorker(QThread):
+    """One bounded single-agent execution; no planner/reviewer/pipeline report."""
+    stage = Signal(str, dict)
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, runtime, run_id, workspace, ports, task, provider_id, cancel_event, mentions):
+        super().__init__()
+        self.runtime, self.run_id, self.workspace, self.ports = runtime, run_id, workspace, ports
+        self.task, self.provider_id, self.cancel_event = task, provider_id, cancel_event
+        self.mentions = tuple(mentions)
+        self.feedback = None
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def run(self):
+        try:
+            result = execute_task(
+                self.runtime, self.run_id,
+                AgentExecutionRequest(self.task if self.feedback is None else
+                                      f"Original task:\n{self.task}\n\nUser follow-up:\n{self.feedback}",
+                                      self.provider_id, self.workspace,
+                                      rules=load_project_rules(self.workspace.root),
+                                      pinned_paths=self.mentions),
+                ports=self.ports, cancel_token=CancellationToken.from_event(self.cancel_event),
+                on_stage=lambda stage: self.stage.emit(stage, {}),
+            )
+            self.finished_ok.emit(result)
+        except Exception:
+            self.failed.emit("agent_execution_failed")
 
 
 def _effective_routing(params: dict) -> dict:
@@ -463,6 +831,22 @@ def _require_project() -> Project:
     if proj is None:
         raise BridgeError("no_project", "Önce bir proje aç.")
     return proj
+
+
+def _require_agent_project(proj: Project) -> None:
+    """Prevent an agent's pending proposal/worktree being retargeted to another project."""
+    if _active.get("engine") != "agent":
+        return
+    expected = _active.get("agent_project_root")
+    workspace = _active.get("workspace")
+    if expected is None and workspace is not None:
+        expected = getattr(getattr(workspace, "snapshot", None), "source_root", None)
+    try:
+        matches = expected is not None and Path(proj.root).resolve(strict=True) == Path(expected).resolve(strict=True)
+    except (OSError, RuntimeError, TypeError):
+        matches = False
+    if not matches:
+        raise BridgeError("agent_project_stale", "Tek ajan koşusunun özgün projesi artık seçili değil.")
 
 
 _TERMINAL_RUN_STATUSES = frozenset({
@@ -715,20 +1099,108 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=
 @handler("run.start")
 def _start(params, ctx):
     proj = _require_project()
+    collab_requested = "collabApprovalHandle" in params
+    collab_handle = params.get("collabApprovalHandle") if collab_requested else None
+    if collab_requested and (type(collab_handle) is not str or not collab_handle):
+        raise BridgeError("collab_invalid", "Yerel işbirliği onayı geçersiz.")
     task = (params.get("task") or "").strip()
     if not task:
         raise BridgeError("empty_task", "Görev boş.")
+    _drain_collaboration_resources()
+    if any(item[1] is not None and
+           Path(proj.root).resolve() == Path(item[1].project_root).resolve()
+           for item in list(_draining_workers)):
+        raise BridgeError("collab_cleanup_failed", "Önceki yerel işbirliği kaynağı güvenle kapatılamadı.")
     if _active["worker"] is not None and _active["worker"].isRunning():
         raise BridgeError("busy", "Zaten bir koşu sürüyor.")
+    if _delivery_is_busy():
+        raise BridgeError("busy", "Teslimat işlemi sürüyor.")
     if _active_canonical_run_blocks_start():
         # Kanonik Run hâlâ terminal-olmayan bir durumda (CREATED/RUNNING/
         # WAITING_USER) olabilir; yeni bir koşu başlatmak bu durumu sessizce
         # terk ederdi.
         raise BridgeError("pending_proposals", "Bekleyen öneriler var; önce uygula veya reddet.")
+    if _active.get("engine") == "agent" and _active.get("workspace") is not None:
+        if not _dispose_agent_workspace(_active["workspace"]):
+            raise BridgeError("workspace_cleanup_failed", "Tek ajan çalışma alanı güvenle kapatılamadı.")
+
+    # Explicit provider mode bypasses all legacy routing and three-role setup.
+    if "providerId" in params:
+        provider_id = params.get("providerId")
+        if type(provider_id) is not str or not provider_id or len(provider_id) > 128:
+            raise BridgeError("invalid_provider", "Sağlayıcı geçersiz.")
+        if "routing" in params or any(k in params for k in ("planner", "coder", "reviewer")):
+            raise BridgeError("conflicting_routing", "Sağlayıcı modu diğer yönlendirmelerle kullanılamaz.")
+        if collab_requested:
+            raise BridgeError("collab_unsupported", "Tek ajan koşuları yerel işbirliğini desteklemiyor.")
+        supported, why = engine_factory.role_supported(provider_id)
+        if not supported:
+            raise BridgeError("invalid_provider", why)
+        if engine_factory._repo_root_for(proj.root) is None:
+            raise BridgeError("agent_requires_git", "Tek ajan koşusu için Git deposu gerekir.")
+        if len(task) > 20_000:
+            raise BridgeError("task_too_long", "Görev çok uzun.")
+        mentions, invalid_mentions = _validate_mentions(proj, params.get("mentions") or [])
+        runtime = state.get_run_runtime()
+        coordinator = AgentRunCoordinator.start(
+            runtime, project_root=proj.root, task=task, provider_id=provider_id,
+        )
+        run_id = coordinator.run_id
+        workspace = None
+        try:
+            workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
+            ports = build_agent_ports(runtime, run_id, provider_id)
+        except Exception:
+            if workspace is not None:
+                workspace.dispose()
+            coordinator.finish_failed("agent_worker_unavailable")
+            raise BridgeError("worker_start_failed", "Tek ajan worker'ı başlatılamadı.") from None
+        cancel_event = threading.Event()
+        _active.update({"worker": None, "coordinator": coordinator, "run_id": run_id, "proposals": [],
+                        "engine": "agent", "workspace": workspace, "cancel_event": cancel_event,
+                        "activity_streamer": None, "pipeline_ports": ports, "task": task,
+                        "plan_text": None, "pinned_paths": list(mentions), "decision_gate": None,
+                        "collab_session": None, "agent_provider_id": provider_id,
+                        "agent_project_root": Path(proj.root).resolve()})
+        bridge = ctx._bridge
+        ended = {"flag": False}
+        emit_ui = lambda ev: bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
+        worker = _AgentWorker(runtime, run_id, workspace, ports, task, provider_id, cancel_event, mentions)
+        _active["worker"] = worker
+        try:
+            _wire_agent_worker(worker, runtime=runtime, run_id=run_id, coordinator=coordinator,
+                               workspace=workspace, proj=proj, emit_ui=emit_ui, bridge=bridge, ended=ended)
+        except Exception as exc:
+            if worker.isRunning() or getattr(worker, "agent_started", False):
+                # Started workers must remain reachable by cancel/shutdown.
+                if isinstance(exc, BridgeError):
+                    raise
+                return {"runId": run_id}
+            try:
+                coordinator.finish_failed("agent_worker_unavailable")
+            except Exception:
+                pass
+            disposed = _dispose_agent_workspace(workspace)
+            if _active.get("worker") is worker and disposed:
+                _active.update({"worker": None, "coordinator": None, "run_id": None,
+                                "workspace": None, "cancel_event": None, "engine": "legacy",
+                                "pipeline_ports": None, "activity_streamer": None})
+            raise BridgeError("worker_start_failed", "Tek ajan worker'ı başlatılamadı.") from None
+        for bad in invalid_mentions:
+            emit_ui({"type": "info", "text": f"Bahsedilen dosya bulunamadı: {bad}"})
+        return {"runId": run_id}
 
     routing = _effective_routing(params)
     mentions, invalid_mentions = _validate_mentions(proj, params.get("mentions") or [])
     runtime = state.get_run_runtime()
+    prefs = ui_prefs.load()
+    ai_engine_pref = prefs.get("ai_engine", "auto")
+    selection = engine_factory.select_engine(proj.root, routing, ai_engine_pref=ai_engine_pref)
+    if collab_requested:
+        coder = provider_registry.get(routing.get("coder")) if routing.get("coder") else None
+        if (selection.engine != "pipeline" or PipelineRunner is None or coder is None or
+                coder.get("kind") not in ("openai", "anthropic")):
+            raise BridgeError("collab_unsupported", "İşbirliği yalnızca yerel native pipeline kodlayıcısıyla kullanılabilir.")
     # run.created/run.started BURADA, QThread BAŞLAMADAN ÖNCE kalıcı olur.
     # Başarısız olursa (Task/Run kalıcılığı) BridgeError doğal olarak
     # yukarı taşınır — hiçbir yerel worker/host durumu KURULMAMIŞ olur.
@@ -736,6 +1208,22 @@ def _start(params, ctx):
         runtime, project_root=proj.root, task=task, routing=routing,
     )
     run_id = coordinator.run_id
+    state.set_collaboration_status_cache(None)
+    collab_session = None
+    if collab_requested:
+        try:
+            collab_session = state.get_collaboration_host().bind_run(collab_handle, proj.root, run_id)
+        except Exception as exc:
+            try:
+                coordinator.finish_failed("collab_invalid")
+            except Exception:
+                pass
+            code = getattr(exc, "code", None)
+            if code == "stale":
+                raise BridgeError("collab_stale", "Yerel işbirliği onayı proje veya kaynak sürümüyle eşleşmiyor.") from None
+            if code == "busy":
+                raise BridgeError("collab_busy", "İşbirliği checkpoint'i başka bir koşu tarafından kullanılıyor.") from None
+            raise BridgeError("collab_invalid", "Yerel işbirliği onayı geçersiz veya kullanılamıyor.") from None
 
     _active["proposals"] = []
     _active["coordinator"] = coordinator
@@ -750,6 +1238,7 @@ def _start(params, ctx):
     # buna ek bir bağımsız koruma sağlar).
     _active["pipeline_ports"] = None
     _active["decision_gate"] = None
+    _active["collab_session"] = collab_session
     _active["task"] = task
     _active["plan_text"] = None
     _active["pinned_paths"] = list(mentions)
@@ -789,10 +1278,29 @@ def _start(params, ctx):
         bridge.emit_event("run.finished", payload)
 
     # ---------------- motor seçimi (T1.2) ----------------
-    prefs = ui_prefs.load()
-    ai_engine_pref = prefs.get("ai_engine", "auto")
+    # Use canonical routing for ports. Collaboration additionally pins its
+    # safe-point to the native worker boundary; opt-out keeps the legacy call shape.
     selection = engine_factory.select_engine(proj.root, coordinator.routing, ai_engine_pref=ai_engine_pref)
     fallback_reason = selection.reason
+    canonical_coder = provider_registry.get(coordinator.routing.get("coder")) if coordinator.routing.get("coder") else None
+    if collab_session is not None and (
+            selection.engine != "pipeline" or PipelineRunner is None or canonical_coder is None or
+            canonical_coder.get("kind") not in ("openai", "anthropic")):
+        closed = True
+        try:
+            collab_session.close()
+        except Exception:
+            closed = False
+            _retain_collaboration(collab_session, None, run_id, terminal_code="run_failed")
+        try:
+            coordinator.finish_failed("collab_unsupported")
+        except Exception:
+            pass
+        if closed:
+            _active["collab_session"] = None
+        _active["coordinator"] = None
+        _active["run_id"] = None
+        raise BridgeError("collab_unsupported", "İşbirliği yalnızca yerel native pipeline kodlayıcısıyla kullanılabilir.")
     pipeline_ports = None
     workspace = None
     # Jev System One karar katmanı (bkz. decision_runtime/, engine_factory.py
@@ -803,7 +1311,11 @@ def _start(params, ctx):
     if selection.engine == "pipeline" and PipelineRunner is not None:
         try:
             workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
-            pipeline_ports = engine_factory.build_pipeline_ports(runtime, run_id, coordinator.routing)
+            if collab_session is not None:
+                pipeline_ports = engine_factory.build_pipeline_ports(
+                    runtime, run_id, coordinator.routing, worker_safe_point=collab_session.safe_point)
+            else:
+                pipeline_ports = engine_factory.build_pipeline_ports(runtime, run_id, coordinator.routing)
             decision_gate = engine_factory.build_verification_failure_gate(
                 engine_factory.decision_layer_preference(prefs), runtime=runtime, run_id=run_id,
             )
@@ -816,6 +1328,22 @@ def _start(params, ctx):
                 workspace = None
             pipeline_ports = None
             decision_gate = None
+            if collab_session is not None:
+                closed = True
+                try:
+                    collab_session.close()
+                except Exception:
+                    closed = False
+                    _retain_collaboration(collab_session, workspace, run_id, terminal_code="run_failed")
+                try:
+                    coordinator.finish_failed("collab_unavailable")
+                except Exception:
+                    pass
+                if closed:
+                    _active["collab_session"] = None
+                _active["coordinator"] = None
+                _active["run_id"] = None
+                raise BridgeError("collab_unavailable", "Yerel işbirliği pipeline'ı başlatılamadı.") from None
             fallback_reason = f"Yeni motor kullanılamadı ({exc}); klasik motor kullanılıyor."
     _active["pipeline_ports"] = pipeline_ports
     _active["decision_gate"] = decision_gate
@@ -839,6 +1367,7 @@ def _start(params, ctx):
                 runtime, coordinator, workspace, pipeline_ports, task,
                 emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
                 ended=ended, bridge=bridge, pinned_paths=mentions, decision_gate=decision_gate,
+                collab_session=collab_session,
             )
         else:
             _active["engine"] = "legacy"
@@ -854,7 +1383,8 @@ def _start(params, ctx):
         # hiç başlamamış bir worker için run.finished YAYINLANMAZ — bu istek
         # zaten BridgeError ile başarısız olacaktır.
         try:
-            coordinator.finish_failed(f"Yerel worker başlatılamadı: {exc}")
+            coordinator.finish_failed(
+                "collab_unavailable" if collab_requested else f"Yerel worker başlatılamadı: {exc}")
         except Exception:
             pass
         if workspace is not None:
@@ -862,6 +1392,13 @@ def _start(params, ctx):
                 workspace.dispose()
             except Exception:
                 pass
+        if collab_session is not None:
+            closed = True
+            try:
+                collab_session.close()
+            except Exception:
+                closed = False
+                _retain_collaboration(collab_session, workspace, run_id, terminal_code="run_failed")
         _stop_activity_streamer()
         _active["worker"] = None
         _active["coordinator"] = None
@@ -870,6 +1407,10 @@ def _start(params, ctx):
         _active["workspace"] = None
         _active["cancel_event"] = None
         _active["decision_gate"] = None
+        if collab_session is None or closed:
+            _active["collab_session"] = None
+        if collab_requested:
+            raise BridgeError("collab_unavailable", "Yerel işbirliği worker'ı başlatılamadı.") from None
         raise BridgeError("worker_start_failed", f"Koşu başlatılamadı: {exc}")
 
     _active["worker"] = worker
@@ -955,7 +1496,7 @@ def _start_legacy_run(proj, coordinator, task, *, emit_ui, finish, settle_canoni
 
 
 def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui, finish, settle_canonical_failure,
-                         ended, bridge, pinned_paths=None, decision_gate=None):
+                         ended, bridge, pinned_paths=None, decision_gate=None, collab_session=None):
     run_id = coordinator.run_id
     cancel_event = threading.Event()
     # F7: this MUST be the same Event instance run.cancel()/shutdown() act
@@ -967,7 +1508,7 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     proj = _require_project()
     worker = _PipelineWorker(
         runtime, run_id, workspace, ports, task, cancel_event, pinned_paths=pinned_paths,
-        decision_gate=decision_gate,
+        decision_gate=decision_gate, collab_session=collab_session,
     )
     _wire_pipeline_worker(
         worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,
@@ -975,6 +1516,140 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
         ended=ended, bridge=bridge, activity_after_seq=0,
     )
     return worker
+
+
+def _dispose_agent_workspace(workspace) -> bool:
+    """Dispose a quiescent agent workspace; retain host ownership on failure."""
+    if workspace is None:
+        return True
+    try:
+        workspace.dispose()
+    except Exception:
+        return False
+    if _active.get("workspace") is workspace:
+        _active["workspace"] = None
+    return True
+
+
+def _agent_event_for_execution(runtime, run_id, event_type, execution_id):
+    """Find an exact attempt's latest canonical event through a fixed seq bound."""
+    through_seq = runtime.get_run(run_id).last_event_seq
+    after_seq = 0
+    found = None
+    while after_seq < through_seq:
+        page = runtime.events(run_id, after_seq=after_seq, limit=200)
+        if not page.events:
+            break
+        for event in page.events:
+            if event.seq > through_seq:
+                break
+            if event.type == event_type and event.payload.get("execution_id") == execution_id:
+                found = event
+        last_seq = page.events[-1].seq
+        if last_seq <= after_seq:
+            break
+        after_seq = last_seq
+        if not page.has_more:
+            break
+    return found
+
+
+def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj, emit_ui, bridge, ended,
+                       activity_after_seq=0):
+    """Bridge the agent core's canonical result without synthesizing pipeline events."""
+    def dispose_after_quiescent():
+        def dispose():
+            _dispose_agent_workspace(workspace)
+        if worker.isFinished():
+            dispose()
+        else:
+            worker.finished.connect(dispose)
+            if worker.isFinished():
+                dispose()
+
+    def stage(name, _info):
+        emit_ui({"type": "stage", "stage": "code" if name == "working" else "verifying"})
+
+    def finish(status, error=None):
+        if ended["flag"]:
+            return
+        ended["flag"] = True
+        _stop_activity_streamer()
+        payload = {"runId": run_id, "status": status, "engine": "agent"}
+        if error:
+            payload["error"] = error
+        bridge.emit_event("run.finished", payload)
+
+    def failed(_message):
+        if coordinator.get_run().status == RunStatus.RUNNING:
+            coordinator.finish_failed("agent_execution_failed")
+        dispose_after_quiescent()
+        finish("failed", "agent_execution_failed")
+
+    def complete(result):
+        if result.status is AgentExecutionStatus.NEEDS_USER:
+            try:
+                evidence_event = _agent_event_for_execution(
+                    runtime, run_id, RunEventType.PROPOSAL_READY, result.execution_id)
+                if evidence_event is None:
+                    raise RuntimeError("proposal receipt missing")
+                evidence = dict(evidence_event.payload)
+                change_set = worker.ports.change_provider.capture(workspace)
+                if evidence.get("diff_sha256") != change_set.diff_sha256:
+                    evidence["verification"] = dict(evidence.get("verification") or {})
+                    if evidence["verification"].get("outcome") == "pass":
+                        evidence["verification"]["outcome"] = "invalidated"
+                proposals, skipped = _build_pipeline_proposals(proj, workspace, change_set)
+                _active["proposals"] = proposals
+                emit_ui({"type": "diff", "files": list(result.changed_paths)})
+                emit_ui({"type": "proposal", "proposals": proposals,
+                         "totals": {"latency_s": None, "tokens": None, "cost_usd": None}})
+                emit_ui({"type": "evidence", **evidence})
+                if evidence.get("agent_message"):
+                    emit_ui({"type": "summary", "text": evidence["agent_message"]})
+                for path in skipped:
+                    emit_ui({"type": "info", "text": f"İkili dosya önerisi gösterilemiyor: {path}"})
+            except Exception:
+                coordinator.finish_failed("agent_result_processing_failed")
+                dispose_after_quiescent()
+                finish("failed", "agent_result_processing_failed")
+                return
+            finish("done")
+        elif result.status is AgentExecutionStatus.NO_CHANGES:
+            dispose_after_quiescent()
+            finish("done")
+        elif result.status is AgentExecutionStatus.CANCELLED:
+            dispose_after_quiescent()
+            finish("cancelled")
+        else:
+            dispose_after_quiescent()
+            finish("failed", "agent_execution_failed")
+
+    worker.stage.connect(stage)
+    worker.failed.connect(failed)
+    worker.finished_ok.connect(complete)
+    worker.start()
+    worker.agent_started = True
+    # Activity streaming is optional: it must not invalidate an already-started
+    # native worker or sever the host's ownership/cancellation handle.
+    try:
+        _stop_activity_streamer()
+        streamer = ActivityStreamer(runtime, run_id, after_seq=activity_after_seq)
+        streamer.activity.connect(lambda item: bridge.emit_event("run.activity", item))
+        streamer.start()
+        _active["activity_streamer"] = streamer
+    except Exception:
+        try:
+            if "streamer" in locals():
+                streamer.request_stop()
+                streamer.wait(1000)
+        except Exception:
+            pass
+        emit_ui({"type": "info", "text": "Canlı etkinlik akışı kullanılamıyor; ajan koşusu devam ediyor."})
+        # Admission already succeeded. Return its run ID so the caller can
+        # still observe/cancel it; optional telemetry cannot turn it into a
+        # failed start with an unreachable UI handle.
+        return
 
 
 def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, proj, emit_ui, finish,
@@ -991,6 +1666,7 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     # usage.recorded üretmeyen (ör. ACP/hesap) bir rol için arayüzün "—"
     # gösterebilmesi içindir -- 0 token ile "hiç veri yok" birbirine
     # KARIŞTIRILMAZ.
+    worker_session = getattr(worker, "collab_session", None)
     stage_state = {
         "role": None, "start_ts": None, "last_seq": 0,
         "role_tokens": 0, "role_cost": 0.0, "role_has_usage": False,
@@ -1067,6 +1743,8 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     def on_stage(stage: str, info: dict):
         if ended["flag"]:
             return
+        if worker_session is not None and _active.get("run_id") != run_id:
+            return
         if stage == "planning":
             enter_role_stage("planner", "plan")
         elif stage in ("working", "fixing"):
@@ -1092,13 +1770,23 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     def on_pipeline_failed(msg: str):
         if ended["flag"]:
             return
+        if worker_session is not None and _active.get("run_id") != run_id:
+            _retire_collaboration_after_worker(worker, worker_session, workspace, run_id, "run_failed")
+            return
         metrics_timer.stop()
         settle_canonical_failure(msg)
-        _dispose_workspace()
+        if worker_session is not None:
+            _retire_collaboration_after_worker(worker, worker_session, workspace, run_id, "run_failed")
+        else:
+            _dispose_workspace()
         finish("failed", msg)
 
     def on_pipeline_finished(report):
         if ended["flag"]:
+            return
+        if worker_session is not None and _active.get("run_id") != run_id:
+            code = "run_cancelled" if report.status is PipelineStatus.CANCELLED else "run_finished"
+            _retire_collaboration_after_worker(worker, worker_session, workspace, run_id, code)
             return
         # A4-A2: iptal (CANCELLED) "done" aşamasından GEÇMEDEN buraya
         # ulaşabilir -- zamanlayıcı orada durdurulmamış olabilir.
@@ -1118,9 +1806,13 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
             # (bkz. _apply/_reject/on_pipeline_failed/shutdown).
             _emit_pipeline_report(emit_ui, proj, workspace, report, runtime=runtime, run_id=run_id)
         except Exception as exc:
-            settle_canonical_failure(f"Sonuç işlenemedi: {exc}")
-            _dispose_workspace()
-            finish("failed", str(exc))
+            message = "collab_run_failed" if worker_session is not None else f"Sonuç işlenemedi: {exc}"
+            settle_canonical_failure(message)
+            if worker_session is not None:
+                _retire_collaboration_after_worker(worker, worker_session, workspace, run_id, "run_failed")
+            else:
+                _dispose_workspace()
+            finish("failed", message)
             return
 
         # F2: a fresh Planner attempt's plan becomes the context for any
@@ -1140,10 +1832,24 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
         except Exception:
             still_waiting = False
         if not still_waiting:
-            _dispose_workspace()
+            if worker_session is not None:
+                code = ("run_cancelled" if report.status is PipelineStatus.CANCELLED else
+                        "run_failed" if report.status in (PipelineStatus.FAILED, PipelineStatus.EXHAUSTED) else
+                        "run_finished")
+                _retire_collaboration_after_worker(worker, worker_session, workspace, run_id, code)
+            else:
+                _dispose_workspace()
 
         status = report.status
         if PipelineStatus is not None and status is PipelineStatus.CANCELLED:
+            try:
+                if coordinator.get_run().status != RunStatus.CANCELLED:
+                    coordinator.finish_cancelled()
+            except Exception as exc:
+                message = "Kanonik iptal sonlandırması başarısız oldu."
+                settle_canonical_failure(message)
+                finish("failed", message)
+                return
             finish("cancelled")
         elif PipelineStatus is not None and status in (PipelineStatus.FAILED, PipelineStatus.EXHAUSTED):
             finish("failed", report.reason or "pipeline_failed")
@@ -1191,11 +1897,66 @@ def _follow_up(params, ctx):
     aksi halde BridgeError (klasik motorda Türkçe, kullanıcıya gösterilecek
     özel bir mesajla)."""
     proj = _require_project()
+    if _delivery_is_busy():
+        raise BridgeError("busy", "Teslimat işlemi sürüyor.")
+    collab_handle_present = "collabApprovalHandle" in params
+    collab_handle = params.get("collabApprovalHandle") if collab_handle_present else None
+    if collab_handle_present and (type(collab_handle) is not str or not collab_handle):
+        raise BridgeError("collab_invalid", "Yerel işbirliği onayı geçersiz.")
     feedback = (params.get("feedback") or "").strip()
     if not feedback:
         raise BridgeError("empty_feedback", "Takip isteği boş.")
 
     if _active.get("engine") != "pipeline":
+        if _active.get("engine") == "agent":
+            _require_agent_project(proj)
+            if collab_handle_present:
+                raise BridgeError("collab_unsupported", "Tek ajan koşuları yerel işbirliğini desteklemiyor.")
+            worker = _active.get("worker")
+            if worker is not None and worker.isRunning():
+                raise BridgeError("busy", "Zaten bir koşu sürüyor.")
+            coordinator, workspace = _active.get("coordinator"), _active.get("workspace")
+            ports = _active.get("pipeline_ports")
+            if coordinator is None or workspace is None or ports is None:
+                raise BridgeError("no_active_run", "Takip isteği için bekleyen bir öneri yok.")
+            if coordinator.get_run().status is not RunStatus.WAITING_USER:
+                raise BridgeError("not_waiting_user", "Takip isteği için bekleyen bir öneri yok.")
+            mentions, _invalid = _validate_mentions(proj, params.get("mentions") or [])
+            pinned = list(dict.fromkeys(list(_active.get("pinned_paths") or []) + mentions))
+            runtime = state.get_run_runtime()
+            CanonicalPipelineRecorder(runtime, coordinator.run_id).resumed(reason="user_feedback")
+            _active["proposals"] = []
+            _active["pinned_paths"] = pinned
+            cancel_event = threading.Event()
+            _active["cancel_event"] = cancel_event
+            next_worker = _AgentWorker(runtime, coordinator.run_id, workspace, ports,
+                                        _active.get("task") or "", _active["agent_provider_id"],
+                                        cancel_event, pinned)
+            next_worker.feedback = feedback
+            bridge = ctx._bridge
+            ended = {"flag": False}
+            emit_ui = lambda ev: bridge.emit_event("run.event", {"runId": coordinator.run_id, "ev": ev})
+            _active["worker"] = next_worker
+            try:
+                _wire_agent_worker(next_worker, runtime=runtime, run_id=coordinator.run_id,
+                                   coordinator=coordinator, workspace=workspace, proj=proj,
+                                   emit_ui=emit_ui, bridge=bridge, ended=ended,
+                                   activity_after_seq=coordinator.get_run().last_event_seq)
+            except Exception as exc:
+                if next_worker.isRunning() or getattr(next_worker, "agent_started", False):
+                    if isinstance(exc, BridgeError):
+                        raise
+                    return {"runId": coordinator.run_id}
+                try:
+                    coordinator.finish_failed("agent_worker_unavailable")
+                except Exception:
+                    pass
+                _dispose_agent_workspace(workspace)
+                if _active.get("worker") is next_worker:
+                    _active["worker"] = None
+                raise BridgeError("worker_start_failed", "Takip worker'ı başlatılamadı.") from None
+            emit_ui({"type": "followUpStarted", "feedback": feedback})
+            return {"runId": coordinator.run_id}
         raise BridgeError(
             "follow_up_unsupported",
             "Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın.",
@@ -1215,6 +1976,21 @@ def _follow_up(params, ctx):
         raise BridgeError("canonical_state_unavailable", f"Koşu durumu doğrulanamadı: {exc}")
     if current.status != RunStatus.WAITING_USER:
         raise BridgeError("not_waiting_user", "Takip isteği için bekleyen bir öneri yok.")
+    collab_session = _active.get("collab_session")
+    if collab_session is not None and Path(proj.root).resolve() != collab_session.project_root:
+        raise BridgeError("collab_stale", "İşbirliği koşusunun özgün projesi artık seçili değil.")
+    if collab_handle_present:
+        if collab_session is None:
+            raise BridgeError("collab_unsupported", "Bu koşu yerel işbirliği onayıyla başlatılmadı.")
+        try:
+            collab_session.reapprove(collab_handle)
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if code == "stale":
+                raise BridgeError("collab_stale", "Yeni onay özgün işbirliği göreviyle eşleşmiyor.") from None
+            if code == "busy":
+                raise BridgeError("collab_busy", "İşbirliği koşusu hâlâ etkin.") from None
+            raise BridgeError("collab_invalid", "Yeni yerel işbirliği onayı geçersiz.") from None
 
     run_id = coordinator.run_id
     runtime = state.get_run_runtime()
@@ -1230,7 +2006,7 @@ def _follow_up(params, ctx):
     # F2: mevcut öneriler ARTIK GEÇERSİZ -- Uygula/Reddet bu andan itibaren
     # devre dışı kalmalı (yeni bir proposal.ready gelene kadar). Akış/sohbet
     # geçmişi (flow) KORUNUR -- yalnızca diff/proposal durumu sıfırlanır.
-    _active["proposals"] = []
+    prior_proposals = list(_active.get("proposals") or [])
 
     cancel_event = threading.Event()
     _active["cancel_event"] = cancel_event
@@ -1265,12 +2041,19 @@ def _follow_up(params, ctx):
     worker = _FollowUpWorker(
         runtime, run_id, workspace, ports, task, feedback, plan_text, cancel_event,
         pinned_paths=pinned_paths, decision_gate=_active.get("decision_gate"),
+        collab_session=collab_session,
     )
-    _wire_pipeline_worker(
-        worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,
-        emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
-        ended=ended, bridge=bridge, activity_after_seq=activity_after_seq,
-    )
+    _active["proposals"] = []
+    try:
+        _wire_pipeline_worker(
+            worker, runtime=runtime, run_id=run_id, coordinator=coordinator, workspace=workspace, proj=proj,
+            emit_ui=emit_ui, finish=finish, settle_canonical_failure=settle_canonical_failure,
+            ended=ended, bridge=bridge, activity_after_seq=activity_after_seq,
+        )
+    except Exception:
+        if not worker.isRunning():
+            _active["proposals"] = prior_proposals
+        raise BridgeError("collab_unavailable", "Takip worker'ı başlatılamadı.") from None
     _active["worker"] = worker
 
     emit_ui({"type": "followUpStarted", "feedback": feedback})
@@ -1284,7 +2067,7 @@ def _cancel(params, ctx):
     w = _active.get("worker")
     if w is None or not w.isRunning():
         return {}
-    if _active.get("engine") == "pipeline":
+    if _active.get("engine") in ("pipeline", "agent"):
         # F7 (gerçek iptal): cancel_token artık yalnızca aşama sınırlarında
         # DEĞİL, devam eden bir Worker/Verification/Reviewer denemesinin
         # İÇİNDEN de gözlemlenir (bkz. agent_runtime.session.AgentSession —
@@ -1336,6 +2119,16 @@ def _stale_apply_conflicts(proj: Project, proposals: list[dict]) -> list[dict]:
 @handler("run.applyProposals")
 def _apply(params, ctx):
     proj = _require_project()
+    _require_agent_project(proj)
+    session = _active.get("collab_session")
+    if _delivery_is_busy(session, _active.get("run_id")):
+        raise BridgeError("busy", "Teslimat işlemi sürüyor.")
+    worker = _active.get("worker")
+    if session is not None:
+        if Path(proj.root).resolve() != session.project_root:
+            raise BridgeError("collab_stale", "İşbirliği koşusunun özgün projesi artık seçili değil.")
+        if worker is not None and worker.isRunning():
+            raise BridgeError("busy", "İşbirliği worker'ı henüz durmadı.")
     wanted = set(params.get("paths") or [])
     proposals = [p for p in _active.get("proposals", []) if p.get("path") in wanted]
     if not proposals:
@@ -1428,8 +2221,8 @@ def _apply(params, ctx):
     # TAMAMEN temizlenir. ReceiptStore YAZIMI YOK — receipt.get artık bu
     # Run'ı kanonik run_events'ten (proposal.applied) doğrudan okur.
     _active["proposals"] = []
-    if _active.get("engine") == "pipeline":
-        _dispose_workspace()
+    if _active.get("engine") in ("pipeline", "agent"):
+        _cleanup_after_collaboration_decision(session, _active.get("run_id"), "run_applied")
     ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
     return {
         "applied": applied,
@@ -1441,7 +2234,17 @@ def _apply(params, ctx):
 
 @handler("run.rejectProposals")
 def _reject(params, ctx):
-    _require_project()
+    proj = _require_project()
+    _require_agent_project(proj)
+    session = _active.get("collab_session")
+    if _delivery_is_busy(session, _active.get("run_id")):
+        raise BridgeError("busy", "Teslimat işlemi sürüyor.")
+    worker = _active.get("worker")
+    if session is not None:
+        if Path(proj.root).resolve() != session.project_root:
+            raise BridgeError("collab_stale", "İşbirliği koşusunun özgün projesi artık seçili değil.")
+        if worker is not None and worker.isRunning():
+            raise BridgeError("busy", "İşbirliği worker'ı henüz durmadı.")
     active_proposals = _active.get("proposals") or []
     if not active_proposals:
         return {}
@@ -1461,16 +2264,19 @@ def _reject(params, ctx):
     # ReceiptStore YAZIMI YOK — receipt.get artık bu Run'ı kanonik
     # run_events'ten (proposal.rejected) doğrudan okur.
     _active["proposals"] = []
-    if _active.get("engine") == "pipeline":
-        _dispose_workspace()
+    if _active.get("engine") in ("pipeline", "agent"):
+        _cleanup_after_collaboration_decision(session, _active.get("run_id"), "run_rejected")
     return {}
 
 
 def shutdown():
     """Uygulama kapanırken koşuyu iptal et (zombi thread önleme)."""
     w = _active.get("worker")
+    session = _active.get("collab_session")
+    workspace = _active.get("workspace")
+    run_id = _active.get("run_id")
     if w is not None and w.isRunning():
-        if _active.get("engine") == "pipeline":
+        if _active.get("engine") in ("pipeline", "agent"):
             cancel_event = _active.get("cancel_event")
             if cancel_event is not None:
                 cancel_event.set()
@@ -1478,4 +2284,29 @@ def shutdown():
             w.cancel()
         w.wait(2000)
     _stop_activity_streamer()
-    _dispose_workspace()
+    if session is not None:
+        if not _worker_is_finished(w):
+            _retire_collaboration_after_worker(w, session, workspace, run_id, "run_shutdown")
+        else:
+            _retain_collaboration(session, workspace, run_id, w, terminal_code="run_shutdown")
+            _drain_collaboration_resources()
+    else:
+        if _active.get("engine") == "agent" and not _worker_is_finished(w):
+            # Do not remove the worktree while a native agent/process is still
+            # using it; cancellation may take longer than the bounded wait.
+            w.finished.connect(lambda: _dispose_agent_workspace(workspace))
+        elif _active.get("engine") == "agent":
+            _dispose_agent_workspace(workspace)
+        else:
+            _dispose_workspace()
+    try:
+        state.get_collaboration_host().clear()
+    except Exception:
+        pass
+    # Owner listeners are independently owned; stop only an already-created
+    # manager and retain it if draining fails so explicit retry remains possible.
+    try:
+        from webhost.api.owner import shutdown as shutdown_owner
+        shutdown_owner()
+    except Exception:
+        pass

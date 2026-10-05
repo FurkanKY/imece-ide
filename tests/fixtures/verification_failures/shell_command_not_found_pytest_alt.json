@@ -1,6 +1,16 @@
 {
+  "schema_version": 2,
   "name": "shell_command_not_found_pytest_alt",
+  "origin": "synthetic",
+  "language": "python",
   "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "/bin/sh: 1: pytest: not found\n",
   "exit_code": 127,
@@ -9,5 +19,10 @@
     "tests/test_signup.py"
   ],
   "baseline_status": null,
-  "expected_label": "environment_or_tooling"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "environment_or_tooling",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user"
 }

@@ -134,6 +134,89 @@ def test_build_pipeline_ports_native_for_openai_roles(tmp_path):
     assert isinstance(ports.reviewer, NativeReviewAttemptAdapter)
     assert isinstance(ports.verification, NativeVerificationAttemptAdapter)
     assert seen_providers == ["gemini", "deepseek", "openai"]
+    assert ports.worker._safe_point is None
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+def test_build_pipeline_ports_injects_safe_point_only_into_native_worker(tmp_path, provider):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    safe_point = object()
+    routing = {"planner": "gemini", "coder": provider, "reviewer": "openai"}
+    ports = engine_factory.build_pipeline_ports(
+        runtime, run_id, routing, backend_factory=lambda _pid: _FakeBackend(),
+        worker_safe_point=safe_point,
+    )
+    assert isinstance(ports.worker, NativeWorkerAttemptAdapter)
+    assert ports.worker._safe_point is safe_point
+    assert isinstance(ports.planner, NativePlanAttemptRunner)
+    assert isinstance(ports.reviewer, NativeReviewAttemptAdapter)
+
+
+def test_native_worker_safe_point_allows_acp_planner_and_reviewer(tmp_path):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    safe_point = object()
+    ports = engine_factory.build_pipeline_ports(
+        runtime, run_id, {"planner": "claude", "coder": "openai", "reviewer": "codex-cli"},
+        backend_factory=lambda _pid: _FakeBackend(), acp_client_factory=_FakeAcpClient,
+        worker_safe_point=safe_point,
+    )
+    assert isinstance(ports.planner, AcpPlanAttemptRunner)
+    assert isinstance(ports.worker, NativeWorkerAttemptAdapter)
+    assert ports.worker._safe_point is safe_point
+    assert isinstance(ports.reviewer, AcpReviewAttemptRunner)
+
+
+@pytest.mark.parametrize("worker", ["claude", "codex-cli", "gemini-cli"])
+@pytest.mark.parametrize("planner", ["openai", "claude"])
+def test_safe_point_rejects_acp_worker_before_any_factory(tmp_path, worker, planner):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    calls = []
+
+    def forbidden(*_args, **_kwargs):
+        calls.append(True)
+        raise AssertionError("factory must not run")
+
+    routing = {"planner": planner, "coder": worker, "reviewer": "openai"}
+    with pytest.raises(engine_factory.EngineUnsupportedError,
+                       match="Collaboration safe points require a native worker provider"):
+        engine_factory.build_pipeline_ports(
+            runtime, run_id, routing, backend_factory=forbidden,
+            acp_client_factory=forbidden, worker_safe_point=object(),
+        )
+    assert calls == []
+
+
+def test_safe_point_factory_never_owns_or_reads_consumer(tmp_path):
+    runtime, run_id = _runtime_with_run(tmp_path)
+
+    class Spy:
+        def __getattr__(self, name):
+            if name in {"start", "peek", "status", "reset", "acknowledge_at_safe_point", "close"}:
+                raise AssertionError(f"factory accessed lifecycle method {name}")
+            raise AttributeError(name)
+
+    safe_point = Spy()
+    ports = engine_factory.build_pipeline_ports(
+        runtime, run_id, _all_native_routing(), backend_factory=lambda _pid: _FakeBackend(),
+        worker_safe_point=safe_point,
+    )
+    assert ports.worker._safe_point is safe_point
+
+
+def test_safe_point_factory_does_not_close_external_resource_on_builder_failure(tmp_path):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    closed = []
+    resource = type("Resource", (), {"close": lambda self: closed.append(True)})()
+
+    def fail(_provider):
+        raise RuntimeError("builder failed")
+
+    with pytest.raises(RuntimeError, match="builder failed"):
+        engine_factory.build_pipeline_ports(
+            runtime, run_id, _all_native_routing(), backend_factory=fail,
+            worker_safe_point=resource,
+        )
+    assert closed == []
 
 
 def test_build_pipeline_ports_acp_for_claude_and_codex(tmp_path):
@@ -145,6 +228,24 @@ def test_build_pipeline_ports_acp_for_claude_and_codex(tmp_path):
     assert isinstance(ports.planner, AcpPlanAttemptRunner)
     assert isinstance(ports.worker, AcpWorkerAttemptAdapter)
     assert isinstance(ports.reviewer, AcpReviewAttemptRunner)
+
+
+def test_opt_out_keeps_original_native_worker_constructor_call_shape(tmp_path, monkeypatch):
+    runtime, run_id = _runtime_with_run(tmp_path)
+    calls = []
+    worker = object()
+
+    def original_constructor(runtime_arg, run_id_arg, backend_arg):
+        calls.append((runtime_arg, run_id_arg, backend_arg))
+        return worker
+
+    monkeypatch.setattr(engine_factory, "NativeWorkerAttemptAdapter", original_constructor)
+    ports = engine_factory.build_pipeline_ports(
+        runtime, run_id, _all_native_routing(), backend_factory=lambda _pid: _FakeBackend(),
+    )
+    assert ports.worker is worker
+    assert len(calls) == 1
+    assert calls[0][:2] == (runtime, run_id)
 
 
 def test_build_pipeline_ports_acp_for_gemini_cli(tmp_path):
@@ -177,8 +278,16 @@ def test_build_pipeline_ports_native_for_anthropic(tmp_path):
 def test_build_pipeline_ports_unsupported_role_raises(tmp_path):
     runtime, run_id = _runtime_with_run(tmp_path)
     routing = {**_all_native_routing(), "coder": "qwen-code"}
+    calls = []
+
+    def forbidden(*_args):
+        calls.append(True)
+
     with pytest.raises(engine_factory.EngineUnsupportedError):
-        engine_factory.build_pipeline_ports(runtime, run_id, routing)
+        engine_factory.build_pipeline_ports(
+            runtime, run_id, routing, backend_factory=forbidden, acp_client_factory=forbidden,
+        )
+    assert calls == []
 
 
 # ---------------- worktree yaşam döngüsü ----------------

@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "name": "npm_test_timeout_ci_runner_killed",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "npm",
+  "command": [
+    "npm",
+    "test"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "Killed\nnpm ERR! Test failed.  See above for more details.\n",
+  "exit_code": null,
+  "timed_out": true,
+  "changed_paths": [
+    "scripts/perf.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "flaky_or_timeout",
+  "expected_rule_action": "rerun_verification_once",
+  "expected_gate_action": "rerun_verification_once",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once",
+  "note": "the CI runner killed the check at its time budget (timed_out fact is authoritative)"
+}

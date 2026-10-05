@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError  # noqa: E402
 from change_runtime.models import WorkspaceChangeSet  # noqa: E402
-from fix_runtime.models import InitialWorkerRequest  # noqa: E402
+from fix_runtime.models import (  # noqa: E402
+    FixWorkerRequest, InitialWorkerRenderContext, InitialWorkerRequest,
+)
 from fix_runtime.ports import WorkerAttemptResult  # noqa: E402
 from pipeline_runtime.errors import PipelineExecutionError  # noqa: E402
 from pipeline_runtime.models import PipelineStatus  # noqa: E402
@@ -223,6 +225,51 @@ def test_approved_first_try_completes_run(tmp_path):
     # WAITING_USER, never settled straight to SUCCEEDED.
     assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
     assert planner.calls and worker.requests and isinstance(worker.requests[0], InitialWorkerRequest)
+
+
+# ---------------- initial request render recipe ----------------
+
+
+def test_initial_worker_request_carries_a_detached_bounded_recipe(tmp_path):
+    """The initial request must carry enough metadata for a canonical re-bind
+    later (collab_runtime.binding), and only bounded display facts."""
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(runtime, run)
+    pins = ["src/b.py", "src/a.py"]
+
+    runner.run(run.run_id, workspace, "Implement X", pinned_paths=pins)
+
+    request = worker.requests[0]
+    assert isinstance(request, InitialWorkerRequest)
+    recipe = request.render_context
+    assert isinstance(recipe, InitialWorkerRenderContext)
+    assert type(recipe.verification_preview) is str
+    assert recipe.verification_preview in request.rendered_input
+    assert "pytest" in recipe.verification_preview
+    assert recipe.pinned_paths == ("src/b.py", "src/a.py")
+    assert request.rendered_input.index("- src/b.py") < request.rendered_input.index("- src/a.py")
+    pins.append("src/c.py")
+    assert recipe.pinned_paths == ("src/b.py", "src/a.py")  # copied, not aliased
+
+
+def test_more_than_256_pins_keep_every_prompt_line_and_drop_the_recipe(tmp_path):
+    """Out-of-metadata-bounds pins opt OUT (recipe=None) but must never change
+    the opt-out prompt bytes or fail the run."""
+    root = tmp_path / "workspace"
+    (root / "tests").mkdir(parents=True)
+    workspace = FakeWorkspace(root)
+    runtime, run = setup_runtime(tmp_path)
+    runner, planner, worker, verification, reviewer = _make_runner(runtime, run)
+    pins = [f"src/p{i:03d}.py" for i in range(300)]
+
+    runner.run(run.run_id, workspace, "Implement X", pinned_paths=pins)
+
+    request = worker.requests[0]
+    assert request.render_context is None
+    assert request.rendered_input.count("\n- src/p") == 300
 
 
 # ---------------- verification fail -> fix loop -> pass ----------------
@@ -541,6 +588,7 @@ def test_continue_with_feedback_advisory_path_when_no_verification_plan(tmp_path
 
     second = runner.continue_with_feedback(
         run.run_id, workspace, "also handle negative numbers", task="Implement X",
+        pinned_paths=("src/b.py", "src/a.py"),
     )
 
     assert second.status is PipelineStatus.NEEDS_USER
@@ -550,6 +598,15 @@ def test_continue_with_feedback_advisory_path_when_no_verification_plan(tmp_path
     # Advisory review is still verification-less for the follow-up too.
     assert reviewer.requests[1].verification_report is None
     assert "also handle negative numbers" in reviewer.requests[1].task
+    # The no-plan follow-up request is re-bindable: budget 1, no classification.
+    followup = worker.requests[1]
+    assert isinstance(followup, FixWorkerRequest)
+    assert followup.render_context is not None
+    assert followup.render_context.max_fix_attempts == 1
+    assert followup.render_context.classification is None
+    assert followup.render_context.pinned_paths == ("src/b.py", "src/a.py")
+    assert followup.rendered_input.index("- src/b.py") < followup.rendered_input.index("- src/a.py")
+    assert "decision_classification" not in followup.rendered_input
     assert runtime.get_run(run.run_id).status is RunStatus.WAITING_USER
 
 

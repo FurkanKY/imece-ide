@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "jest_timeout",
+  "origin": "synthetic",
+  "language": "javascript",
   "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "Timeout - Async callback was not invoked within the 5000 ms timeout specified by jest.setTimeout.\n",
   "exit_code": null,
@@ -9,5 +18,10 @@
     "src/api/fetch.js"
   ],
   "baseline_status": null,
-  "expected_label": "flaky_or_timeout"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "flaky_or_timeout",
+  "expected_rule_action": "rerun_verification_once",
+  "expected_gate_action": "rerun_verification_once",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once"
 }

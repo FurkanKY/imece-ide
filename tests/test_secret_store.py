@@ -74,3 +74,21 @@ def test_secret_store_filtering_uses_known_key_envs(monkeypatch):
         store.save({"ANTHROPIC_API_KEY": "sk-ant-abc", "GEMINI_API_KEY": "should-be-dropped"})
         loaded = store.load()
         assert loaded == {"ANTHROPIC_API_KEY": "sk-ant-abc"}
+
+
+# ---------------- Jev (TypeSafe) izin listesi (S1b) ----------------
+
+def test_known_key_envs_includes_typesafe():
+    envs = secret_store._known_key_envs()
+    assert "TYPESAFE_API_KEY" in envs
+
+
+def test_secret_store_keeps_typesafe_key(monkeypatch, tmp_path):
+    """Paketli depo, Jev anahtarını izin listesiyle aynen korur; bilinmeyen
+    env adları düşürülür (DPAPI bypas — round-trip sahte)."""
+    monkeypatch.setattr(secret_store, "_known_key_envs", lambda: ("TYPESAFE_API_KEY", "ANTHROPIC_API_KEY"))
+    monkeypatch.setattr(secret_store, "_protect", lambda data: data)
+    monkeypatch.setattr(secret_store, "_unprotect", lambda data: data)
+    store = secret_store.SecretStore(tmp_path / "secrets.dat")
+    store.save({"TYPESAFE_API_KEY": "ts-gizli-uzun", "BILINMEYEN_ENV": "dusur"})
+    assert store.load() == {"TYPESAFE_API_KEY": "ts-gizli-uzun"}

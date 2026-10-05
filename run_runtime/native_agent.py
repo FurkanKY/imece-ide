@@ -31,9 +31,13 @@ SOURCE = "native_agent"
 
 
 def _error_payload(event: ModelFailed | ToolFailed | ExecutionFailed) -> dict[str, Any]:
+    # Provider exception text may contain credentials or request bodies.
+    # Keep typed failure evidence, never persist the raw backend diagnostic.
+    message = ("Model provider request failed." if isinstance(event, ModelFailed) else
+               "Agent execution failed." if isinstance(event, ExecutionFailed) else event.message[:2000])
     payload = {
         "error_type": event.error_type,
-        "message": event.message[:2000],
+        "message": message,
     }
     if isinstance(event, ToolFailed):
         payload.update({

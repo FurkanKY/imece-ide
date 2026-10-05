@@ -26,7 +26,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from change_runtime.models import WorkspaceChangeSet  # noqa: E402
+from decision_runtime import gate as gate_module  # noqa: E402
+from decision_runtime.fake_backend import FakeDecisionBackend  # noqa: E402
+from decision_runtime.gate import VerificationFailureGate  # noqa: E402
+from decision_runtime.models import ChoiceAnswer, DecisionResult, NoulAnswer, ScoreAnswer  # noqa: E402
 from decision_runtime.triage import (  # noqa: E402
+    QUESTION_SET_VERSION,
     RuleDecisionBackend,
     TriageAction,
     TriageFacts,
@@ -64,8 +69,9 @@ class FakeChangeProvider:
 
 
 class FakeWorkerAttemptRunner:
-    """Also captures each attempt's rendered_input so tests can assert the
-    decision classification actually reached the fix prompt."""
+    """Also captures each attempt's request/rendered_input so tests can assert
+    the decision classification actually reached the fix prompt and the bounded
+    render recipe that lets it be re-bound canonically later."""
 
     def __init__(self, runtime, run_id, *, changes=True):
         self._runtime = runtime
@@ -73,10 +79,12 @@ class FakeWorkerAttemptRunner:
         self._changes = changes
         self.call_count = 0
         self.rendered_inputs: list[str] = []
+        self.requests: list = []
 
     def run(self, workspace: FakeWorkspace, request, *, execution_id: str, cancel_token=None) -> WorkerAttemptResult:
         self.call_count += 1
         self.rendered_inputs.append(request.rendered_input)
+        self.requests.append(request)
         should_change = self._changes[self.call_count - 1] if isinstance(self._changes, list) else self._changes
         if should_change:
             workspace.content += f"change-{self.call_count}\n"
@@ -354,6 +362,42 @@ def test_continue_fix_loop_attaches_classification_to_next_prompt(tmp_path):
     assert "decision_classification: code_bug" in worker.rendered_inputs[1]
 
 
+def test_render_recipe_scopes_the_classification_to_exactly_one_attempt(tmp_path):
+    """The attempt recipe must carry the SAME classification that attempt's
+    prompt was rendered with -- no more (a later attempt would inherit a label
+    its own prompt does not contain) and no less (a canonical re-bind would
+    drop it)."""
+    runtime, run = setup_runtime(tmp_path)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id, changes=[True, True, True])
+    verification = FakeVerificationAttemptRunner(
+        runtime, run.run_id, [VerificationStatus.FAIL, VerificationStatus.FAIL, VerificationStatus.PASS]
+    )
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [ReviewVerdict.APPROVED])
+    gate = ScriptedGate([
+        _outcome(TriageAction.CONTINUE_FIX_LOOP, failure_kind="code_bug"),
+        None,  # gate off / no triage evidence -> attempt 3 carries no label
+    ])
+    runner = FixLoopRunner(
+        runtime, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=FakeChangeProvider(), decision_gate=gate,
+    )
+    request = FixLoopRequest(
+        task="fix it", trigger=_initial_fail_trigger(), verification_plan=_valid_verification_plan(),
+        max_fix_attempts=3, pinned_paths=("src/a.py",),
+    )
+
+    report = runner.run(run.run_id, FakeWorkspace(), request)
+
+    assert report.status is FixLoopStatus.COMPLETED
+    assert worker.call_count == 3
+    assert [r.render_context.classification for r in worker.requests] == [None, "code_bug", None]
+    assert [r.render_context.max_fix_attempts for r in worker.requests] == [3, 3, 3]
+    assert all(r.render_context.pinned_paths == ("src/a.py",) for r in worker.requests)
+    assert "decision_classification" not in worker.rendered_inputs[0]
+    assert "decision_classification: code_bug" in worker.rendered_inputs[1]
+    assert "decision_classification" not in worker.rendered_inputs[2]
+
+
 # ==================== design rule 1: gate failure degrades to "gate absent" ====================
 
 
@@ -380,3 +424,91 @@ def test_decision_gate_exception_falls_back_to_todays_behaviour(tmp_path):
     assert worker.call_count == 2
     for rendered in worker.rendered_inputs:
         assert "decision_classification" not in rendered
+
+
+# ==================== S1b safety guard through the real gate: a misleading
+# remote 'unrelated_preexisting' may not skip the fix loop when the baseline
+# actually passed ====================
+
+
+_LABELS = (
+    "code_bug", "test_needs_update", "missing_dependency",
+    "environment_or_tooling", "flaky_or_timeout", "unrelated_preexisting",
+)
+
+
+def _misleading_remote_preexisting_result():
+    probabilities = {label: (0.99 if label == "unrelated_preexisting" else 0.002) for label in _LABELS}
+    return DecisionResult(
+        decision_id="verification_failure_triage",
+        question_set_version=QUESTION_SET_VERSION,
+        answers={
+            "failure_kind": ChoiceAnswer(
+                choice="unrelated_preexisting", probabilities=probabilities, confidence=0.99,
+            ),
+            "caused_by_change": NoulAnswer(noul=0.02),
+            "fixable_by_agent": ScoreAnswer(
+                score=0.0, probabilities={"0": 0.9, "1": 0.1, "2": 0.0}, confidence=0.99,
+            ),
+        },
+        backend="jev",
+        model_version="jev-1.13.0",
+        latency_ms=5,
+        prompt_tokens=87,
+        fallback_used=False,
+    )
+
+
+def _baseline_process_result(**overrides):
+    defaults = dict(
+        argv=("true",), cwd=".", exit_code=1, timed_out=False, duration_ms=1,
+        stdout="", stderr="", stdout_truncated=False, stderr_truncated=False,
+        stdout_bytes=0, stderr_bytes=0,
+    )
+    defaults.update(overrides)
+    return ProcessResult(**defaults)
+
+
+@pytest.mark.parametrize(
+    ("baseline_overrides",),
+    [
+        pytest.param({"exit_code": 0}, id="baseline-pass"),
+        pytest.param({"timed_out": True}, id="baseline-timeout"),
+        pytest.param({"exit_code": None}, id="baseline-error"),
+        pytest.param({}, id="baseline-unavailable"),
+    ],
+)
+def test_misleading_remote_preexisting_never_skips_the_fix_loop(tmp_path, monkeypatch, baseline_overrides):
+    """The REAL VerificationFailureGate (not a scripted fake) sits between a
+    remote model that confidently claims 'unrelated_preexisting' and
+    FixLoopRunner: the gate's deterministic baseline guard downgrades the
+    action to CONTINUE_FIX_LOOP unless the same check ACTUALLY failed on the
+    baseline, so verification/review are never skipped on a model say-so."""
+    runtime, run = setup_runtime(tmp_path)
+    worker = FakeWorkerAttemptRunner(runtime, run.run_id, changes=[True, True])
+    verification = FakeVerificationAttemptRunner(
+        runtime, run.run_id, [VerificationStatus.FAIL, VerificationStatus.PASS]
+    )
+    reviewer = FakeReviewAttemptRunner(runtime, run.run_id, [ReviewVerdict.APPROVED])
+    if baseline_overrides:
+        baseline = _baseline_process_result(**baseline_overrides)
+    else:
+        baseline = None  # workspace has no snapshot -> no baseline evidence
+    monkeypatch.setattr(gate_module, "run_baseline_check", lambda workspace, request: baseline)
+    gate = VerificationFailureGate(
+        FakeDecisionBackend([_misleading_remote_preexisting_result()]), run_baseline=True,
+    )
+    runner = FixLoopRunner(
+        runtime, worker=worker, verification=verification, reviewer=reviewer,
+        change_provider=FakeChangeProvider(), decision_gate=gate,
+    )
+    request = FixLoopRequest(
+        task="fix it", trigger=_initial_fail_trigger(), verification_plan=_valid_verification_plan(),
+        max_fix_attempts=2,
+    )
+
+    report = runner.run(run.run_id, FakeWorkspace(), request)
+
+    assert report.status is FixLoopStatus.COMPLETED  # the fix loop ran to completion
+    assert report.reason != "pre_existing_failure"
+    assert worker.call_count == 2  # a second fix attempt was NOT skipped

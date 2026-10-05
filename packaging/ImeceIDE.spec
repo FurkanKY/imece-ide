@@ -17,6 +17,15 @@ dp_datas, dp_binaries, dp_hidden = collect_all("debugpy")
 # PyInstaller otomatik analizi göremez → collect_all ile paketle (Beta-3 PTY blokeri).
 wp_datas, wp_binaries, wp_hidden = collect_all("winpty")
 
+# Jev System One karar katmanı (decision_runtime, Spike S1b): İSTEĞE BAĞLI.
+# typesafe-sdk yalnızca derleme ortamında kuruluysa toplanır; kurulu değilse
+# karar katmanı "rules/off" ile çalışmaya devam eder (design rule 1 —
+# decision_runtime.typesafe-sdk'ı yalnızca decide() içinde lazy import eder).
+try:
+    ts_datas, ts_binaries, ts_hidden = collect_all("typesafe_sdk")
+except Exception:
+    ts_datas, ts_binaries, ts_hidden = [], [], []
+
 node_exe = Path(nodejs_wheel.__file__).parent / "node.exe"
 
 datas = [
@@ -27,12 +36,14 @@ datas = [
     *bp_datas,
     *dp_datas,
     *wp_datas,
+    *ts_datas,
 ]
-binaries = [*bp_binaries, *dp_binaries, *wp_binaries]
+binaries = [*bp_binaries, *dp_binaries, *wp_binaries, *ts_binaries]
 hiddenimports = [
     *bp_hidden,
     *dp_hidden,
     *wp_hidden,
+    *ts_hidden,
     "code",
     "http.server",
     "xmlrpc.client",

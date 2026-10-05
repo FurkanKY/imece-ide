@@ -21,6 +21,7 @@ web/ui/dist/
 # Claude Code yerel IDE ayarları (makineye özgü mutlak yollar içerir)
 .claude/
 .agents/
+.opencode/
 skills-lock.json
 
 # Yayınlanmayan yerel çalışma/devir kayıtları

@@ -18,13 +18,17 @@ from runtime_paths import app_data_dir, is_frozen
 
 def _known_key_envs() -> tuple[str, ...]:
     """API anahtarı isteyen her katalog girdisinin (yerleşik + kullanıcının
-    özel uçları) env değişkeni adı. providers.py'yi burada modül seviyesinde
-    İTHAL ETMİYORUZ: secret_store paketli Windows'ta erken (uygulama açılışı,
-    henüz katalog/adapters kurulmadan) çağrılabilir; gecikmeli (lazy) import
-    hem olası döngüsel import'u hem de gereksiz erken yan etkileri (providers.
+    özel uçları) + karar sağlayıcılarının (Jev/TypeSafe) env değişkeni adı.
+    providers.py / decision_credentials.py burada modül seviyesinde İTHAL
+    EDİLMİYOR: secret_store paketli Windows'ta erken (uygulama açılışı, henüz
+    katalog/adapters kurulmadan) çağrılabilir; gecikmeli (lazy) import hem
+    olası döngüsel import'u hem de gereksiz erken yan etkileri (providers.
     refresh() -> adapters.PROVIDERS mutasyonu) önler."""
     import providers
-    return tuple(sorted({e["key_env"] for e in providers.catalog() if e.get("key_env")}))
+    known = {e["key_env"] for e in providers.catalog() if e.get("key_env")}
+    import decision_credentials
+    known.update(decision_credentials.known_envs())
+    return tuple(sorted(known))
 
 
 class SecretStoreError(RuntimeError):

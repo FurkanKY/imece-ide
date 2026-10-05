@@ -1,6 +1,16 @@
 {
+  "schema_version": 2,
   "name": "pytest_timeout",
+  "origin": "synthetic",
+  "language": "python",
   "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "tests/test_slow.py::test_long_running \n",
   "stderr": "",
   "exit_code": null,
@@ -9,5 +19,10 @@
     "src/worker.py"
   ],
   "baseline_status": null,
-  "expected_label": "flaky_or_timeout"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "flaky_or_timeout",
+  "expected_rule_action": "rerun_verification_once",
+  "expected_gate_action": "rerun_verification_once",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once"
 }

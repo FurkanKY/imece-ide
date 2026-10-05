@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "name": "pytest_real_capture_assertion_failure",
+  "origin": "real_capture",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "real capture produced by the S1b agent in a scratch repo under /tmp/opencode (no user content); see real_capture for a reproducible cmd and tool version",
+  "real_capture": {
+    "cmd": "python -m pytest tests/ -q (scratch repo: src/math.py returns a-b, test asserts add(2,2)==5)",
+    "source": "captured by the S1b fixture agent in /tmp/opencode/s1b-captures/repo (scratch repo, no user content)",
+    "tool_version": "pytest 8.4.2 (CPython 3.12.3)",
+    "captured_at": "2026-10-02",
+    "sanitization": "none needed"
+  },
+  "stdout": "=================================== FAILURES ====================================\n___________________________________ test_add ___________________________________\n\n    def test_add():\n>       assert add(2, 2) == 5\nE       assert 0 == 5\nE        +  where 0 = add(2, 2)\n\ntests/test_math.py:4: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_math.py::test_add - assert 0 == 5\n1 failed in 0.02s\n",
+  "stderr": "",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/math.py",
+    "tests/test_math.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "REAL capture: a genuine add() bug (returns a-b) caught by a genuine assertion"
+}

@@ -86,10 +86,12 @@ from fix_runtime.models import (
     FixTriggerKind,
     FixWorkerRequest,
     InitialWorkerRequest,
+    _capture_fix_worker_render_context,
+    _capture_initial_worker_render_context,
     new_fix_execution_id,
 )
 from fix_runtime.ports import ReviewAttemptRunner, VerificationAttemptRunner, WorkerAttemptRunner
-from fix_runtime.prompt import render_fix_worker_input, render_initial_worker_input
+from fix_runtime.prompt import _capture_verification_preview, render_fix_worker_input, render_initial_worker_input
 from fix_runtime.runner import FixLoopRunner
 from planner_runtime.models import PlanReport, new_plan_id
 from review_runtime.errors import ReviewInputError
@@ -356,6 +358,7 @@ class PipelineRunner:
         rendered_input = self._render_feedback_only_input(workspace, task, plan_text, trigger, pinned_paths)
         worker_request = FixWorkerRequest(
             task=task, trigger=trigger, attempt_index=1, plan=plan_text, rendered_input=rendered_input,
+            render_context=_capture_fix_worker_render_context(1, pinned_paths, None),
         )
         worker_result = self._run_worker(workspace, worker_request, execution_id, cancel_token)
         self._require_execution_completed(run_id, worker_result.execution_id)
@@ -426,10 +429,18 @@ class PipelineRunner:
         # ---------------- 3. initial worker attempt ----------------
         on_stage("working", {"plan_id": plan_id})
         execution_id = new_fix_execution_id()
+        try:
+            verification_preview = _capture_verification_preview(verification_plan)
+        except Exception as exc:
+            raise PipelineExecutionError(f"Initial worker input could not be rendered: {exc}") from exc
         rendered_input = self._render_initial_input(
             workspace, task, plan_report, verification_plan, pinned_paths=pinned_paths,
+            verification_preview=verification_preview,
         )
-        worker_request = InitialWorkerRequest(task=task, rendered_input=rendered_input, plan=plan_report.summary)
+        worker_request = InitialWorkerRequest(
+            task=task, rendered_input=rendered_input, plan=plan_report.summary,
+            render_context=_capture_initial_worker_render_context(verification_preview, pinned_paths),
+        )
         worker_result = self._run_worker(workspace, worker_request, execution_id, cancel_token)
         self._require_execution_completed(run_id, worker_result.execution_id)
 
@@ -682,13 +693,13 @@ class PipelineRunner:
 
     def _render_initial_input(
         self, workspace, task: str, plan_report: PlanReport, verification_plan,
-        pinned_paths: Sequence[str] = (),
+        pinned_paths: Sequence[str] = (), verification_preview: str | None = None,
     ) -> str:
         try:
             rules = load_project_rules(workspace.root)
             return render_initial_worker_input(
                 task=task, plan=plan_report.summary, verification_plan=verification_plan, rules=rules,
-                pinned_paths=pinned_paths,
+                pinned_paths=pinned_paths, verification_preview=verification_preview,
             )
         except Exception as exc:
             raise PipelineExecutionError(f"Initial worker input could not be rendered: {exc}") from exc

@@ -76,6 +76,16 @@ def run_runtime_db_path() -> Path:
     return app_data_dir() / "runtime.sqlite3"
 
 
+def collab_cursors_dir() -> Path:
+    """Private collaboration cursor namespace; returns a path without I/O."""
+    return app_data_dir() / "collab-cursors"
+
+
+def collab_owners_dir() -> Path:
+    """Private owner-side collaboration metadata root; returns a path only."""
+    return app_data_dir() / "collab-owners"
+
+
 def helper_executable(name: str) -> Path | None:
     """Ana exe yanındaki paketli yardımcı programı döndürür."""
     if not is_frozen():

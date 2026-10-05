@@ -19,6 +19,9 @@ def register_all() -> None:
     from webhost.api import keys as _keys          # noqa: F401
     from webhost.api import providers as _providers  # noqa: F401
     from webhost.api import debug as _debug        # noqa: F401
+    from webhost.api import collab as _collab      # noqa: F401
+    from webhost.api import delivery as _delivery  # noqa: F401
+    from webhost.api import owner as _owner          # noqa: F401
 
     # T1.2 — bir önceki oturumun çökmesi/olağandışı kapanması sonrası kalmış
     # olabilecek izole (pipeline) worktree'leri temizle. En iyi çabadır;

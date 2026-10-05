@@ -1,15 +1,20 @@
 """keys.* — API anahtarı onboarding'i.
 
 Sağlayıcı listesi providers.py kataloğundan gelir: anahtar isteyen her API
-sağlayıcısı + PATH'te aranan ajan CLI'ları. Paketli Windows uygulamasında
-anahtarlar DPAPI korumalı depoya; kaynak modunda geliştirici uyumluluğu için
-.env'e yazılır. Her iki durumda adapters anahtarı os.environ'dan okur; anahtar
-UI'a asla geri dönmez, yalnız son dört haneli maske gösterilir.
+sağlayıcısı + PATH'te aranan ajan CLI'ları. Bunlardan AYRI olarak Jev
+(TypeSafe) karar sağlayıcısı (S1b) keys.set/keys.test'e "typesafe" id'siyle
+katılır ve keys.status'ta ayrı bir decisionProviders sonucunda döner; normal
+sağlayıcı listesine ve yönlendirmeye hiçbir zaman karışmaz.
+Paketli Windows uygulamasında anahtarlar DPAPI korumalı depoya; kaynak modunda
+geliştirici uyumluluğu için .env'e yazılır. Her iki durumda adapters (ve
+decision_runtime) anahtarı os.environ'dan okur; anahtar UI'a asla geri dönmez,
+yalnız son dört haneli maske gösterilir.
 """
 
 import os
 from pathlib import Path
 
+import decision_credentials
 import providers
 from runtime_paths import env_path
 from webhost.bridge import handler, BridgeError
@@ -19,12 +24,15 @@ ENV_PATH = env_path()
 
 
 def _key_vars() -> dict[str, str]:
-    """köprü sağlayıcı id'si → env değişkeni (anahtar isteyen API sağlayıcıları)."""
-    return {
+    """köprü sağlayıcı id'si → env değişkeni (API sağlayıcıları + karar
+    sağlayıcıları: typesafe → TYPESAFE_API_KEY)."""
+    vars_ = {
         e["id"]: e["key_env"]
         for e in providers.catalog()
         if e["kind"] in ("openai", "anthropic") and e.get("key_env")
     }
+    vars_.update(decision_credentials.key_vars())
+    return vars_
 
 
 def _mask(v: str) -> str:
@@ -93,7 +101,22 @@ def _status(params, ctx):
             val = os.getenv(entry["key_env"], "").strip()
             info["masked"] = _mask(val) if val else ""
         result[entry["id"]] = info
-    return {"providers": result, "envPath": str(ENV_PATH)}
+    # Jev (TypeSafe) AYRI bir karar sağlayıcısı: `ok` yalnız anahtarın
+    # kayıtlı olduğunu belirtir; SDK kurulumu ve bağlantı ayrı alanlardadır
+    # ("anahtar var" ≠ "doğrulandı"). providers listesine hiçbir zaman karışmaz.
+    decision: dict = {}
+    for entry in decision_credentials.DECISION_PROVIDERS:
+        val = os.getenv(entry["key_env"], "").strip()
+        decision[entry["id"]] = {
+            "id": entry["id"],
+            "label": entry["label"],
+            "ok": bool(val),
+            "sdkAvailable": decision_credentials.sdk_available(),
+            "keyHint": entry.get("key_hint", ""),
+            "docsUrl": entry.get("docs_url", ""),
+            "masked": _mask(val) if val else "",
+        }
+    return {"providers": result, "decisionProviders": decision, "envPath": str(ENV_PATH)}
 
 
 @handler("keys.set")
@@ -103,7 +126,16 @@ def _set(params, ctx):
     for name, val in params.items():
         var = key_vars.get(name)
         if var and isinstance(val, str) and val.strip():
-            updates[var] = val.strip()
+            if name in decision_credentials.DECISION_IDS:
+                # Jev anahtarı: yazdırılabilir + boşluksuz zorunlu (.env satır
+                # enjeksiyonu / JSON bozulması önlenir; hata metni değeri
+                # asla içermez). Mevcut sağlayıcılar eskisi gibi .strip() alır.
+                try:
+                    updates[var] = decision_credentials.validate_key(val)
+                except ValueError as e:
+                    raise BridgeError("invalid_key", str(e)) from e
+            else:
+                updates[var] = val.strip()
     if not updates:
         raise BridgeError("empty", "Kaydedilecek anahtar yok.")
     try:
@@ -116,13 +148,20 @@ def _set(params, ctx):
             write_env(ENV_PATH, updates)
     except (OSError, SecretStoreError) as e:
         raise BridgeError("write_failed", f"Anahtar güvenle kaydedilemedi: {e}")
-    os.environ.update(updates)  # adapters bir sonraki çağrıda görür
+    os.environ.update(updates)  # adapters/decision_runtime bir sonraki çağrıda görür
     return {}
 
 
 @handler("keys.test")
 def _test(params, ctx):
     provider_id = (params.get("provider") or "").strip()
+    if provider_id in decision_credentials.DECISION_IDS:
+        # Jev: ayrı backend — salt test isteği (modellerin listesi), kısa
+        # timeout; hatalar sabit metinlere eşlenir.
+        try:
+            return decision_credentials.test_provider(provider_id, params.get("key"))
+        except ValueError as e:
+            raise BridgeError("invalid_key", str(e)) from e
     try:
         return providers.test_provider(provider_id, params.get("key"))
     except ValueError as e:

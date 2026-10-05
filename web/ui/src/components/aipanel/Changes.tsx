@@ -6,11 +6,14 @@ import { useRun } from "@/state/run";
 import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
 import { Button, EmptyState } from "@/components/ui";
+import { bridge } from "@/bridge";
 
 export function Changes() {
   const diffs = useRun((s) => s.diffs);
   const verdict = useRun((s) => s.verdict);
   const verdictNote = useRun((s) => s.verdictNote);
+  const engine = useRun((s) => s.engine);
+  const evidence = useRun((s) => s.agentEvidence);
   const status = useRun((s) => s.status);
   const runStage = useRun((s) => s.runStage);
   const checkpointId = useRun((s) => s.checkpointId);
@@ -33,10 +36,17 @@ export function Changes() {
               "Dosyalar checkpoint anına döndürüldü. Yeni bir tur başlatabilirsiniz."] as const)
           : runStage === "ready"
             ? ([FileDiff, "Uygulanacak dosya yok",
-                "Ekip bu tur için dosya değişikliği önermedi."] as const)
+                engine === "agent" ? "Ajan bu tur için dosya değişikliği önermedi." : "Ekip bu tur için dosya değişikliği önermedi."] as const)
             : ([FileDiff, "Öneri bekleniyor",
-                "Ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir."] as const);
+                engine === "agent" ? "Ajan sonucu ve varsa doğrulama kanıtı burada görünür." : "Ekip incelemeyi bitirdiğinde dosya değişiklikleri burada listelenir."] as const);
     return (
+      <div className="h-full overflow-y-auto">
+      {engine === "agent" && evidence && <div className="border-b border-border-w px-3 py-3 text-text2">
+        <p className="text-warn" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>{agentVerificationSummary(evidence)}</p>
+        {evidence.agent_message && <p className="mt-1 break-words whitespace-pre-wrap" style={{ fontSize: "var(--t-caption)" }}>{evidence.agent_message}</p>}
+        <p className="mt-1 break-words" style={{ fontSize: "var(--t-caption)" }}>Değişen yollar: {evidence.changed_paths.length ? evidence.changed_paths.join(", ") : "—"}</p>
+        {evidence.verification.checks.map((check, i) => <p key={`${check.check_id}-${i}`} className="break-words" style={{ fontSize: "var(--t-caption)" }}>{check.check_id}: {check.status}{!bridge.isNative || check.check_id.startsWith("mock") ? " · MOCK, gerçek doğrulama değil" : ""}</p>)}
+      </div>}
       <EmptyState
         icon={EmptyIcon}
         tone={ok ? "ok" : "neutral"}
@@ -58,23 +68,30 @@ export function Changes() {
           ) : undefined
         }
       />
+      </div>
     );
   }
 
   const checkedCount = diffs.filter((d) => d.checked).length;
-  const canApply = status !== "running" && checkedCount > 0 && !checkpointBusy;
+  const canApply = runStage === "ready" && status !== "running" && checkedCount > 0 && !checkpointBusy;
 
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 border-b border-border-w px-3 py-3">
         <div className="flex items-start gap-2">
-          <ShieldCheck size={14} className={verdict === "APPROVED" ? "mt-0.5 shrink-0 text-ok" : "mt-0.5 shrink-0 text-warn"} />
+          <ShieldCheck size={14} className={engine !== "agent" && verdict === "APPROVED" ? "mt-0.5 shrink-0 text-ok" : "mt-0.5 shrink-0 text-warn"} />
           <div className="min-w-0 flex-1">
-            <p className={verdict === "APPROVED" ? "text-ok" : "text-warn"} style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>{verdict === "APPROVED" ? "İnceleme onayı" : "İnceleme notu"}</p>
+            <p className="text-warn" style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>{engine === "agent" ? "Sonuç / doğrulama" : verdict === "APPROVED" ? "İnceleme onayı" : "İnceleme notu"}</p>
             <p className="text-text2" style={{ fontSize: "var(--t-caption)", lineHeight: 1.35 }}>
-              {verdictNote || `${checkedCount}/${diffs.length} dosya seçili. Uygulamadan önce kontrol edin.`}
+              {engine === "agent" ? (evidence ? agentVerificationSummary(evidence) : "Kanıt bekleniyor. Değişiklikleri insan olarak inceleyebilirsiniz.") : verdictNote || `${checkedCount}/${diffs.length} dosya seçili. Uygulamadan önce kontrol edin.`}
             </p>
             <p className="mt-0.5 text-faint" style={{ fontSize: "var(--t-caption)" }}>{checkedCount}/{diffs.length} dosya uygulamaya dahil</p>
+            {engine === "agent" && evidence && <>
+              {evidence.agent_message && <p className="mt-2 break-words whitespace-pre-wrap text-text2" style={{ fontSize: "var(--t-caption)" }}>{evidence.agent_message}</p>}
+              <p className="mt-1 break-words text-text2" style={{ fontSize: "var(--t-caption)" }}>Değişen yollar: {evidence.changed_paths.length ? evidence.changed_paths.join(", ") : "—"}</p>
+              {evidence.verification.checks.map((check, i) => <p key={`${check.check_id}-${i}`} className="break-words text-text2" style={{ fontSize: "var(--t-caption)" }}>{check.check_id}: {check.status}{!bridge.isNative || check.check_id.startsWith("mock") ? " · MOCK, gerçek doğrulama değil" : ""}</p>)}
+              {checkedCount !== diffs.length && <p className="mt-1 text-warn" style={{ fontSize: "var(--t-caption)" }}>Kısmi dosya seçimi ayrı olarak doğrulanmadı.</p>}
+            </>}
           </div>
         </div>
       </div>
@@ -145,4 +162,16 @@ export function Changes() {
       </div>
     </div>
   );
+}
+
+function agentVerificationSummary(evidence: NonNullable<ReturnType<typeof useRun.getState>["agentEvidence"]>) {
+  const v = evidence.verification;
+  const mock = !bridge.isNative || evidence.execution_id.startsWith("mock-") || v.checks.some((check) => check.check_id.startsWith("mock"));
+  if (mock) return `MOCK senaryosu (${v.outcome}); gerçek doğrulama kanıtı değil.`;
+  const sha = evidence.diff_sha256;
+  const validHash = typeof sha === "string" && /^[a-f0-9]{64}$/i.test(sha);
+  const validIds = typeof v.verification_id === "string" && v.verification_id.length > 0 && typeof v.plan_id === "string" && v.plan_id.length > 0;
+  const allChecksPass = v.checks.length > 0 && v.checks.every((check) => check.status === "pass" && !check.check_id.startsWith("mock"));
+  if (!evidence.unknown && !evidence.truncated && evidence.reason === "single_agent_proposal" && v.outcome === "pass" && v.fingerprint_complete === true && v.changed_content === false && validHash && validIds && allChecksPass) return "Doğrulama geçti; fingerprint tam ve içerik değişmedi.";
+  return `Henüz doğrulanmadı (${v.outcome || "sonuç bilinmiyor"}). İnsan incelemesi ve açık uygulama kararı mümkün.`;
 }

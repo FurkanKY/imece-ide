@@ -36,6 +36,23 @@ python3 -m venv .venv
 For a test/contribution environment use `requirements-dev.txt` instead, which
 adds `pytest`.
 
+The experimental Jev (TypeSafe) **decision layer** is optional and deliberately
+not part of `requirements.txt`. Install it only if you want to opt in to
+Settings → Karar katmanı → **Jev (TypeSafe)**:
+
+```bash
+# Linux / macOS (source venv)
+.venv/bin/python -m pip install -r requirements-jev.txt
+
+# Windows PowerShell
+.venv\Scripts\python -m pip install -r requirements-jev.txt
+```
+
+Its key (`TYPESAFE_API_KEY`) is entered in Settings → **Karar sağlayıcısı**
+and stored like every other key (`.env` in source mode, DPAPI in packaged
+builds); it is separate from the model-provider catalog and from role routing.
+See [DECISION-LAYER.md](DECISION-LAYER.md).
+
 Contents: `requests`, `python-dotenv`, `flask` (web interface),
 `PySide6` (desktop shell), `pywinpty` (integrated terminal, ConPTY;
 Windows-only), `ptyprocess` (integrated terminal, real PTY; Linux/macOS-only),
@@ -101,6 +118,11 @@ picked in Settings overrides the `*_MODEL` variable.
 > current documentation for available models and quota limits.
 
 `.env` is git-ignored — never commit or share it.
+
+The Jev (TypeSafe) decision-layer key is **not** part of this catalog: it is a
+separate "decision provider" (`TYPESAFE_API_KEY`), it never appears in the
+Planner/Coder/Reviewer provider lists, and the optional SDK it needs is
+installed separately (see §2 and [DECISION-LAYER.md](DECISION-LAYER.md)).
 
 ## 5. Verify
 
@@ -182,14 +204,18 @@ equivalent is used outside a packaged Windows build); packaging itself
 
 If your shell has a global `PYTHONPATH` set by an unrelated toolchain (for
 example ROS's `setup.bash`), it can shadow this project's own packages and
-break `pytest`'s plugin loading or make imports resolve to the wrong modules,
-with confusing errors that don't look related to `PYTHONPATH` at all. Clear it
-for the run instead of trying to reconcile it:
+break `pytest`'s plugin loading — a ROS plugin importing `launch`/`yaml` from
+the system interpreter fails collection with errors that don't look related to
+`PYTHONPATH` at all. Clear it for the run instead of trying to reconcile it:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m pytest -q
+env -u PYTHONPATH QT_QPA_PLATFORM=offscreen PATH="$PWD/.venv/bin:$PATH" \
+  .venv/bin/python -m pytest -q
 ```
 
-If you don't have a display server available (headless CI, containers), also
-set `QT_QPA_PLATFORM=offscreen` before running anything that imports
-`PySide6.QtWidgets`.
+(`QT_QPA_PLATFORM=offscreen` is for headless machines/containers that touch
+`PySide6.QtWidgets`; the `PATH` prefix just makes `pytest` resolve to the venv.)
+
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` also makes collection work, but it disables
+**every** pytest plugin — including any Qt/PySide-side plugins and fixtures the
+suite may rely on. Prefer `env -u PYTHONPATH`.

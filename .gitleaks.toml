@@ -1,0 +1,27 @@
+title = "Imece: default rules with exact synthetic regression fixtures"
+
+[extend]
+useDefault = true
+
+# Never ignore whole test directories: both the path and the deterministic
+# fixture marker must match. Real credentials in these files remain findings.
+[[allowlists]]
+description = "Deterministic AWS-shaped redaction fixture"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/test_decision_remote_state\.py$''']
+regexes = ['''AKIAABCDEFGHIJKLMNOP''']
+
+[[allowlists]]
+description = "Deterministic provider-error regression fixture"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/test_agent_security_regressions\.py$''']
+regexes = ['''sk-regression-c0ffee-SECRET-4f21ba7e9d''']
+
+[[allowlists]]
+description = "Deterministic non-output host credential fixture"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/test_collab_host\.py$''']
+regexes = ['''secretcredential_not_for_output_123456''']

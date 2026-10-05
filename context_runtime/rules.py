@@ -20,7 +20,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from collab_runtime.context import SharedSnapshot
+
+from collab_runtime.errors import CollabError  # pure, import-light; never pulls the git layer
 from workspace.base import resolve_within_workspace
 from workspace.errors import WorkspaceBoundaryError
 
@@ -69,7 +74,39 @@ def _bounded(text: str, limit: int) -> str:
     return text[: limit - len(_TRUNCATION_MARKER)] + _TRUNCATION_MARKER
 
 
-def load_project_rules(root: Path) -> ProjectRules | None:
+_SNAPSHOT_SOURCE = ".imece/shared-context.json"
+
+
+def _shared_snapshot_section(
+    root: Path, snapshot_override: SharedSnapshot | None = None,
+) -> tuple[str, bool]:
+    """Render the collab shared-context binding artifact
+    (`.imece/shared-context.json`) as a bounded, clearly labelled UNTRUSTED
+    DATA section — or ("", False) when it is absent, unreadable, oversized
+    or invalid.
+
+    Only EXPECTED failures are swallowed: the optional import, the
+    collab/data validation errors (CollabError covers ValidationError), and
+    filesystem/encoding failures. Invalid snapshots are skipped entirely by
+    the loader itself — unsafe raw text is never included. The bool is the
+    renderer's EXPLICIT truncation metadata (per-field cuts, omitted
+    teammate entries, or the section's own budget) — it is never inferred
+    from user-controlled text that might merely contain a truncation
+    marker."""
+    try:
+        from collab_runtime.context import (
+            load_project_snapshot, render_snapshot_block_detailed,
+        )
+
+        snapshot = snapshot_override if snapshot_override is not None else load_project_snapshot(root)
+        if snapshot is None:
+            return "", False
+        return render_snapshot_block_detailed(snapshot)
+    except (ImportError, CollabError, OSError, UnicodeEncodeError, RecursionError):
+        return "", False
+
+
+def load_project_rules(root: Path, *, shared_snapshot: SharedSnapshot | None = None) -> ProjectRules | None:
     """Discover and read project rule files at a workspace root.
 
     Reads, in this fixed order: `.imece/rules.md`, `AGENTS.md`, `CLAUDE.md`
@@ -80,6 +117,18 @@ def load_project_rules(root: Path) -> ProjectRules | None:
     (workspace.base.resolve_within_workspace with reject_symlinks=True) and
     is treated as absent rather than raising.
 
+    Additionally, when a valid collab shared-context binding artifact
+    (`.imece/shared-context.json`) exists, its content is PREPENDED as a
+    clearly labelled untrusted-data snapshot section (session id, metadata
+    revision, integrity hash, selected task first) so large file rules can
+    never hide the selected task; provenance is never treated as
+    authentication. When the artifact is absent or invalid the output is
+    byte-for-byte identical to the previous rules-only behavior.
+
+    An explicit `shared_snapshot` replaces the on-disk snapshot section for
+    this call only. Safe-point hosts pass their validated immutable snapshot;
+    rule files are still discovered normally and no artifact is written.
+
     Bytes are decoded as UTF-8 with the replacement error handler (never
     raises on invalid encoding). Every file found is concatenated, each
     preceded by a `# --- <filename> ---` header. The combined text is
@@ -87,9 +136,9 @@ def load_project_rules(root: Path) -> ProjectRules | None:
     function truncates it and appends an explicit, visible note saying so —
     it never truncates silently.
 
-    Returns None when none of the candidate files exist (or all existing
-    candidates were rejected as unsafe), so callers can treat "no rules"
-    and "rules present" as a clean two-way branch.
+    Returns None when none of the candidate files exist AND no valid
+    snapshot exists, so callers can treat "no rules" and "rules present" as
+    a clean two-way branch.
     """
     root = Path(root)
     parts: list[str] = []
@@ -109,14 +158,22 @@ def load_project_rules(root: Path) -> ProjectRules | None:
         parts.append(f"# --- {name} ---\n{content}")
         sources.append(name)
 
-    if not parts:
+    snapshot_section, snapshot_inner_truncated = _shared_snapshot_section(root, shared_snapshot)
+    if not parts and not snapshot_section:
         return None
 
-    combined = "\n\n".join(parts)
+    files_combined = "\n\n".join(parts)
+    if snapshot_section:
+        # Snapshot first: provenance and the selected task stay visible even
+        # when the file rules below it get truncated by the shared budget.
+        combined = snapshot_section + "\n\n" + files_combined if files_combined else snapshot_section
+        sources = (_SNAPSHOT_SOURCE, *sources)
+    else:
+        combined = files_combined
     sha256 = hashlib.sha256(combined.encode("utf-8")).hexdigest()
-    truncated = len(combined) > MAX_PROJECT_RULES_CHARS
+    truncated = snapshot_inner_truncated or len(combined) > MAX_PROJECT_RULES_CHARS
     text = combined
-    if truncated:
+    if len(combined) > MAX_PROJECT_RULES_CHARS:
         limit = max(0, MAX_PROJECT_RULES_CHARS - len(_TRUNCATION_NOTE))
         text = combined[:limit] + _TRUNCATION_NOTE
 

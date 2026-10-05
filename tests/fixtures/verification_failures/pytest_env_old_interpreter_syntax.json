@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "name": "pytest_env_old_interpreter_syntax",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "  File \"tests/test_match.py\", line 3\n    match cmd:\n          ^\nSyntaxError: invalid syntax\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "tests/test_match.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user",
+  "note": "match/case requires Python 3.10+; the checkout's venv is 3.9 (environment). Same surface text as a genuine syntax bug — deliberately ambiguous for the rules, resolved here by the known interpreter version"
+}

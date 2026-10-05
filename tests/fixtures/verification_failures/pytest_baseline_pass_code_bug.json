@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "pytest_baseline_pass_code_bug",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "tests/test_totals.py::test_totals FAILED\ndef test_totals():\n>       assert totals([1, 2]) == 3\nE       assert 2 == 3\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/totals.py",
+    "tests/test_totals.py"
+  ],
+  "baseline_status": "pass",
+  "baseline_exit_code": 0,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "baseline PASSES, so the failure was introduced by this change — pins that a 'pass' baseline is ignored by the rule backend (only fail/timeout/error trigger rule 1)"
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "name": "py_real_syntax_error_py_compile",
+  "origin": "real_capture",
+  "language": "python",
+  "tool": "python",
+  "command": [
+    "python",
+    "-m",
+    "py_compile",
+    "src/"
+  ],
+  "provenance": "real capture produced by the S1b agent in a scratch repo under /tmp/opencode (no user content); see real_capture for a reproducible cmd and tool version",
+  "real_capture": {
+    "cmd": "python -m py_compile cap_syntax.py (scratch file with an unclosed def paren)",
+    "source": "captured by the S1b fixture agent in /tmp/opencode/s1b-captures (scratch dir, no user content)",
+    "tool_version": "CPython 3.12.3",
+    "captured_at": "2026-10-02",
+    "sanitization": "none needed"
+  },
+  "stdout": "",
+  "stderr": "  File \"cap_syntax.py\", line 1\n    def broken(\n              ^\nSyntaxError: '(' was never closed\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "cap_syntax.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "REAL capture: authentic CPython SyntaxError formatting"
+}

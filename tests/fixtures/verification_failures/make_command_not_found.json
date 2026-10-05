@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "make_command_not_found",
+  "origin": "synthetic",
+  "language": "shell",
   "tool": "make check",
+  "command": [
+    "make",
+    "check"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "/bin/sh: 1: golangci-lint: not found\nmake: *** [Makefile:12: lint] Error 127\n",
   "exit_code": 127,
@@ -9,5 +18,10 @@
     "internal/service/handler.go"
   ],
   "baseline_status": null,
-  "expected_label": "environment_or_tooling"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "environment_or_tooling",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user"
 }

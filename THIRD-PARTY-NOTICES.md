@@ -19,6 +19,8 @@ the linked upstream projects.
 | basedpyright (includes Pyright, © Microsoft) | MIT | https://github.com/DetachHead/basedpyright |
 | debugpy | MIT | https://github.com/microsoft/debugpy |
 | nodejs-wheel-binaries (bundles the Node.js runtime) | MIT (Node.js: MIT and third-party licenses) | https://github.com/njzjz/nodejs-wheel |
+| typesafe-sdk (optional Jev System One decision layer; bundled only when the optional dependency is installed) | MIT | https://github.com/typesafe-ai/typesafe-sdk-python |
+| tenacity (transitive dependency of the optional typesafe-sdk) | Apache-2.0 | https://github.com/jd/tenacity |
 
 ## Frontend (bundled into the UI build)
 

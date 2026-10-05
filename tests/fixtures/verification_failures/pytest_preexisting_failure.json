@@ -1,6 +1,16 @@
 {
+  "schema_version": 2,
   "name": "pytest_preexisting_failure",
+  "origin": "synthetic",
+  "language": "python",
   "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "tests/test_legacy.py::test_old_behavior FAILED\nE   AssertionError: assert 1 == 2\n",
   "exit_code": 1,
@@ -9,5 +19,10 @@
     "src/unrelated.py"
   ],
   "baseline_status": "fail",
-  "expected_label": "unrelated_preexisting"
+  "baseline_exit_code": 1,
+  "expected_rule_kind": "unrelated_preexisting",
+  "expected_rule_action": "mark_pre_existing",
+  "expected_gate_action": "mark_pre_existing",
+  "gold_kind": "unrelated_preexisting",
+  "gold_action": "mark_pre_existing"
 }

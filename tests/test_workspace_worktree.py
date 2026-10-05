@@ -68,10 +68,159 @@ def _init_repo(root):
 def repo(tmp_path):
     root = _init_repo(tmp_path / "repo")
     (root / "foo.py").write_text("A\n", encoding="utf-8")
-    (root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    (root / ".gitignore").write_text("ignored.txt\n.env\n.imece/\n", encoding="utf-8")
     _git(["add", "-A"], root)
     _git(["commit", "-q", "-m", "initial"], root)
     return root
+
+
+# ---------------- collab bağlama artifact'ı kopyası ----------------
+
+
+def _binding_bytes(head, revision="b" * 40, task_id="t-ui"):
+    from collab_runtime.context import SharedSnapshot
+    from collab_runtime.models import build_context, build_initial_state, build_task
+
+    state = build_initial_state(session_id="s1", target_version="v1", base_commit=head)
+    state = state.with_context(build_context(goal="shared goal", decisions=[], interfaces={}))
+    state = state.with_task(
+        build_task(task_id=task_id, owner="alice", goal="task goal", scopes=["src/"],
+                   status="queued", context_revision="c" * 40)
+    )
+    snapshot = SharedSnapshot(revision=revision, context_hash=state.context.content_hash, state=state, task_id=task_id)
+    from collab_runtime.models import canonical_json_bytes
+    return canonical_json_bytes(snapshot.to_dict())
+
+
+def _write_binding(root, raw):
+    imece = root / ".imece"
+    imece.mkdir(exist_ok=True)
+    (imece / "shared-context.json").write_bytes(raw)
+
+
+def test_ignored_binding_artifact_captured_code_only(repo, tmp_path):
+    from change_runtime.git import GitWorktreeChangeProvider
+    from collab_runtime.context import parse_snapshot_bytes
+
+    head = _head(repo)
+    raw = _binding_bytes(head)
+    _write_binding(repo, raw)
+    (repo / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    (repo / "ignored.txt").write_text("secret\n", encoding="utf-8")
+    (repo / ".imece" / "other-ignored.txt").write_text("noise\n", encoding="utf-8")
+
+    before_head, before_branch, before_status = _head(repo), _branch(repo), _status(repo)
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-binding", base_dir=tmp_path / "workspaces")
+    try:
+        copied = ws.root / ".imece" / "shared-context.json"
+        assert copied.is_file()
+        assert copied.read_bytes() == raw
+        assert parse_snapshot_bytes(copied.read_bytes()).task_id == "t-ui"
+
+        # .env ve diğer ignore edilen dosyalar kopyalanmaz.
+        assert not ws.exists(".env")
+        assert not ws.exists("ignored.txt")
+        assert not ws.exists(".imece/other-ignored.txt")
+
+        # Artifact sentetik snapshot'a girmez.
+        tree = _git(["ls-tree", "-r", "--name-only", ws.snapshot.snapshot_commit], repo)
+        assert ".imece/shared-context.json" not in tree
+        assert ".env" not in tree
+
+        # Değişiklik yakalaması artifact'ı (ve ignore edilenleri) görmez.
+        changes = GitWorktreeChangeProvider().capture(ws)
+        assert ".imece/shared-context.json" not in changes.changed_paths
+
+        # Sıcak yenileme yok: kaynak artifact yenilense de shadow kopyası aynı kalır.
+        _write_binding(repo, _binding_bytes(head, revision="d" * 40))
+        assert copied.read_bytes() == raw
+
+        # Kaynak repo görünür durumu (HEAD/dal/status) değişmedi.
+        assert _head(repo) == before_head
+        assert _branch(repo) == before_branch
+        assert _status(repo) == before_status
+    finally:
+        ws.dispose()
+
+
+def test_invalid_or_missing_binding_not_consumed(repo, tmp_path):
+    # Eksik artifact: shadow'da .imece oluşturulmaz.
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-no-binding", base_dir=tmp_path / "workspaces")
+    try:
+        assert not (ws.root / ".imece" / "shared-context.json").exists()
+    finally:
+        ws.dispose()
+
+    # Geçersiz artifact (bozuk JSON): tüketilmez, sessizce atlanır.
+    _write_binding(repo, b"not json")
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-bad-binding", base_dir=tmp_path / "workspaces")
+    try:
+        assert not (ws.root / ".imece" / "shared-context.json").exists()
+    finally:
+        ws.dispose()
+
+    # Artifact diğer ignore edilen dosyalar gibi kopyalanmazsa .env hâlâ kopyalanmaz.
+    (repo / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-bad-binding-env", base_dir=tmp_path / "workspaces")
+    try:
+        assert not ws.exists(".env")
+    finally:
+        ws.dispose()
+
+
+def test_symlinked_imece_artifact_not_copied(repo, tmp_path):
+    raw = _binding_bytes(_head(repo))
+    outside = repo / "binding-store"
+    outside.mkdir()
+    _write_binding(outside, raw)
+    try:
+        (repo / ".imece").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks not supported in this environment")
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-symlink-binding", base_dir=tmp_path / "workspaces")
+    try:
+        assert not (ws.root / ".imece" / "shared-context.json").exists()
+    finally:
+        ws.dispose()
+
+
+def test_stale_binding_not_consumed(repo, tmp_path):
+    """Bir artifact base_commit'i, worktree'nin oluşturulduğu HEAD'den eskiyse
+    (bayat bağlama) tüketilmez."""
+    stale = _binding_bytes("a" * 40)  # base_commit != gerçek HEAD
+    _write_binding(repo, stale)
+    ws = GitWorktreeWorkspace.create(source_root=repo, run_id="run-stale-binding", base_dir=tmp_path / "workspaces")
+    try:
+        assert not (ws.root / ".imece" / "shared-context.json").exists()
+    finally:
+        ws.dispose()
+
+
+def test_subdir_project_binding_copied(repo, tmp_path):
+    """Proje kökü repo ALTDİZİNİ olduğunda artifact, karşılık gelen shadow
+    alt-dizin köküne kopyalanır (ignore kuralları repo-düzeyinde denetlenir)."""
+    head = _head(repo)
+    sub = repo / "sub"
+    sub.mkdir()
+    (sub / "app.py").write_text("print('sub')\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("ignored.txt\n.env\n.imece/\nsub/.imece/\n", encoding="utf-8")
+    raw = _binding_bytes(head)
+    _write_binding(sub, raw)
+
+    before_head, before_branch, before_status = _head(repo), _branch(repo), _status(repo)
+    ws = GitWorktreeWorkspace.create(source_root=sub, run_id="run-subdir-binding", base_dir=tmp_path / "workspaces")
+    try:
+        copied = ws.root / ".imece" / "shared-context.json"
+        assert ws.root.name == "sub"
+        assert copied.is_file()
+        assert copied.read_bytes() == raw
+        tree = _git(["ls-tree", "-r", "--name-only", ws.snapshot.snapshot_commit], repo)
+        assert "sub/.imece/shared-context.json" not in tree
+        assert _head(repo) == before_head
+        assert _branch(repo) == before_branch
+        assert _status(repo) == before_status
+    finally:
+        ws.dispose()
 
 
 def test_clean_repo_shadow_matches_head_and_source_untouched(repo, tmp_path):

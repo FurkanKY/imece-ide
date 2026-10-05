@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "name": "docker_env_daemon_unreachable",
+  "origin": "synthetic",
+  "language": "shell",
+  "tool": "docker compose",
+  "command": [
+    "docker",
+    "compose",
+    "run",
+    "--rm",
+    "tests"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "docker-compose.yml"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user",
+  "note": "the integration check needs the docker daemon; it is not running on this machine"
+}

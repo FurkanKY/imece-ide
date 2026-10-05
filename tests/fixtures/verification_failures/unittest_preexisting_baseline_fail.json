@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "name": "unittest_preexisting_baseline_fail",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "unittest",
+  "command": [
+    "python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "======================================================================\nFAIL: test_old_export (tests.test_legacy.TestLegacy)\n----------------------------------------------------------------------\nAssertionError: 'v1' != 'v2'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/vendored.py"
+  ],
+  "baseline_status": "fail",
+  "baseline_exit_code": 1,
+  "expected_rule_kind": "unrelated_preexisting",
+  "expected_rule_action": "mark_pre_existing",
+  "expected_gate_action": "mark_pre_existing",
+  "gold_kind": "unrelated_preexisting",
+  "gold_action": "mark_pre_existing",
+  "note": "the CLEAN case: the baseline rerun FAILED with the same check — mark pre-existing is authorized and correct under the gate guard"
+}

@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "jest_project_local_import_broken",
+  "origin": "synthetic",
+  "language": "javascript",
   "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "FAIL tests/helpers.test.js\n  ● Test suite failed to run\n\n    Cannot find module './helpers' from 'tests/helpers.test.js'\n",
   "exit_code": 1,
@@ -10,5 +19,10 @@
     "tests/helpers.test.js"
   ],
   "baseline_status": null,
-  "expected_label": "code_bug"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop"
 }

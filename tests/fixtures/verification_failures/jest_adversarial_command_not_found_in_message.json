@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "name": "jest_adversarial_command_not_found_in_message",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "FAIL tests/cli.test.js\n  ✕ prints a hint when the user types a command not found\n\n    Expected: 'hint: unknown command'\n    Received: undefined\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/cli.js",
+    "tests/cli.test.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "environment_or_tooling",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "adversarial: the phrase 'command not found' is inside the TEST NAME; jest itself ran fine and an assertion failed — the rule backend matches the phrase and wrongly stops"
+}

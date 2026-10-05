@@ -51,6 +51,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   openProject: async (path) => {
     const { root, name } = await bridge.call("project.open", { path });
+    const { useCollaboration } = await import("@/state/collaboration");
+    useCollaboration.getState().resetRoot(root);
+    const { useDelivery } = await import("@/state/delivery");
+    useDelivery.getState().reset(root);
     set({ root, name, children: {}, expanded: new Set(), loading: new Set(), errors: {} });
     await get().loadDir("");
     // önceki oturumun sekmelerini geri yükle

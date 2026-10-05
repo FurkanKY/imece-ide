@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "name": "node_env_heap_oom",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "node",
+  "command": [
+    "node",
+    "bin/cli.js"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\n",
+  "exit_code": 134,
+  "timed_out": false,
+  "changed_paths": [
+    "src/ingest.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "environment_or_tooling",
+  "gold_action": "needs_user",
+  "note": "OOM: can be a leak (code_bug) or a container/heap limit (environment); labelled environment here because the same script passes with NODE_OPTIONS=--max-old-space-size raised"
+}

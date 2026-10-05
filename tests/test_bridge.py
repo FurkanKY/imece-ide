@@ -178,6 +178,167 @@ def test_keys_set_and_status_for_anthropic(bridge, tmp_path, monkeypatch):
         os.environ.pop("ANTHROPIC_API_KEY", None)
 
 
+# ---------------- Jev (TypeSafe) karar sağlayıcısı anahtarı (S1b) ----------------
+
+def test_keys_status_decision_providers_separate_from_catalog(bridge, tmp_path, monkeypatch):
+    """Jev (TypeSafe) keys.status'ta AYRI decisionProviders sonucunda döner;
+    normal sağlayıcı kataloğuna ve yönlendirmeye hiçbir zaman karışmaz."""
+    import providers
+    import webhost.api.keys as keys_module
+    import webhost.api.providers  # noqa: F401 — handler kaydı
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    monkeypatch.setattr(keys_module, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    r = rpc(bridge, "keys.status")
+    assert r["ok"]
+    res = r["result"]
+    assert "typesafe" not in res["providers"]  # katalog listesi değişmedi
+    dp = res["decisionProviders"]
+    assert dp["typesafe"]["id"] == "typesafe"
+    assert dp["typesafe"]["label"] == "Jev (TypeSafe)"
+    assert dp["typesafe"]["ok"] is False          # anahtar kayıtlı değil
+    assert dp["typesafe"]["masked"] == ""
+    assert isinstance(dp["typesafe"]["sdkAvailable"], bool)  # SDK/bağlantı ayrı durum
+    # yönlendirme kataloğu (providers.list) da TypeSafe'i İÇERMEZ
+    r2 = rpc(bridge, "providers.list", call_id=2)
+    assert r2["ok"]
+    assert "typesafe" not in {p["id"] for p in r2["result"]["providers"]}
+
+
+def test_keys_set_typesafe_validates_and_stores(bridge, tmp_path, monkeypatch):
+    """typesafe → TYPESAFE_API_KEY; satır enjeksiyonu/boşluk İÇEREN anahtar
+    reddedilir — dosyaya yazılmaz, os.environ güncellenmez, değer hata
+    metnine asla yansımaz."""
+    import os
+    import providers
+    import webhost.api.keys as keys_module
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    monkeypatch.setattr(keys_module, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    try:
+        r = rpc(bridge, "keys.set", {"typesafe": "ts-gizli-uzun"})
+        assert r["ok"]
+        assert os.environ["TYPESAFE_API_KEY"] == "ts-gizli-uzun"
+        assert "TYPESAFE_API_KEY=ts-gizli-uzun" in env_file.read_text(encoding="utf-8")
+
+        r = rpc(bridge, "keys.status", call_id=2)
+        dp = r["result"]["decisionProviders"]["typesafe"]
+        assert dp["ok"] is True
+        assert dp["masked"].endswith("uzun")
+        assert "ts-gizli-uzun" not in json.dumps(r["result"])  # anahtar köprüden dönmez
+        assert "typesafe" not in r["result"]["providers"]
+
+        content_before = env_file.read_text(encoding="utf-8")
+        r = rpc(bridge, "keys.set", {"typesafe": "ts-yeni-deger\nEKSTRA=1"}, call_id=3)
+        assert r["ok"] is False and r["error"]["code"] == "invalid_key"
+        assert "ts-yeni-deger" not in r["error"]["message"] and "EKSTRA" not in r["error"]["message"]
+        assert env_file.read_text(encoding="utf-8") == content_before  # dosyaya YAZILMADI
+        assert os.environ["TYPESAFE_API_KEY"] == "ts-gizli-uzun"       # env güncellenmedi
+    finally:
+        os.environ.pop("TYPESAFE_API_KEY", None)
+
+
+def test_keys_test_routes_typesafe_to_decision_backend(bridge, tmp_path, monkeypatch):
+    """keys.test 'typesafe' çağrısını decision_credentials backend'ine yöneltir;
+    normal sağlayıcılar providers.test_provider'da kalır."""
+    import providers
+    import decision_credentials
+    import webhost.api.keys as keys_module  # noqa: F401 — handler kaydı
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    calls: list[tuple] = []
+
+    def fake_decision_test(provider_id, api_key):
+        calls.append((provider_id, api_key))
+        return {"ok": True, "code": "", "detail": "sentinel-jev"}
+
+    monkeypatch.setattr(decision_credentials, "test_provider", fake_decision_test)
+    r = rpc(bridge, "keys.test", {"provider": "typesafe", "key": "ts-anahtar"})
+    assert r["ok"] and r["result"]["detail"] == "sentinel-jev"
+    assert calls == [("typesafe", "ts-anahtar")]
+
+    def fake_provider_test(provider_id, api_key):
+        if providers.get(provider_id) is None:
+            raise ValueError(f"Test edilemeyen sağlayıcı: {provider_id}")
+        calls.append((provider_id, api_key))
+        return {"ok": False, "code": "network", "detail": "sentinel-provider"}
+
+    monkeypatch.setattr(providers, "test_provider", fake_provider_test)
+    r = rpc(bridge, "keys.test", {"provider": "deepseek"}, call_id=2)
+    assert r["ok"] and r["result"]["detail"] == "sentinel-provider"
+    r = rpc(bridge, "keys.test", {"provider": "boyle-biri-yok"}, call_id=3)
+    assert r["ok"] is False and r["error"]["code"] == "unknown_provider"
+
+
+def test_keys_status_typesafe_packaged_store_migration(bridge, tmp_path, monkeypatch):
+    """Paketli depo geçişi (düz .env → şifreli) TYPESAFE_API_KEY'i de taşır."""
+    import os
+    import providers
+    import webhost.api.keys as keys_module
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    monkeypatch.setattr(keys_module, "ENV_PATH", tmp_path / ".env")
+
+    class _FakeStore:
+        def __init__(self):
+            self.data: dict = {}
+            self.saved: list[dict] = []
+
+        def load(self):
+            return dict(self.data)
+
+        def save(self, updates):
+            self.saved.append(dict(updates))
+            self.data.update(updates)
+
+    fake = _FakeStore()
+    monkeypatch.setattr(keys_module, "packaged_store", lambda: fake)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-migrate-1234")
+    try:
+        r = rpc(bridge, "keys.status")
+        assert r["ok"]
+        dp = r["result"]["decisionProviders"]["typesafe"]
+        assert dp["ok"] is True
+        assert dp["masked"].endswith("1234")
+        assert fake.saved and fake.saved[0].get("TYPESAFE_API_KEY") == "ts-migrate-1234"
+        assert "ts-migrate-1234" not in json.dumps(r["result"])
+    finally:
+        os.environ.pop("TYPESAFE_API_KEY", None)
+
+
+def test_typesafe_test_provider_sanitized_via_missing_sdk(bridge, tmp_path, monkeypatch):
+    """SDK yok: köprüden net, yerel, eyleme dönük Türkçe mesaj — ağ yok.
+    (Gerçek SDK sınıf hataları — 200/401/429/timeout/close — gerçek SDK ile
+    tests/test_keys.py'de httpx2.MockTransport üzerinden sınanır.)"""
+    import providers
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    import decision_credentials
+
+    def _raise():
+        raise ImportError("no typesafe_sdk")
+
+    monkeypatch.setattr(decision_credentials, "_import_typesafe_sdk", _raise)
+    r = rpc(bridge, "keys.test", {"provider": "typesafe", "key": "ts-gizli-uzun"})
+    assert r["ok"]
+    assert r["result"]["ok"] is False and r["result"]["code"] == "sdk_missing"
+    assert "requirements-jev" in r["result"]["detail"]
+    assert "ts-gizli-uzun" not in r["result"]["detail"]
+
+
+def test_typesafe_test_provider_no_key_via_bridge(bridge, tmp_path, monkeypatch):
+    """Köprü üzerinden anahtarsız 'sına' → no_key; ağa çıkmaz, dosya yazmaz.
+    Anahtar yolu istemci açmadan döner — SDK seam asla çağrılmamalı."""
+    import providers
+    import decision_credentials
+    monkeypatch.setattr(providers, "providers_config_path", lambda: tmp_path / "providers.json")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setattr(decision_credentials, "_import_typesafe_sdk",
+                        lambda: pytest.fail("anahtar yokken SDK yüklenmemeli"))
+    r = rpc(bridge, "keys.test", {"provider": "typesafe"})
+    assert r["ok"]
+    assert r["result"] == {"ok": False, "code": "no_key", "detail": "Önce bir anahtar kaydedin."}
+    assert not (tmp_path / ".env").exists()
+
+
 def test_settings_routing_and_ai_engine_persist_roundtrip(bridge, tmp_path, monkeypatch):
     """Composer'ın routing seçimi ve 'AI motoru' tercihi ui_prefs.json'a yazılıp
     aynı biçimde geri okunmalı (bkz. ui_prefs.DEFAULTS: 'routing'/'ai_engine')."""

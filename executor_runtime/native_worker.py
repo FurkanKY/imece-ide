@@ -10,6 +10,11 @@ FixLoopRunner/RunCompletionGate responsibilities.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collab_runtime.safe_point import NativeWorkerSafePoint
+
 from agent_runtime.backend import ModelBackend
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.errors import AgentRuntimeError
@@ -99,6 +104,7 @@ class NativeWorkerAttemptAdapter:
         *,
         context_engine: ContextEngine | None = None,
         limits: AgentLimits | None = None,
+        safe_point: NativeWorkerSafePoint | None = None,
     ) -> None:
         if not isinstance(run_id, str) or not run_id.strip():
             raise ExecutorAdapterInputError("NativeWorkerAttemptAdapter.run_id must be a non-empty string.")
@@ -107,6 +113,7 @@ class NativeWorkerAttemptAdapter:
         self._backend = backend
         self._context_engine = context_engine or ContextEngine()
         self._limits = limits or _DEFAULT_WORKER_LIMITS
+        self._safe_point = safe_point
 
     @property
     def run_id(self) -> str:
@@ -130,28 +137,72 @@ class NativeWorkerAttemptAdapter:
         except FixLoopInputError as exc:
             raise ExecutorAdapterInputError(f"Invalid execution_id: {exc}") from exc
 
-        registry = _worker_registry(self._context_engine)
-        policy = _worker_policy()
-        context = ToolExecutionContext(workspace)
-        try:
-            sink = CanonicalAgentEventSink(self._runtime, self._run_id, execution_id=execution_id)
-        except ValueError as exc:
-            raise ExecutorAdapterInputError(f"Cannot construct canonical Worker sink: {exc}") from exc
+        effective_request = request
+        prepared = None
+        if self._safe_point is not None:
+            from collab_runtime.safe_point import SafePointError
 
-        session = AgentSession(
-            backend=self._backend,
-            registry=registry,
-            policy=policy,
-            context=context,
-            instructions=NATIVE_FIX_WORKER_SYSTEM_INSTRUCTIONS,
-            limits=self._limits,
-            event_sink=sink,
-            execution_id=execution_id,
-            cancel_token=cancel_token,
-        )
+            try:
+                if cancel_token is None:
+                    prepared = self._safe_point.prepare(request, workspace)
+                else:
+                    prepared = self._safe_point.prepare(request, workspace, cancel_token=cancel_token)
+                effective_request = prepared.request
+            except OperationCancelledError as exc:
+                raise ExecutorAdapterCancelledError(f"Worker preparation cancelled: {exc}") from exc
+            except SafePointError:
+                raise ExecutorAdapterInputError(
+                    "Collaboration context could not be safely accepted; worker attempt was not started."
+                ) from None
+
+        def create_session(event_sink):
+            return AgentSession(
+                backend=self._backend,
+                registry=registry,
+                policy=policy,
+                context=context,
+                instructions=NATIVE_FIX_WORKER_SYSTEM_INSTRUCTIONS,
+                limits=self._limits,
+                event_sink=event_sink,
+                execution_id=execution_id,
+                cancel_token=cancel_token,
+            )
+
+        if prepared is None:
+            registry = _worker_registry(self._context_engine)
+            policy = _worker_policy()
+            context = ToolExecutionContext(workspace)
+            try:
+                sink = CanonicalAgentEventSink(self._runtime, self._run_id, execution_id=execution_id)
+            except ValueError as exc:
+                raise ExecutorAdapterInputError(f"Cannot construct canonical Worker sink: {exc}") from exc
+            session = create_session(sink)
+        else:
+            try:
+                if cancel_token is not None:
+                    cancel_token.raise_if_cancelled()
+                registry = _worker_registry(self._context_engine)
+                policy = _worker_policy()
+                context = ToolExecutionContext(workspace)
+                sink = CanonicalAgentEventSink(self._runtime, self._run_id, execution_id=execution_id)
+                if cancel_token is not None:
+                    cancel_token.raise_if_cancelled()
+                session = create_session(sink)
+                if cancel_token is None:
+                    prepared.acknowledge()
+                else:
+                    prepared.acknowledge(cancel_token=cancel_token)
+            except OperationCancelledError as exc:
+                raise ExecutorAdapterCancelledError(f"Worker preparation cancelled: {exc}") from exc
+            except Exception:
+                raise ExecutorAdapterInputError(
+                    "Collaboration context could not be safely accepted; worker attempt was not started."
+                ) from None
 
         try:
-            outcome = session.start(request.rendered_input)
+            if prepared is not None and cancel_token is not None:
+                cancel_token.raise_if_cancelled()
+            outcome = session.start(effective_request.rendered_input)
         except OperationCancelledError as exc:
             raise ExecutorAdapterCancelledError(f"Worker AgentSession cancelled: {exc}") from exc
         except AgentRuntimeError as exc:

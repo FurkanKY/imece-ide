@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "jest_assertion_error",
+  "origin": "synthetic",
+  "language": "javascript",
   "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "FAIL tests/sum.test.js\n  ✕ adds numbers\n\n    expect(received).toBe(expected)\n\n    Expected: 5\n    Received: 4\n",
   "exit_code": 1,
@@ -9,5 +18,10 @@
     "src/sum.js"
   ],
   "baseline_status": null,
-  "expected_label": "code_bug"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop"
 }

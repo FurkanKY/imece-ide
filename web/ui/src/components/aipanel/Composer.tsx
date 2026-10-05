@@ -5,26 +5,19 @@
    dizisine eklenir ve textarea'nın üstünde çip olarak gösterilir. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  BrainCircuit, Code2, SearchCheck, Play, Square, ClipboardCheck, X, Folder,
-  CornerDownLeft, type LucideIcon,
-} from "lucide-react";
+import { Play, Square, ClipboardCheck, X, Folder, CornerDownLeft } from "lucide-react";
 import { useRun, MAX_MENTIONS } from "@/state/run";
 import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
+import { useCollaboration } from "@/state/collaboration";
+import { CollaborationControls } from "./CollaborationControls";
 import { useKeys } from "@/state/keys";
-import { bridge, ProviderInfo, Role } from "@/bridge";
+import { bridge, ProviderInfo } from "@/bridge";
 import { Select, SelectGroup } from "@/components/ui/Select";
 import { Button } from "@/components/ui";
 import { fuzzyFilter, FuzzyHit } from "@/lib/fuzzy";
 import { fileIcon } from "@/lib/fileIcons";
 import { toast } from "@/components/toasts/toasts";
-
-const ROLE_ICONS: Record<Role, LucideIcon> = {
-  planner: BrainCircuit,
-  coder: Code2,
-  reviewer: SearchCheck,
-};
 
 // Backend label'ları (providers.py CATALOG) hesap/API farkını Composer'da
 // belirsiz bırakır ("Gemini" hem CLI hem API girdisinde geçer) — burada
@@ -182,20 +175,18 @@ function MentionPopup({
   );
 }
 
-function RoleSelect({ role }: { role: Role }) {
+function AgentProviderSelect({ disabled }: { disabled: boolean }) {
   const providers = useRun((s) => s.providers);
-  const value = useRun((s) => s.routing[role]);
-  const setRouting = useRun((s) => s.setRouting);
-  const Icon = ROLE_ICONS[role];
+  const value = useRun((s) => s.providerId);
+  const setProviderId = useRun((s) => s.setProviderId);
   const groups = providerGroups(providers);
 
   return (
     <Select
       value={value}
       groups={groups}
-      onChange={(v) => setRouting(role, v)}
-      ariaLabel={role}
-      icon={<Icon size={13} className="shrink-0 text-muted" strokeWidth={1.9} />}
+      onChange={(v) => { if (!disabled) setProviderId(v); }}
+      ariaLabel="Ajan / sağlayıcı"
     />
   );
 }
@@ -214,6 +205,8 @@ export function Composer() {
   const followUpDraft = useRun((s) => s.followUpDraft);
   const setFollowUpDraft = useRun((s) => s.setFollowUpDraft);
   const followUp = useRun((s) => s.followUp);
+  const collaborationEnabled = useCollaboration((s) => s.enabled);
+  const runRootStale = useRun((s) => s.runRootStale);
   const enterToSend = useSettings((s) => s.prefs?.enterToSend ?? true);
   const focusNonce = useUi((s) => s.composerFocusNonce);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -223,8 +216,8 @@ export function Composer() {
   // motoruyla yürütüldüyse -- Composer kilitlenmez, bir takip-isteği
   // kutusuna döner; klasik motorda (veya motor henüz bilinmiyorsa) eski
   // "kilitli" davranış korunur.
-  const followUpMode = reviewReady && engine === "pipeline";
-  const followUpUnsupported = reviewReady && engine !== "pipeline";
+  const followUpMode = reviewReady && (engine === "pipeline" || engine === "agent");
+  const followUpUnsupported = reviewReady && engine !== "pipeline" && engine !== "agent";
   const locked = running || followUpUnsupported;
   // @-mention'lar ve textarea'nın kendisi normal modda `task`'ı, takip-isteği
   // modunda `followUpDraft`'ı okur/yazar -- aşağıdaki tüm mantık bu ikisi
@@ -301,7 +294,7 @@ export function Composer() {
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }, [focusNonce, locked]);
   // beta onboarding: seçili routing'de anahtarı/CLI'ı eksik sağlayıcı uyarısı
-  const routing = useRun((s) => s.routing);
+  const providerId = useRun((s) => s.providerId);
   const keyProviders = useKeys((s) => s.providers);
   const keysLoaded = useKeys((s) => s.loaded);
   const loadKeys = useKeys((s) => s.load);
@@ -309,25 +302,20 @@ export function Composer() {
   useEffect(() => {
     if (!keysLoaded) void loadKeys();
   }, [keysLoaded, loadKeys]);
-  const missing = keysLoaded
-    ? [...new Set(Object.values(routing))].filter((p) => keyProviders[p] && !keyProviders[p].ok)
-    : [];
-  // routing'deki herhangi bir rol yeni (pipeline) motorca desteklenmiyorsa
-  // koşu klasik motora düşer — decision 4: bunu kullanıcıya ipucu olarak göster.
+  const missing = keysLoaded && keyProviders[providerId] && !keyProviders[providerId].ok ? [providerId] : [];
   const runProviders = useRun((s) => s.providers);
-  const unsupported = runProviders.length
-    ? [...new Set(Object.values(routing))].filter((p) => {
-        const info = runProviders.find((x) => x.id === p);
-        return info && info.engineSupported === false;
-      })
-    : [];
+  const selectedProvider = runProviders.find((x) => x.id === providerId);
+  const unsupported = selectedProvider?.engineSupported === false;
+  const collaborationBlocked = collaborationEnabled;
 
-  const helper = running
+  const helper = runRootStale && running
+    ? "Önceki projenin koşusu sürüyor; bu sonucu yeni projede kullanamazsınız. Gerekirse durdurun."
+    : running
     ? followUpMode
       ? "Takip isteği sürüyor. Gerekirse durdurun."
       : "Koşu sürüyor. Gerekirse durdurun."
     : followUpUnsupported
-      ? "Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın."
+      ? "Bu eski koşuda takip isteği desteklenmiyor; yeni bir görev başlatın."
       : runStage === "error"
         ? "Koşu tamamlanmadı. Görevi düzenleyip tekrar çalıştırın."
         : null;
@@ -372,10 +360,9 @@ export function Composer() {
 
   return (
     <div className="material-panel border-t border-border-w p-2.5">
-      <div className="mb-2 flex gap-1.5">
-        <RoleSelect role="planner" />
-        <RoleSelect role="coder" />
-        <RoleSelect role="reviewer" />
+      <div className={"mb-2 " + (running || reviewReady ? "pointer-events-none opacity-60" : "")}>
+        <label className="mb-1 block text-muted" style={{ fontSize: "var(--t-caption)" }}>Ajan / sağlayıcı</label>
+        <AgentProviderSelect disabled={running || reviewReady} />
       </div>
       {helper && (
         <div className="mb-1.5 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
@@ -390,11 +377,13 @@ export function Composer() {
           </button>
         </div>
       )}
-      {!helper && missing.length === 0 && unsupported.length > 0 && (
+      {!helper && missing.length === 0 && unsupported && (
         <div className="mb-1.5 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
-          {unsupported.join(", ")} yeni motoru desteklemiyor — bu koşu klasik motorla yürütülecek.
+          {selectedProvider?.engineReason || `${providerId} bu akışı desteklemiyor. Başka bir sağlayıcı seçin.`}
         </div>
       )}
+      {!helper && collaborationEnabled && <div className="mb-1.5 text-warn" style={{ fontSize: "var(--t-caption)" }}>Ortak bağlam bu yeni tek ajan akışına henüz bağlı değil; çalıştırmak için ortak bağlamı kapatın.</div>}
+      <CollaborationControls />
       {mentions.length > 0 && (
         <div className="mb-1.5 flex flex-wrap gap-1.5">
           {mentions.map((path) => {
@@ -452,7 +441,7 @@ export function Composer() {
             spellCheck={false}
             readOnly={locked}
             aria-label={
-              followUpMode ? "Takip isteği" : followUpUnsupported ? "İnceleme tamamlanmayı bekliyor" : "Ekip görevi"
+              followUpMode ? "Takip isteği" : followUpUnsupported ? "Sonuç tamamlanmayı bekliyor" : "Görev"
             }
             className="selectable min-h-[54px] w-full resize-none rounded-[var(--r-md)] border border-border-w2 bg-field px-3 py-2 text-text outline-none transition-colors placeholder:text-faint focus:border-accent"
             style={{ fontSize: "var(--t-body)" }}
@@ -482,6 +471,7 @@ export function Composer() {
             variant="primary"
             icon={Play}
             onClick={submit}
+            disabled={collaborationEnabled}
             title="Takip isteği gönder (Enter)"
             aria-label="Takip isteği gönder"
             className="w-9 shrink-0 px-0"
@@ -491,6 +481,7 @@ export function Composer() {
             variant="primary"
             icon={Play}
             onClick={submit}
+            disabled={collaborationBlocked || unsupported || missing.length > 0}
             title="Çalıştır (Enter)"
             aria-label="Çalıştır"
             className="w-9 shrink-0 px-0"

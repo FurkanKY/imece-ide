@@ -1,21 +1,26 @@
 """decision_runtime — the Jev System One decision layer (docs/JEV-DESIGN.md).
 
-S1a (this slice): fully offline. No typesafe-sdk import, no API key read,
-no network call anywhere in this package. `RuleDecisionBackend` is a
-deterministic stand-in usable on its own (ui_prefs "rules") or as the
-fallback every other backend must use (design rule 1). The seam for a
-future `JevDecisionBackend` is `decision_runtime.ports.DecisionPort` — no
-such class exists yet (see engine_factory.build_decision_backend).
+S1a (offline skeleton): `RuleDecisionBackend` (deterministic), fake backend,
+canonical `decision.made` recording, baseline verification rerun and the
+`VerificationFailureGate` seam. S1b adds `JevDecisionBackend` — the real
+TypeSafe (typesafe-sdk) backend — which is deliberately LAZY: importing this
+package never imports typesafe-sdk and never reads TYPESAFE_API_KEY; both
+are only touched when a decide() call actually runs, and any missing
+key/SDK/remote failure surfaces as a typed `DecisionBackendError` that
+callers map to the deterministic rule fallback (design rule 1). Remote state
+leaves only through `decision_runtime.remote_state` (allowlist + redaction).
 """
 
 from decision_runtime.errors import (
     DecisionBackendError,
+    DecisionBackendFailureReason,
     DecisionInputError,
     DecisionRecordingError,
     DecisionRuntimeError,
 )
 from decision_runtime.fake_backend import FakeDecisionBackend
 from decision_runtime.gate import VerificationFailureGate
+from decision_runtime.jev_backend import JevDecisionBackend
 from decision_runtime.models import (
     Answer,
     Choice,
@@ -32,6 +37,7 @@ from decision_runtime.models import (
 from decision_runtime.policy import ConfidenceBand, DecisionPolicy
 from decision_runtime.ports import DecisionPort
 from decision_runtime.recorder import CanonicalDecisionRecorder
+from decision_runtime.remote_state import sanitize_process_output, sanitize_remote_state
 from decision_runtime.triage import (
     FailureKind,
     RuleDecisionBackend,
@@ -50,6 +56,7 @@ __all__ = [
     "DecisionRuntimeError",
     "DecisionInputError",
     "DecisionBackendError",
+    "DecisionBackendFailureReason",
     "DecisionRecordingError",
     "QuestionKind",
     "Choice",
@@ -68,6 +75,9 @@ __all__ = [
     "FakeDecisionBackend",
     "CanonicalDecisionRecorder",
     "VerificationFailureGate",
+    "JevDecisionBackend",
+    "sanitize_process_output",
+    "sanitize_remote_state",
     "FailureKind",
     "TriageAction",
     "TriageFacts",

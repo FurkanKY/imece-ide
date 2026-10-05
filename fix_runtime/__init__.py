@@ -22,7 +22,9 @@ from fix_runtime.models import (
     FixTrigger,
     FixTriggerKind,
     FixWorkerRequest,
+    FixWorkerRenderContext,
     InitialWorkerRequest,
+    InitialWorkerRenderContext,
     new_fix_attempt_id,
     new_fix_execution_id,
     new_fix_loop_id,
@@ -34,7 +36,9 @@ from fix_runtime.ports import (
     WorkerAttemptResult,
     WorkerAttemptRunner,
 )
-from fix_runtime.prompt import MAX_FIX_INPUT_CHARS, render_fix_worker_input, render_initial_worker_input
+from fix_runtime.prompt import (
+    MAX_FIX_INPUT_CHARS, render_fix_worker_input, render_initial_worker_input,
+)
 from fix_runtime.runner import FixLoopRunner
 
 __all__ = [
@@ -47,6 +51,8 @@ __all__ = [
     "FixTrigger",
     "FixWorkerRequest",
     "InitialWorkerRequest",
+    "FixWorkerRenderContext",
+    "InitialWorkerRenderContext",
     "FixLoopRequest",
     "FixAttemptResult",
     "FixLoopReport",

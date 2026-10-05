@@ -5,6 +5,66 @@ planning records are intentionally not part of the published repository.
 
 ## Unreleased
 
+> Everything in this section is **development work on top of
+> `v0.4.0-beta.1`**. It is not a released version, not a tag and not a binary.
+> Nothing here is announced as available in a download. The tracked
+> plan of record is [PRODUCT-PLAN.md](PRODUCT-PLAN.md).
+
+- **Experimental collaboration foundation (metadata-first, loopback only):**
+  checkouts of the same repository can share an explicit, offline metadata
+  session — a goal/decisions/interfaces record, a task list with **advisory**
+  scopes, an explicitly published private proposal per selected path, and a
+  combined candidate materialized in a **new directory outside your checkout**
+  with real three-way merges. An opt-in loopback control core on literal
+  `127.0.0.1` adds authenticated metadata operations, revision subscription
+  with bounded replay, a read-only snapshot client and explicit native
+  task-status commands. This is a **foundation**, not a team product: it is
+  **not connected to the default single-agent flow** (an attached shared
+  context is refused explicitly), **no LAN pairing or LAN/WAN deployment or
+  TLS exists**, and two-computer, LAN and Windows end-to-end are **unverified**.
+  Selected proposal code is shared **verbatim with no automatic redaction**;
+  the one-shot credential share uses memory and the system clipboard. See
+  [COLLABORATION.md](COLLABORATION.md) and
+  [PRIVACY.md](../PRIVACY.md).
+- **Single-task default flow (no roles):** the AI panel now defaults to one
+  task plus **one** provider — a task goes in, a single independent agent
+  works on it end to end in its own isolated worktree, and the result comes
+  back with deterministic verification evidence. There is no planner step, no
+  reviewer step and no role chain in the default flow; the panel shows **Çalışma
+  (work) / Sonuç (result) / Etkinlik (activity)**. The older
+  Planner/Worker/Reviewer trio remains available as a **compatibility backend**
+  for existing runs and historical receipts, but is no longer the default and
+  is not planned for v1. Providers the agent flow cannot drive are now refused
+  with a reason instead of falling back silently, and agent-CLI (ACP) providers
+  that do not report usage show `—` for cost/tokens instead of a fabricated
+  number. See [USAGE.md](USAGE.md#default-flow-task--one-agent--evidence--your-decision).
+  **Status: implemented and verified by local fixture end-to-end runs; real
+  provider and supported-platform acceptance are still unmet, so no live
+  guarantee is made.** The task-first shell and real concurrency (M2) are now
+  **authorized and starting** but are **not implemented yet**; restart
+  durability (M3), two-machine pairing (M4) and the packaged release gate
+  (M5) remain planned — see [PRODUCT-PLAN.md](PRODUCT-PLAN.md).
+- **Follow-up requests on the default flow:** while a result is waiting for
+  your decision, you can send a follow-up instruction and the **same run**
+  continues from the **same worktree** and the **same original task** instead
+  of starting over. A follow-up that is refused for a known reason keeps your
+  existing ready state and evidence rather than discarding them, and rejecting
+  a result or restoring files clears the stale evidence instead of leaving it
+  on screen.
+- **Experimental decision layer (Jev / TypeSafe) — optional capability:** Settings
+  → "Karar katmanı" decides what happens when a verification check fails *before*
+  the automatic fix loop spends an attempt on it. This is **not** a role in the
+  role-free product, **not** a mandatory step and **not** a v1 requirement.
+  **Kapalı** (default) keeps today's behaviour, **Kurallar** classifies the
+  failure with deterministic offline rules, and **Jev (TypeSafe)** opts in to a
+  fast triage model — with its own key ("Karar sağlayıcısı") and an optional SDK
+  (`pip install -r requirements-jev.txt`). Any Jev failure falls back to the
+  offline rules, so the feature can never block a run. Only the opt-in Jev
+  mode sends data (filtered command, short error excerpt, relative changed
+  paths, baseline result) to `https://api.typesafe.ai`, over a separate pinned
+  state allowlist and after credential redaction; see [PRIVACY.md](../PRIVACY.md)
+  and [DECISION-LAYER.md](DECISION-LAYER.md). Experimental: the live evaluation is
+  still pending, so no accuracy or latency claim is made.
 - **Follow-up requests on a pending proposal:** while a pipeline run's
   proposal is waiting for a decision, you can type a follow-up instruction
   (e.g. "also handle negative numbers") and the same run continues from the
@@ -70,6 +130,12 @@ planning records are intentionally not part of the published repository.
 
 ## Security and privacy
 
-- No telemetry, analytics, or automatic error reporting.
-- Model requests are started by the user and use the provider assigned to each
-  role. See [PRIVACY.md](../PRIVACY.md) and [SECURITY.md](../SECURITY.md).
+- No telemetry, analytics, or automatic error reporting. Imece runs no hosted
+  service of its own.
+- Model requests are started by the user and use the single provider selected for
+  that run. API credentials are stored locally and transmitted only to the
+  provider you selected, over that provider's auth protocol.
+- Selected collaboration proposal code is shared verbatim (no automatic
+  redaction), and the one-shot credential share uses memory and the system
+  clipboard — both explicit, both documented.
+- See [PRIVACY.md](../PRIVACY.md) and [SECURITY.md](../SECURITY.md).

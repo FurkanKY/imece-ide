@@ -94,6 +94,7 @@ export function Chat() {
   const stages = useRun((s) => s.stages);
   const verdict = useRun((s) => s.verdict);
   const verdictNote = useRun((s) => s.verdictNote);
+  const engine = useRun((s) => s.engine);
   const endRef = useRef<HTMLDivElement>(null);
 
   // yeni içerik gelince yumuşak kaydır
@@ -122,7 +123,10 @@ export function Chat() {
           return null; // görev ve plan, Plan bölümünün sahipliğindedir
         }
         if (item.kind === "stage" && item.stage) {
-          const role = STAGE_ROLE[item.stage] as Role | undefined;
+           if (engine === "agent") {
+             return <div key={item.id} className="material-card rounded-[var(--r-md)] border border-border-w px-3 py-2 text-text2" style={{ fontSize: "var(--t-label)" }}><Activity size={13} className="mr-2 inline text-accent" />{item.stage === "verifying" ? "Doğrulama" : "Ajan çalışıyor"}</div>;
+           }
+           const role = STAGE_ROLE[item.stage] as Role | undefined;
           if (!role) return null;
           return <StageCard key={item.id} stage={item.stage} info={stages[role]} />;
         }

@@ -9,6 +9,7 @@ import {
   Loader2, Check, X, Info, type LucideIcon,
 } from "lucide-react";
 import { useActivity } from "@/state/activity";
+import { useRun } from "@/state/run";
 import { ActivityItem, ActivityRole } from "@/bridge";
 import { EmptyState } from "@/components/ui";
 
@@ -71,14 +72,14 @@ function Row({ item }: { item: ActivityItem }) {
   );
 }
 
-function RoleGroup({ role, items }: { role: ActivityRole; items: ActivityItem[] }) {
+function RoleGroup({ role, items, agentRun }: { role: ActivityRole; items: ActivityItem[]; agentRun: boolean }) {
   const meta = ROLE_META[role];
   const running = items.some((i) => i.status === "running");
   return (
     <section className="mb-3">
       <div className="mb-1 flex items-center gap-1.5 text-muted">
         <meta.Icon size={13} className={running ? "text-accent" : "text-faint"} strokeWidth={1.9} />
-        <span style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>{meta.label}</span>
+        <span style={{ fontSize: "var(--t-caption)", fontWeight: "var(--w-label)" }}>{agentRun && role === "worker" ? "Ajan" : meta.label}</span>
         <span className="text-faint" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>
           {items.length}
         </span>
@@ -92,30 +93,33 @@ const ROLE_ORDER: ActivityRole[] = ["planner", "worker", "verification", "review
 
 export function Activity() {
   const items = useActivity((s) => s.items);
+  const agentRun = useRun((s) => s.engine === "agent");
 
   const grouped = useMemo(() => {
     const byRole = new Map<ActivityRole, ActivityItem[]>();
     for (const item of items) {
-      const list = byRole.get(item.role) ?? [];
+      if (agentRun && item.role !== "worker" && item.role !== "verification" && item.role !== "system") continue;
+      const role = agentRun && item.role === "worker" ? "worker" : item.role;
+      const list = byRole.get(role) ?? [];
       list.push(item);
-      byRole.set(item.role, list);
+      byRole.set(role, list);
     }
     return ROLE_ORDER.map((role) => ({ role, items: byRole.get(role) ?? [] })).filter((g) => g.items.length > 0);
-  }, [items]);
+  }, [items, agentRun]);
 
   if (grouped.length === 0) {
     return (
       <EmptyState
         icon={TerminalSquare}
         title="Henüz bir etkinlik yok"
-        description="Bir koşu başladığında her ajanın ne yaptığını burada canlı olarak görürsünüz."
+          description="Bir koşu başladığında ajan etkinliği burada görünür."
       />
     );
   }
 
   return (
     <div className="h-full overflow-y-auto px-3 py-3">
-      {grouped.map((g) => <RoleGroup key={g.role} role={g.role} items={g.items} />)}
+      {grouped.map((g) => <RoleGroup key={g.role} role={g.role} items={g.items} agentRun={agentRun} />)}
     </div>
   );
 }

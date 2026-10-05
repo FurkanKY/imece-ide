@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "name": "jest_flaky_intermittent_failure",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "FAIL tests/cache.test.js\n  ✕ keeps insertion order under parallel writes\n\n    Expected: 1\n    Received: 0\n\n  ● note: passes when this suite is run alone (shared module cache)\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/cache.js",
+    "tests/cache.test.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once",
+  "note": "flakiness needs run history, not a single output; the rule backend has no signal and defaults to a low-confidence code_bug"
+}

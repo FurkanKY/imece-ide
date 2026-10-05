@@ -1,6 +1,15 @@
 {
+  "schema_version": 2,
   "name": "jest_missing_module_lodash",
+  "origin": "synthetic",
+  "language": "javascript",
   "tool": "jest",
+  "command": [
+    "npx",
+    "jest"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "FAIL tests/util.test.js\n  ● Test suite failed to run\n\n    Cannot find module 'lodash' from 'src/util.js'\n\n    Require stack:\n      src/util.js\n",
   "exit_code": 1,
@@ -9,5 +18,10 @@
     "src/util.js"
   ],
   "baseline_status": null,
-  "expected_label": "missing_dependency"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "missing_dependency",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "missing_dependency",
+  "gold_action": "needs_user"
 }

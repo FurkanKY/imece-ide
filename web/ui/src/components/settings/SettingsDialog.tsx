@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { X, Check, KeyRound, Plus, Trash2, Terminal } from "lucide-react";
+import { X, Check, KeyRound, Plus, Trash2, Terminal, Zap } from "lucide-react";
 import { useUi } from "@/state/ui";
 import { useSettings } from "@/state/settings";
 import { useKeys } from "@/state/keys";
@@ -187,6 +187,106 @@ function ApiProviderCard({ p }: { p: ProviderInfo }) {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Jev (TypeSafe) karar sağlayıcısı — normal sağlayıcı kartlarından AYRI,
+    kompakt bir alan. Durum noktası nötrdür: `ok` yalnız anahtarın KAYITLI
+    olduğunu belirtir (bağlantı doğrulanmadı) — yeşil/uyarı yanıltmasın;
+    açık metin etiketi durumu söyler. SDK/bağlantı "Bağlantıyı sına" ile
+    denenir (salt test isteği, proje içeriği taşımaz). Kayıt sırasında canlı
+    API testi YAPILMAZ. */
+function DecisionProviderSection() {
+  const decision = useKeys((s) => s.decisionProviders);
+  const loaded = useKeys((s) => s.loaded);
+  const load = useKeys((s) => s.load);
+  const saveDecision = useKeys((s) => s.saveDecision);
+  const test = useKeys((s) => s.test);
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const p = decision.typesafe;
+  const label = p?.label ?? "Jev (TypeSafe)";
+  const key = val.trim();
+
+  useEffect(() => {
+    if (!loaded) void load();
+  }, [loaded, load]);
+
+  const saveKey = async () => {
+    if (!key || busy || testing) return; // tekrar tıklama koruması
+    setBusy(true);
+    try {
+      await saveDecision(key);
+      setVal(""); // kaydedilen anahtar yerel durumdan temizlenir
+      toast.ok(`${label} anahtarı kaydedildi.`);
+    } catch (e) {
+      toast.err(e instanceof Error ? e.message : "Anahtar kaydedilemedi.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testConn = async () => {
+    if (busy || testing) return; // tekrar tıklama koruması
+    if (!key && !p?.ok) return; // anahtar yokken sına devre dışı
+    setTesting(true);
+    try {
+      const t = await test("typesafe", key || undefined);
+      if (t.ok) toast.ok(`${label} bağlantısı doğrulandı.`);
+      else toast.err(`${label}: ${t.detail || "Bağlantı kurulamadı."}`);
+    } catch (e) {
+      toast.err(e instanceof Error ? e.message : "Bağlantı test edilemedi.");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="py-2.5">
+      <div className="mb-1 flex items-center gap-1.5 text-muted"
+           style={{ fontSize: "var(--t-overline)", fontWeight: "var(--w-overline)", letterSpacing: "var(--ls-overline)" }}>
+        <Zap size={11} /> Karar sağlayıcısı
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-text2" style={{ fontSize: "var(--t-label)" }}>
+          <StatusDot tone="neutral" />
+          <span className="truncate">{label}</span>
+        </span>
+      </div>
+      <div className="mt-0.5 pl-4 text-muted" style={{ fontSize: "var(--t-caption)" }}>
+        {p?.ok
+          ? "Anahtar kayıtlı (bağlantı doğrulanmadı) — 'Bağlantıyı sına' ile deneyin."
+          : "Anahtar kayıtlı değil."}
+        {p && p.sdkAvailable === false &&
+          " TypeSafe SDK kurulu değil — bağlantı testi ve Jev kararları için gerekli (isteğe bağlı kurulum: pip install -r requirements-jev.txt)."}
+      </div>
+      <div className="mt-1 flex items-center gap-2 pl-4">
+        <input
+          type="password"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder={p?.ok ? `kayıtlı (${p.masked}). Değiştirmek için yaz` : p?.keyHint || "API anahtarı"}
+          aria-label={`${label} API anahtarı`}
+          autoComplete="off"
+          spellCheck={false}
+          className="selectable min-w-0 flex-1 rounded-[var(--r-sm)] border border-border-w2 bg-field px-2.5 py-1.5 text-text outline-none placeholder:text-faint focus:border-accent"
+          style={{ fontSize: "var(--t-caption)", fontFamily: "var(--font-mono)" }}
+        />
+        <Button size="sm" variant="secondary" loading={busy} disabled={!key || testing} onClick={() => void saveKey()}>
+          Kaydet
+        </Button>
+        <Button size="sm" variant="ghost" loading={testing} disabled={(!key && !p?.ok) || busy} onClick={() => void testConn()}>
+          Bağlantıyı sına
+        </Button>
+      </div>
+      <p className="mt-1 pl-4 text-muted" style={{ fontSize: "var(--t-caption)" }}>
+        Aktifken Jev'e (api.typesafe.ai) yalnız izin listesindeki küçük bağlam alıntısı gönderilir:
+        süzülmüş komut, hata alıntısı, değişen dosya yolları ve taban (baseline) sonuçları —
+        tam dosya içerikleri gönderilmez. Anahtar yokken veya bağlantı kurulamazsa kurallara
+        (çevrimdışı) düşer. Deneysel; canlı ölçümler henüz tamamlanmadı.
+      </p>
     </div>
   );
 }
@@ -488,7 +588,7 @@ export function SettingsDialog() {
                 label="Karar katmanı (deneysel)"
                 hint={
                   prefs.decisionLayer === "jev"
-                    ? "Jev (TypeSafe): şimdilik Kurallar davranışına düşer — henüz bir API anahtarı arka ucu yok."
+                    ? "Jev (TypeSafe): doğrulama başarısızlıklarını sınıflandırır — anahtarı aşağıdaki 'Karar sağlayıcısı' bölümünden girin. Hata/eksik anahtar durumunda Kurallar davranışına düşer."
                     : prefs.decisionLayer === "rules"
                       ? "Kurallar: bir doğrulama başarısız olunca ortam/eksik bağımlılık, önceden var olan hata ve kararsız (flaky) durumları belirlenimci kurallarla ayırt eder; hiçbir şey makineden çıkmaz."
                       : "Kapalı: doğrulama hataları doğrudan düzeltme döngüsüne gider (bugünkü davranış)."
@@ -504,6 +604,8 @@ export function SettingsDialog() {
                   onChange={(v) => void update({ decisionLayer: v })}
                 />
               </Row>
+
+              {prefs.decisionLayer === "jev" && <DecisionProviderSection />}
 
               <ProvidersSection />
             </div>

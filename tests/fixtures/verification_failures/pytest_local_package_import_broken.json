@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "pytest_local_package_import_broken",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"tests/test_loader.py\", line 2, in <module>\n    from helpers import load\nModuleNotFoundError: No module named 'helpers'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "helpers/__init__.py",
+    "helpers/loader.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "the missing module name matches the package this very change touched — the change broke its own import (rule backend resolves this in code from changed_paths)"
+}

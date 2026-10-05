@@ -1,6 +1,16 @@
 {
+  "schema_version": 2,
   "name": "pytest_syntax_error",
+  "origin": "synthetic",
+  "language": "python",
   "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "tests/test_parser.py:5: in <module>\n    def parse(x)\n                ^\nSyntaxError: expected ':'\nTraceback (most recent call last):\n  File \"tests/test_parser.py\", line 5\n    def parse(x)\n                ^\nSyntaxError: expected ':'\n",
   "exit_code": 1,
@@ -9,5 +19,10 @@
     "src/parser.py"
   ],
   "baseline_status": null,
-  "expected_label": "code_bug"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop"
 }

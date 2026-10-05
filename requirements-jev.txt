@@ -1,0 +1,10 @@
+# Optional Jev System One decision layer (docs/DECISION-LAYER.md).
+#
+# Deliberately NOT part of requirements.txt: the decision layer is an
+# optional accelerator (design rule 1) and decision_runtime imports
+# typesafe-sdk lazily, only when a decide() call of the "jev" backend
+# actually runs. Install explicitly when opting in:
+#
+#   pip install -r requirements-jev.txt
+#
+typesafe-sdk==0.7.2

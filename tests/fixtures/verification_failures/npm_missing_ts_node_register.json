@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "name": "npm_missing_ts_node_register",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "npm",
+  "command": [
+    "npm",
+    "test"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "FAIL tests/config.test.ts\n  ● Test suite failed to run\n\n    Cannot find module 'ts-node/register' from 'jest.config.js'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "jest.config.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "missing_dependency",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "missing_dependency",
+  "gold_action": "needs_user",
+  "note": "the ts-node dev dependency needed by the jest transform is missing"
+}

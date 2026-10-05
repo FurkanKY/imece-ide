@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "name": "node_real_local_module_missing",
+  "origin": "real_capture",
+  "language": "javascript",
+  "tool": "node",
+  "command": [
+    "node",
+    "bin/cli.js"
+  ],
+  "provenance": "real capture produced by the S1b agent in a scratch repo under /tmp/opencode (no user content); see real_capture for a reproducible cmd and tool version",
+  "real_capture": {
+    "cmd": "node tests/sum.test.js (scratch repo where src/sum.js was never created)",
+    "source": "captured by the S1b fixture agent in /tmp/opencode/s1b-captures/repo2 (scratch repo, no user content)",
+    "tool_version": "node v24.18.0",
+    "captured_at": "2026-10-02",
+    "sanitization": "/tmp/opencode/... absolute paths in the stack replaced with project-relative forms"
+  },
+  "stdout": "",
+  "stderr": "node:internal/modules/cjs/loader:1520\n  throw err;\n  ^\n\nError: Cannot find module '../src/sum'\nRequire stack:\n- tests/sum.test.js\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1517:15)\n    at Object.<anonymous> (tests/sum.test.js:1:17) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: [ 'tests/sum.test.js' ]\n}\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "tests/sum.test.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "code_bug",
+  "gold_action": "continue_fix_loop",
+  "note": "REAL capture: local specifier (../src/sum) — the rule backend ACTs on code_bug"
+}

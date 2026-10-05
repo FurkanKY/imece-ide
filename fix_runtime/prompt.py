@@ -77,9 +77,18 @@ def _render_verification_preview(plan) -> str:
     return "\n".join(lines)
 
 
+def _capture_verification_preview(plan) -> str:
+    """Detach only bounded display facts used in initial worker input.
+
+    This captures rendered names, identifiers and argv only; it never retains
+    a ProcessRequest (which may contain environment secrets).
+    """
+    return _bounded(_render_verification_preview(plan), MAX_FIX_INPUT_CHARS)
+
+
 def render_initial_worker_input(
     *, task: str, plan: str | None, verification_plan=None, rules: ProjectRules | None = None,
-    pinned_paths: Sequence[str] = (),
+    pinned_paths: Sequence[str] = (), verification_preview: str | None = None,
 ) -> str:
     """Render bounded input for the FIRST Worker attempt of a Run.
 
@@ -101,6 +110,12 @@ def render_initial_worker_input(
     bounded out of whatever remains after the mandatory sections and the
     other ancillary sections' own share. Passing rules=None reproduces the
     exact prior (pre-rules) output.
+
+    `verification_preview` is an optional detached preview captured for
+    verified safe-point rebinding. When explicitly supplied, it takes
+    precedence over `verification_plan`; the plan is not inspected. When
+    omitted (the normal API path), preview behavior remains derived from
+    `verification_plan` exactly as before.
     """
     headers_total = (
         len(_INITIAL_TRUST_NOTE) + len(_INITIAL_TASK_HEADER)
@@ -122,7 +137,10 @@ def render_initial_worker_input(
     ancillary_budget = max(0, remaining - len(rules_block)) // _INITIAL_NUM_ANCILLARY_SECTIONS
 
     plan_text = plan if plan else "(not provided)"
-    verification_text = _render_verification_preview(verification_plan)
+    verification_text = (
+        _render_verification_preview(verification_plan)
+        if verification_preview is None else verification_preview
+    )
     pinned_text = _render_pinned_paths(pinned_paths)
 
     sections = [

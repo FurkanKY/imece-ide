@@ -4,7 +4,7 @@
    için tüketilir. desktop.py:on_event akışının store karşılığı. */
 
 import { create } from "zustand";
-import { bridge, Checkpoint, Proposal, ProviderInfo, Role, Routing, RunEvent } from "@/bridge";
+import { bridge, BridgeError, Checkpoint, Proposal, ProviderInfo, Role, Routing, RunEvent, AgentEvidence } from "@/bridge";
 import { toast } from "@/components/toasts/toasts";
 
 export const STAGE_ROLE: Record<string, Role> = {
@@ -74,7 +74,7 @@ export type RunStage =
 /** F2 (takip isteği): bir koşunun GERÇEKTE hangi motorla yürütüldüğü —
     run.finished'ın `engine` alanından gelir; henüz bilinmiyorsa null.
     Composer, takip isteği modunu yalnızca "pipeline" iken açar. */
-export type RunEngine = "pipeline" | "legacy" | null;
+export type RunEngine = "agent" | "pipeline" | "legacy" | null;
 
 /** F6 (@-mentions) — Composer'da @ ile pinlenen dosya/klasör; sadece bu
     oturum boyunca task taslağıyla birlikte tutulur (kalıcı depoya YAZILMAZ). */
@@ -94,6 +94,9 @@ interface RunState {
   followUpDraft: string;
   plan: PlanInfo | null;
   routing: Routing;
+  providerId: string;
+  agentEvidence: AgentEvidence | null;
+  runRootStale: boolean;
   providers: ProviderInfo[];
   stages: Record<Role, StageInfo>;
   flow: FlowItem[];
@@ -101,7 +104,7 @@ interface RunState {
   proposals: Proposal[];
   verdict: string | null;
   verdictNote: string;
-  totals: { latency_s: number; tokens: number; cost_usd: number } | null;
+  totals: { latency_s: number | null; tokens: number | null; cost_usd: number | null } | null;
   /** Ham hata metni (kanonik `error_code`'dan bağımsız) -- terminal hata
       kartındaki "Ayrıntılar" açılır bölümünde gösterilir (bkz. AiPanel). */
   error: string | null;
@@ -117,6 +120,7 @@ interface RunState {
 
   loadProviders: () => Promise<void>;
   setRouting: (role: Role, provider: string) => void;
+  setProviderId: (providerId: string) => void;
   setTask: (task: string) => void;
   /** F6 (@-mentions): halihazırda pinliyse yoksayılır; MAX_MENTIONS'da doludur. */
   addMention: (path: string) => boolean;
@@ -142,6 +146,59 @@ const IDLE_STAGES = (): Record<Role, StageInfo> => ({
 
 let flowId = 1;
 let installed = false;
+let startFlight = false;
+let followUpFlight = false;
+let workspaceGeneration = 0;
+let workspaceRoot: string | null = null;
+let workspaceTracker: Promise<void> | null = null;
+let activeRunContext: { runId: string | null; root: string | null; generation: number; attempt: number } | null = null;
+let runAttempt = 0;
+
+async function trackWorkspace() {
+  if (!workspaceTracker) {
+    workspaceTracker = import("@/state/workspace").then(({ useWorkspace }) => {
+      workspaceRoot = useWorkspace.getState().root;
+      useWorkspace.subscribe((state) => {
+        if (state.root === workspaceRoot) return;
+        workspaceRoot = state.root;
+        workspaceGeneration += 1;
+        const current = useRun.getState();
+        const stillRunning = current.status === "running" || startFlight || followUpFlight;
+        setRunOnRootChange(stillRunning);
+      });
+    });
+  }
+  await workspaceTracker;
+  const { useWorkspace } = await import("@/state/workspace");
+  if (useWorkspace.getState().root !== workspaceRoot) {
+    workspaceRoot = useWorkspace.getState().root;
+    workspaceGeneration += 1;
+  }
+}
+
+function setRunOnRootChange(stillRunning: boolean) {
+  useRun.setState({
+    runRootStale: stillRunning,
+    task: "",
+    mentions: [],
+    agentEvidence: null,
+    diffs: [],
+    proposals: [],
+    verdict: null,
+    verdictNote: "",
+    totals: null,
+    ...(stillRunning ? {
+      status: "running" as const,
+      flow: [{ id: flowId++, kind: "info" as const, text: "Önceki projenin koşusu sürüyor. Bu proje için sonucu kullanılamaz; gerekirse eski koşuyu durdurun." }],
+    } : {
+      status: "idle" as const,
+      runStage: "draft" as const,
+      runId: null,
+      engine: null,
+      flow: [],
+    }),
+  });
+}
 
 export const useRun = create<RunState>((set, get) => ({
   status: "idle",
@@ -153,6 +210,9 @@ export const useRun = create<RunState>((set, get) => ({
   followUpDraft: "",
   plan: null,
   routing: { planner: "claude", coder: "deepseek", reviewer: "gemini" },
+  providerId: "deepseek",
+  agentEvidence: null,
+  runRootStale: false,
   providers: [],
   stages: IDLE_STAGES(),
   flow: [],
@@ -179,7 +239,7 @@ export const useRun = create<RunState>((set, get) => ({
       // Kaydedilmiş sağlayıcı artık kullanılamıyor olsa da DEĞİŞTİRİLMEZ —
       // Composer'daki mevcut eksik-anahtar/CLI uyarısı zaten bunu gösterir.
       const routing = prefs.routing ?? recommendedRouting;
-      set({ providers, routing });
+      set({ providers, routing, providerId: recommendedRouting.coder });
     } catch {
       // varsayılanlar kalır
     }
@@ -190,6 +250,8 @@ export const useRun = create<RunState>((set, get) => ({
     set({ routing });
     void import("@/state/settings").then(({ useSettings }) => useSettings.getState().update({ routing }));
   },
+
+  setProviderId: (providerId) => set({ providerId }),
 
   setTask: (task) => set({ task }),
 
@@ -204,8 +266,18 @@ export const useRun = create<RunState>((set, get) => ({
   removeMention: (path) => set((s) => ({ mentions: s.mentions.filter((m) => m !== path) })),
 
   start: async () => {
-    const { task, routing, mentions, status, runStage } = get();
-    if (status === "running") return;
+    if (startFlight || followUpFlight || get().status === "running") return;
+    startFlight = true;
+    const attempt = ++runAttempt;
+    const draft = get();
+    let requestIssued = false;
+    try {
+    await trackWorkspace();
+    const root = workspaceRoot;
+    const generation = workspaceGeneration;
+    const { task, providerId, providers, mentions, runStage } = draft;
+    if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken yeni koşu başlatılamaz."); return; }
+    if (get().status === "running") return;
     if (runStage === "ready") {
       toast.info("Önce hazır değişiklikleri inceleyin veya vazgeçin.");
       return;
@@ -214,9 +286,22 @@ export const useRun = create<RunState>((set, get) => ({
       toast.info("Görev boş.");
       return;
     }
+    const { useCollaboration } = await import("@/state/collaboration");
+    const collaboration = useCollaboration.getState();
+    if (collaboration.enabled) {
+      toast.info("Ortak bağlam bu yeni tek ajan akışına henüz bağlı değil; çalıştırmak için ortak bağlamı kapatın.");
+      return;
+    }
+    const selected = providers.find((provider) => provider.id === providerId);
+    if (!selected || selected.engineSupported === false) {
+      toast.info(selected?.engineReason || "Seçili sağlayıcı bu tek ajan akışında desteklenmiyor.");
+      return;
+    }
+    if (get().status === "running" || workspaceGeneration !== generation || workspaceRoot !== root) return;
+    activeRunContext = { runId: null, root, generation, attempt };
     set({
       status: "running",
-      runStage: "planning",
+      runStage: "working",
       stages: IDLE_STAGES(),
       flow: [{ id: flowId++, kind: "task", text: task.trim() }],
       plan: null,
@@ -225,22 +310,41 @@ export const useRun = create<RunState>((set, get) => ({
       verdict: null,
       verdictNote: "",
       totals: null,
+      agentEvidence: null,
       error: null,
       errorTitle: null,
       errorDescription: null,
       checkpointId: null,
-      engine: null, // F2: bilinmiyor -- run.finished gelince belirlenir
+      engine: "agent",
+      runRootStale: false,
     });
     try {
-      const { runId } = await bridge.call("run.start", { task: task.trim(), routing, mentions });
+      requestIssued = true;
+      const { runId } = await bridge.call("run.start", { task: task.trim(), providerId, mentions });
+      if (activeRunContext?.attempt === attempt) activeRunContext.runId = runId;
+      else if (runAttempt !== attempt || workspaceGeneration !== generation || workspaceRoot !== root) return;
       set({ runId });
+      useCollaboration.getState().attachRun(null);
       // F1 (canlı ajan etkinliği): Etkinlik sekmesi bir önceki koşudan kalan
       // öğeleri göstermesin diye döngüsel importu geciktir (diğer state
       // dosyalarındaki desenle aynı).
       void import("@/state/activity").then(({ useActivity }) => useActivity.getState().reset(runId));
     } catch (e) {
-      set({ status: "failed", runStage: "error", error: e instanceof Error ? e.message : "Koşu başlatılamadı." });
-      toast.err(e instanceof Error ? e.message : "Koşu başlatılamadı.");
+      if (activeRunContext?.attempt === attempt) {
+        const staleRoot = workspaceGeneration !== generation || workspaceRoot !== root;
+        if (!staleRoot || e instanceof BridgeError) {
+          activeRunContext = null;
+          set({ status: "failed", runStage: "error", runId: null, error: staleRoot ? "Proje değişirken koşu isteği reddedildi; eski projede etkin koşu yok." : e instanceof Error ? e.message : "Koşu başlatılamadı." });
+          toast.err(e instanceof Error ? e.message : "Koşu başlatılamadı.");
+        }
+      }
+    }
+    } finally {
+      if (!requestIssued && get().runRootStale && get().status === "running") {
+        activeRunContext = null;
+        set({ status: "failed", runStage: "error", runId: null, error: "Proje değişmeden önce koşu isteği gönderilmedi." });
+      }
+      startFlight = false;
     }
   },
 
@@ -253,11 +357,26 @@ export const useRun = create<RunState>((set, get) => ({
   setFollowUpDraft: (text) => set({ followUpDraft: text }),
 
   followUp: async () => {
+    if (followUpFlight || startFlight) return;
+    followUpFlight = true;
+    const invocation = get();
+    const expectedRunId = invocation.runId;
+    let requestIssued = false;
+    try {
+    await trackWorkspace();
+    const root = workspaceRoot;
+    const generation = workspaceGeneration;
+    if (activeRunContext && activeRunContext.runId && activeRunContext.runId !== expectedRunId) return;
+    if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken takip koşusu başlatılamaz."); return; }
+    if ((await import("@/state/collaboration")).useCollaboration.getState().enabled) {
+      toast.info("Bu yeni akışta ortak bağlam henüz bağlı değil. Takip koşusu başlatılmadı.");
+      return;
+    }
     const { followUpDraft, mentions, status, runStage, engine } = get();
     if (status === "running") return;
     if (runStage !== "ready") return;
-    if (engine !== "pipeline") {
-      toast.info("Klasik motorda takip isteği desteklenmiyor; yeni bir görev başlatın.");
+    if (engine !== "pipeline" && engine !== "agent") {
+      toast.info("Bu koşuda takip isteği desteklenmiyor; yeni bir görev başlatın.");
       return;
     }
     const feedback = followUpDraft.trim();
@@ -265,14 +384,33 @@ export const useRun = create<RunState>((set, get) => ({
       toast.info("Takip isteği boş.");
       return;
     }
+    if (get().status === "running" || get().runId !== expectedRunId || workspaceGeneration !== generation || workspaceRoot !== root) return;
+    activeRunContext = { runId: expectedRunId, root, generation, attempt: ++runAttempt };
     try {
+      requestIssued = true;
       await bridge.call("run.followUp", { feedback, mentions });
       // Sunucu, continuation'ı başlatmadan ÖNCE bir "followUpStarted" run.event
       // yayınlar (bkz. webhost/api/run.py) -- diff/proposal sıfırlama ve
       // kullanıcı mesajının akışa (flow) eklenmesi ORADA yapılır (consume()),
       // burada değil; böylece tek bir doğruluk kaynağı olur.
     } catch (e) {
-      toast.err(e instanceof Error ? e.message : "Takip isteği başarısız.");
+      if (get().runId === expectedRunId && (workspaceGeneration !== generation || workspaceRoot !== root)) {
+        if (e instanceof BridgeError) {
+          activeRunContext = null;
+          set({ status: "failed", runStage: "error", runId: null, error: "Önceki projede takip isteği reddedildi; bekleyen eski sonuç artık etkin değil." });
+        }
+      } else if (get().runId === expectedRunId && workspaceGeneration === generation && workspaceRoot === root) {
+        const knownPreExecution = e instanceof BridgeError && ["busy", "no_active_run", "wrong_root", "stale_run"].includes(e.code);
+        if (!knownPreExecution) set({ status: "failed", runStage: "error", error: "Takip isteği kabulü doğrulanamadı. Sonuç yetkisi teyitsiz; tekrar veya yeni işlem yapmadan önce durumu kontrol edin." });
+        toast.err(e instanceof Error ? e.message : "Takip isteği başarısız.");
+      }
+    }
+    } finally {
+      if (!requestIssued && get().runRootStale && get().status === "running") {
+        activeRunContext = null;
+        set({ status: "failed", runStage: "error", runId: null, error: "Proje değişmeden önce takip isteği gönderilmedi." });
+      }
+      followUpFlight = false;
     }
   },
 
@@ -282,6 +420,7 @@ export const useRun = create<RunState>((set, get) => ({
     })),
 
   apply: async () => {
+    if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken değişiklikler uygulanamaz."); return; }
     const paths = get().diffs.filter((d) => d.checked).map((d) => d.path);
     if (paths.length === 0) {
       toast.info("Uygulanacak dosya seçilmedi.");
@@ -369,6 +508,7 @@ export const useRun = create<RunState>((set, get) => ({
         lastRestoredCheckpointId: checkpointId,
         diffs: [],
         proposals: [],
+        agentEvidence: null,
       });
       toast.ok(`${restored.length} dosya checkpoint'e geri alındı.`);
     } catch (e) {
@@ -379,8 +519,10 @@ export const useRun = create<RunState>((set, get) => ({
   },
 
   reject: async () => {
+    if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken öneriler reddedilemez."); return; }
     await bridge.call("run.rejectProposals", {});
-    set({ diffs: [], proposals: [], runStage: "draft", task: "", mentions: [] });
+    set({ diffs: [], proposals: [], runStage: "draft", task: "", mentions: [],
+      agentEvidence: null, totals: null, verdict: null, verdictNote: "", followUpDraft: "" });
     (await import("@/state/editor")).useEditor.getState().closeDiff();
     toast.info("Değişiklikler reddedildi.");
   },
@@ -389,8 +531,29 @@ export const useRun = create<RunState>((set, get) => ({
     if (installed) return;
     installed = true;
 
-    bridge.on("run.event", ({ ev }) => consume(ev, set, get));
-    bridge.on("run.finished", ({ status, error, errorTitle, errorDescription, engine }) => {
+    void import("@/state/workspace").then(({ useWorkspace }) => {
+      let previousRoot = useWorkspace.getState().root;
+      useWorkspace.subscribe((workspace) => {
+        if (workspace.root !== previousRoot) {
+          previousRoot = workspace.root;
+          set({ agentEvidence: null });
+        }
+      });
+    });
+
+    bridge.on("run.event", ({ runId, ev }) => {
+      const context = activeRunContext;
+      if (!context || (context.runId && context.runId !== runId) || context.generation !== workspaceGeneration || context.root !== workspaceRoot || get().runRootStale) return;
+      consume(ev, set, get);
+    });
+    bridge.on("run.finished", ({ runId, status, error, errorTitle, errorDescription, engine }) => {
+      const context = activeRunContext;
+      if (!context || (context.runId && context.runId !== runId)) return;
+      if (get().runRootStale || context.generation !== workspaceGeneration || context.root !== workspaceRoot) {
+        activeRunContext = null;
+        set({ status: "failed", runStage: "error", runId: null, agentEvidence: null, diffs: [], proposals: [], verdict: null, totals: null, error: "Önceki projenin koşusu tamamlandı; sonucu bu projede kullanılamaz.", flow: [{ id: flowId++, kind: "info", text: "Önceki projenin koşusu tamamlandı. Sonuç bu projeye ait değil." }] });
+        return;
+      }
       // F2: `engine`, bu koşunun GERÇEKTE hangi motorla yürütüldüğünü
       // taşır -- bilinmiyorsa (eski/eksik bir olay) önceki değer korunur.
       if (status === "failed") {
@@ -424,6 +587,7 @@ export const useRun = create<RunState>((set, get) => ({
           engine: engine ?? s.engine,
         }));
       }
+      activeRunContext = null;
     });
   },
 }));
@@ -539,6 +703,7 @@ function consume(
       proposals: [],
       verdict: null,
       verdictNote: "",
+      agentEvidence: null,
       checkpointId: null,
       followUpDraft: "",
       flow: [...s.flow, { id: flowId++, kind: "task", text: (ev.feedback as string) ?? "" }],
@@ -547,11 +712,12 @@ function consume(
     set(() => ({ verdict: ev.verdict as string, verdictNote: (ev.note as string) ?? "" }));
   } else if (type === "proposal") {
     const proposals = (ev.proposals as Proposal[]) ?? [];
-    const totals = ev.totals as { latency_s: number; tokens: number; cost_usd: number };
+    const rawTotals = ev.totals as { latency_s?: number | null; tokens?: number | null; cost_usd?: number | null } | undefined;
+    const totals = rawTotals ? { latency_s: rawTotals.latency_s ?? null, tokens: rawTotals.tokens ?? null, cost_usd: rawTotals.cost_usd ?? null } : null;
     set((s) => ({
       proposals,
       runStage: "ready",
-      totals,
+      totals: totals as RunState["totals"],
       verdict: (ev.verdict as string) ?? s.verdict,
       flow: [
         ...s.flow,
@@ -566,8 +732,74 @@ function consume(
         useEditor.getState().openDiff(proposals[0].path),
       );
     }
+  } else if (type === "evidence") {
+    set(() => ({ agentEvidence: parseAgentEvidence(ev) }));
   }
   void get; // (şimdilik kullanılmıyor)
+}
+
+function parseAgentEvidence(ev: RunEvent): AgentEvidence {
+  const raw = ev as unknown as Record<string, unknown>;
+  const validOutcomes = new Set(["pass", "fail", "not_run", "error", "invalidated", "timeout"]);
+  const validCheckStatuses = new Set(["pass", "fail", "not_run", "error", "invalidated", "timeout", "skipped"]);
+  let unknown = false;
+  let truncated = raw.truncated === true;
+  const text = (value: unknown, cap: number, nullable = false): string | null => {
+    if (nullable && value === null) return null;
+    if (typeof value !== "string") { unknown = true; return null; }
+    if (value.length > cap) { unknown = true; truncated = true; return value.slice(0, cap); }
+    return value;
+  };
+  const reason = text(raw.reason, 128) ?? "unknown";
+  const execution_id = text(raw.execution_id, 128) ?? "unknown";
+  const agent_message = text(raw.agent_message, 20_000) ?? "";
+  if (!reason || reason === "unknown" || !execution_id || execution_id === "unknown") unknown = true;
+  const receipt = raw.attempt_receipt && typeof raw.attempt_receipt === "object" ? raw.attempt_receipt as Record<string, unknown> : null;
+  if (!receipt) unknown = true;
+  const count = (value: unknown) => {
+    if (value === null) return null;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) { unknown = true; return null; }
+    return value;
+  };
+  const changedRaw = raw.changed_paths;
+  if (!Array.isArray(changedRaw)) unknown = true;
+  if (Array.isArray(changedRaw) && changedRaw.length > 256) { unknown = true; truncated = true; }
+  const changed_paths = (Array.isArray(changedRaw) ? changedRaw.slice(0, 256) : []).map((path) => text(path, 1024) ?? "");
+  const diff_sha256 = text(raw.diff_sha256, 128, true);
+  const verificationRaw = raw.verification && typeof raw.verification === "object" ? raw.verification as Record<string, unknown> : null;
+  if (!verificationRaw) unknown = true;
+  const outcomeRaw = verificationRaw?.outcome;
+  const outcome = typeof outcomeRaw === "string" && validOutcomes.has(outcomeRaw) ? outcomeRaw : "unknown";
+  if (outcome === "unknown") unknown = true;
+  const bool = (value: unknown) => {
+    if (typeof value !== "boolean") { unknown = true; return null; }
+    return value;
+  };
+  const verification_id = text(verificationRaw?.verification_id, 128, true);
+  const plan_id = text(verificationRaw?.plan_id, 128, true);
+  const checksRaw = verificationRaw?.checks;
+  if (!Array.isArray(checksRaw)) unknown = true;
+  if (Array.isArray(checksRaw) && checksRaw.length > 100) { unknown = true; truncated = true; }
+  const checks = (Array.isArray(checksRaw) ? checksRaw.slice(0, 100) : []).map((item) => {
+    if (!item || typeof item !== "object") { unknown = true; return { check_id: "unknown", status: "unknown" }; }
+    const check = item as Record<string, unknown>;
+    const check_id = text(check.check_id, 128) ?? "unknown";
+    const status = typeof check.status === "string" && validCheckStatuses.has(check.status) ? check.status : "unknown";
+    if (!check_id || check_id === "unknown" || status === "unknown") unknown = true;
+    return { check_id, status };
+  });
+  if (raw.truncated !== undefined && typeof raw.truncated !== "boolean") { unknown = true; truncated = true; }
+  return {
+    unknown, truncated, reason, execution_id, agent_message,
+    attempt_receipt: { model_turns: count(receipt?.model_turns), tool_calls: count(receipt?.tool_calls) },
+    changed_paths, diff_sha256,
+    verification: {
+      outcome,
+      fingerprint_complete: bool(verificationRaw?.fingerprint_complete),
+      changed_content: bool(verificationRaw?.changed_content),
+      verification_id, plan_id, checks,
+    },
+  };
 }
 
 function markPrevDone(stages: Record<Role, StageInfo>): Record<Role, StageInfo> {

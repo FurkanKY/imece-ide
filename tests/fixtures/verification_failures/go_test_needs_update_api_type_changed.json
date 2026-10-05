@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "go_test_needs_update_api_type_changed",
+  "origin": "synthetic",
+  "language": "go",
+  "tool": "go test",
+  "command": [
+    "go",
+    "test",
+    "./..."
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "./user.go:9:5: cannot use GetUser(name) (value of type string) as int value in variable declaration\nFAIL\texample.com/app/internal/user\t0.010s\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "internal/user/user.go",
+    "internal/user/user_test.go"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "test_needs_update",
+  "gold_action": "continue_fix_loop",
+  "note": "task switched GetUser to return string ids; the test still expects int — the change is per-spec, the test needs the update"
+}

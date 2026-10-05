@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
+      IMECE_RUN_LIVE_API_TESTS: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,6 +48,7 @@ jobs:
     timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
+      IMECE_RUN_LIVE_API_TESTS: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

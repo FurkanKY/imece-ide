@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "name": "npm_test_needs_update_cli_output_changed",
+  "origin": "synthetic",
+  "language": "javascript",
+  "tool": "npm",
+  "command": [
+    "npm",
+    "test"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "> imece-demo@0.1.0 test\n> node test/cli.test.js\n\nAssertionError [ERR_ASSERTION]: banner mismatch\n    Expected: 'imece v1'\n    Received: 'imece v2 (rewritten banner)'\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "bin/cli.js",
+    "test/cli.test.js"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "test_needs_update",
+  "gold_action": "continue_fix_loop",
+  "note": "the task reworded the CLI banner; the test pins the old wording"
+}

@@ -22,10 +22,12 @@ export interface Prefs {
       run.providers'ın recommendedRouting'i kullanılır (bkz. state/run.ts). */
   routing: Routing | null;
   /** Jev System One karar katmanı (deneysel, bkz. decision_runtime/,
-      engine_factory.py): "off" (varsayılan, davranış bugünküyle bayt-bayt
-      aynı) | "rules" (belirlenimci triage kuralları, hiçbir şey makineden
-      çıkmaz) | "jev" (şimdilik "rules" davranışına düşer — gerçek bir
-      TypeSafe/Jev API arka ucu henüz yok). */
+      engine_factory.py, decision_credentials.py): "off" (varsayılan,
+      davranış bugünküyle bayt-bayt aynı) | "rules" (belirlenimci triage
+      kuralları, hiçbir şey makineden çıkmaz) | "jev" (Jev/TypeSafe kararı —
+      TYPESAFE_API_KEY gerekir; SDK yokken veya bağlantı/SDK hatasında
+      belirlenimci kurallara düşer; DÜŞÜK güvenilirlikte ise kurallara
+      düşmez — bugünkü davranış, yani düzeltme döngüsü sürer). */
   decisionLayer: "off" | "rules" | "jev";
 }
 
@@ -38,8 +40,125 @@ export interface RunEvent {
   // "summary": Worker'ın son mesajı (bkz. webhost/api/run.py
   // _last_worker_final_message) -- yalnızca değişiklik/öneri çıkmadığında
   // "info" ile birlikte gönderilir.
-  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal" | "followUpStarted" | "summary";
+  type: "stage" | "info" | "output" | "metric" | "plan" | "diff" | "verdict" | "proposal" | "followUpStarted" | "summary" | "evidence";
   [key: string]: unknown;
+}
+
+export interface AgentEvidence {
+  unknown: boolean;
+  truncated: boolean;
+  reason: string;
+  execution_id: string;
+  agent_message: string;
+  attempt_receipt: { model_turns: number | null; tool_calls: number | null };
+  changed_paths: string[];
+  diff_sha256: string | null;
+  verification: {
+    outcome: "pass" | "fail" | "not_run" | "error" | "invalidated" | "timeout" | string;
+    fingerprint_complete: boolean | null;
+    changed_content: boolean | null;
+    verification_id: string | null;
+    plan_id: string | null;
+    checks: { check_id: string; status: string }[];
+  };
+}
+
+export interface CollaborationPreview {
+  previewId: string;
+  projectRoot: string;
+  endpoint: string;
+  memberId: string;
+  taskId: string;
+  sessionId: string;
+  targetVersion: string;
+  baseCommit: string;
+  revision: string;
+  task: { owner: string; goal: string; scopes: string[]; status: string; contextRevision: string };
+  context: { goal: string; decisions: string[]; interfaces: Record<string, string> };
+}
+
+export interface CollaborationStatus {
+  state: string;
+  code: string | null;
+  recoveryState?: string;
+  recoveryCode?: string | null;
+  consumedRevision: string | null;
+  receivedRevision: string | null;
+  pendingCount: number;
+  sessionId: string;
+  taskId: string;
+  memberId: string;
+  active: boolean | null;
+  runId: string;
+}
+
+export interface ParticipantTaskStatusPreview {
+  ticketId: string; runId: string; projectRoot: string; sessionId: string;
+  taskId: string; memberId: string; fromStatus: string;
+  targetStatus: "queued" | "running" | "waiting"; expectedRevision: string;
+  contextHash: string; freshContextDiffersFromAccepted: boolean | null;
+}
+
+export interface OwnerTask {
+  id: string; owner: string; goal: string; scopes: string[];
+  status: "queued" | "running" | "waiting" | "done"; contextRevision: string;
+}
+export interface OwnerPreview {
+  previewId: string; projectRoot: string; sessionId: string; targetVersion: string;
+  baseCommit: string; goal: string; ownerId: string; memberIds: string[];
+  tasks: OwnerTask[]; mode: "create"; warnings: string[];
+}
+export interface OwnerStatus {
+  state: string; projectRoot: string | null; sessionId: string | null;
+  targetVersion: string | null; baseCommit: string | null; revision: string | null;
+  goal: string | null; ownerId: string | null; memberIds: string[]; tasks: OwnerTask[];
+  storePath: string | null; hubPath: string | null; endpoint: string | null;
+  epoch: number; exportedMembers: string[]; retryRequired: boolean; createdPaths: string[];
+}
+export interface ProductTask { id: string; owner: string; goal: string; scopes: string[]; status: "queued" | "running" | "waiting" | "done"; contextRevision: string }
+export interface ProductBoard {
+  projectRoot: string; sessionId: string; baseCommit: string; targetVersion: string;
+  revision: string; contextHash: string; context: { goal: string; decisions: string[]; interfaces: Record<string, string> };
+  ownerId: string; memberIds: string[]; tasks: ProductTask[];
+  overlaps: { tasks: string[]; shared: string[] }[]; waitingTaskIds: string[]; epoch: number; state: string;
+}
+export interface ProductProposals {
+  sessionId: string; baseCommit: string; revision: string; contextHash: string; epoch: number;
+  proposals: { proposalId: string; proposalRevision: string; sessionId: string; baseCommit: string; taskId: string; owner: string; contextRevision: string; contextHash: string; fileCount: number; staleContext: boolean }[];
+}
+export interface ProductChangeEvent {
+  fromRevision: string; toRevision: string; metadataCheckpoint: boolean;
+  goalChanged: boolean; decisionsChanged: boolean;
+  interfaces: { added: string[]; removed: string[]; changed: string[] };
+  taskChanges: { taskId: string; change: "added" | "removed" | "changed"; previousStatus: ProductTask["status"] | null; status: ProductTask["status"] | null; previousOwner: string | null; owner: string | null; fields: string[] }[];
+  taskChangeCount: number; taskChangesTruncated: boolean;
+  affectedTaskIds: string[]; affectedTaskCount: number; affectedTasksTruncated: boolean; contextChanged: boolean;
+}
+export interface ProductChanges { sessionId: string; baseCommit: string; epoch: number; headRevision: string; lastRevision: string; hasMore: boolean; events: ProductChangeEvent[] }
+export interface OwnerShare {
+  endpoint: string; sessionId: string; baseCommit: string; targetVersion: string;
+  memberId: string; credential: string; storePath: string; hubPath: string;
+  taskIds: string[]; epoch: number; scope: "loopback-only";
+}
+
+export interface DeliveryPreview {
+  previewId: string; proposalId: string; runId: string; sessionId: string; taskId: string; owner: string;
+  baseCommit: string; contextRevision: string; contextHash: string; expectedRevision: string;
+  paths: string[]; outOfScopePaths: string[]; fileCount: number; artifactBytes: number;
+  contentDigest: string; warnings: string[];
+}
+export interface DeliveryProposal {
+  proposalId: string; proposalRevision: string; taskId: string; owner: string; sessionId: string;
+  baseCommit: string; contextRevision: string; contextHash: string; fileCount: number;
+  currentContextHashMatches: boolean;
+}
+export interface DeliveryCandidate {
+  session_id: string; session_revision: string; binding_revision: string; context_hash: string;
+  base_commit: string; proposal_ids: string[];
+  proposals: { proposal_id: string; task_id: string; owner: string; context_revision: string; paths: string[] }[];
+  candidate_dir: string; file_count: number; content_fingerprint: string;
+  verification: { status: "not_run" | "pass" | "fail" | "timeout" | "error" | "invalidated"; plan_id?: string | null; checks?: unknown[]; changed_content?: boolean; fingerprint_complete?: boolean; fingerprint_before?: unknown; fingerprint_after?: unknown };
+  conflicts: string[]; notes: string[];
 }
 
 /** F1 (canlı ajan etkinliği) — run_runtime.activity_projection.project_event
@@ -113,16 +232,42 @@ export interface Api {
     params: {};
     result: { providers: ProviderInfo[]; recommendedRouting: Routing };
   };
+  "collab.preview": { params: { endpoint: string; credential: string; memberId: string; taskId: string }; result: CollaborationPreview };
+  "collab.approve": { params: { previewId: string; resetCursor?: boolean }; result: { approvalHandle: string; preview: CollaborationPreview; resetCursor: boolean } };
+  "collab.discard": { params: { previewId?: string; approvalHandle?: string }; result: {} };
+  "collab.delivery.preview": { params: { runId: string; storePath: string; hubPath: string; paths: string[]; proposalId?: string }; result: DeliveryPreview };
+  "collab.delivery.publish": { params: { runId: string; previewId: string; allowOutOfScope?: boolean }; result: { proposalId: string; sessionRevision: string; proposalRevision: string; contextRevision: string; contextHash: string; paths: string[]; outOfScopePaths: string[]; outOfScopeAuthorized: boolean } };
+  "collab.delivery.discard": { params: { previewId: string }; result: {} };
+  "collab.delivery.list": { params: { runId: string; storePath: string; hubPath: string }; result: { proposals: DeliveryProposal[] } };
+  "collab.delivery.candidate": { params: { runId: string; storePath: string; hubPath: string; proposalIds: string[]; outputPath: string; verify?: boolean }; result: { candidate: DeliveryCandidate | null; conflicts: string[] } };
+  "collab.status": { params: { runId?: string }; result: { collaboration: CollaborationStatus | null } };
+  "collab.taskStatus.preview": { params: { runId: string; targetStatus: "queued" | "running" | "waiting" }; result: ParticipantTaskStatusPreview };
+  "collab.taskStatus.confirm": { params: { runId: string; ticketId: string; confirm: true }; result: { revision: string; taskId: string; status: "queued" | "running" | "waiting" } };
+  "collab.taskStatus.discard": { params: { runId: string; ticketId: string }; result: {} };
+  "collab.owner.previewCreate": { params: { sessionId: string; targetVersion: string; goal: string; ownerId: string; memberIds: string[]; tasks: { id: string; owner: string; goal: string; scopes: string[]; status?: "queued" | "running" | "waiting" }[] }; result: OwnerPreview };
+  "collab.owner.create": { params: { previewId: string }; result: OwnerStatus };
+  "collab.owner.select": { params: { storePath: string; hubPath: string; ownerId: string; memberIds: string[] }; result: OwnerStatus };
+  "collab.owner.start": { params: { port?: number }; result: OwnerStatus };
+  "collab.owner.stop": { params: {}; result: OwnerStatus };
+  "collab.owner.status": { params: {}; result: OwnerStatus };
+  "collab.owner.snapshot": { params: {}; result: ProductBoard };
+  "collab.owner.updateContext": { params: { confirm: true; expectedRevision: string; expectedEpoch: number; expectedSessionId: string; context: ProductBoard["context"] }; result: { revision: string; sessionId: string; epoch: number; action: string } };
+  "collab.owner.updateTaskStatus": { params: { confirm: true; expectedRevision: string; expectedEpoch: number; expectedSessionId: string; taskId: string; status: ProductTask["status"] }; result: { revision: string; sessionId: string; epoch: number; action: string; taskId: string; status: ProductTask["status"] } };
+  "collab.owner.createTask": { params: { confirm: true; expectedRevision: string; expectedEpoch: number; expectedSessionId: string; task: { id: string; owner: string; goal: string; scopes: string[] } }; result: { revision: string; sessionId: string; epoch: number; action: "createTask"; taskId: string; status: "queued"; owner: string; contextRevision: string } };
+  "collab.owner.proposals": { params: { expectedSessionId: string }; result: ProductProposals };
+  "collab.owner.changes": { params: { expectedSessionId: string; afterRevision: string; limit?: number }; result: ProductChanges };
+  "collab.owner.shareOnce": { params: { memberId: string; confirmSecret: true }; result: OwnerShare };
+  "collab.owner.localPreview": { params: { memberId: string; taskId: string }; result: { preview: CollaborationPreview; storePath: string; hubPath: string; endpoint: string; memberId: string; taskId: string; epoch: number } };
   /** mentions: F6 (@-mentions) — Composer'da @ ile seçilen proje-göreli,
       forward-slash yollar (dosya veya klasör); en fazla 10. Sunucu bunları
       Project._safe ile bağımsızca doğrular — mevcut olmayan/proje dışına
       çıkan bir yol sessizce düşürülür ve bir "info" olayıyla bildirilir. */
-  "run.start": { params: { task: string; routing: Routing; mentions?: string[] }; result: { runId: string } };
+  "run.start": { params: { task: string; providerId: string; mentions?: string[]; collabApprovalHandle?: never } | { task: string; routing: Routing; mentions?: string[]; collabApprovalHandle?: string }; result: { runId: string } };
   "run.cancel": { params: { runId?: string }; result: {} };
   /** F2 (takip isteği / follow-up): sadece bekleyen bir öneri (WAITING_USER,
       canlı worktree'li bir pipeline koşusu) varken geçerlidir; klasik
       motorda veya aktif koşu yokken BridgeError. */
-  "run.followUp": { params: { feedback: string; mentions?: string[] }; result: { runId: string } };
+  "run.followUp": { params: { feedback: string; mentions?: string[] } | { feedback: string; mentions?: string[]; collabApprovalHandle?: string }; result: { runId: string } };
   "run.applyProposals": {
     params: { paths: string[] };
     result: {
@@ -173,15 +318,26 @@ export interface Api {
   "exec.setCommand": { params: { command: string }; result: {} };
 
   // ---- keys (API anahtarları — sağlayıcı kataloğundan) ----
-  /** anahtarlar UI'a dönmez; yalnız ok + maske. kind=cli → PATH varlık kontrolü */
+  /** anahtarlar UI'a dönmez; yalnız ok + maske. kind=cli → PATH varlık kontrolü.
+      decisionProviders: Jev (TypeSafe) karar sağlayıcısı — normal katalogdan
+      AYRI bir arayüz (ProviderInfo'ya karışmaz, yönlendirmeye katılmaz). */
   "keys.status": {
     params: {};
-    result: { providers: Record<string, ProviderInfo>; envPath: string };
+    result: {
+      providers: Record<string, ProviderInfo>;
+      decisionProviders: Record<string, DecisionProviderInfo>;
+      envPath: string;
+    };
   };
-  /** { sağlayıcıId: anahtar } — yalnız katalogda anahtar isteyen id'ler kabul edilir */
+  /** { sağlayıcıId: anahtar } — yalnız katalogda anahtar isteyen id'ler + karar
+      sağlayıcısı "typesafe" kabul edilir; Jev anahtarı yazdırılabilir ve
+      boşluksuz olmalıdır */
   "keys.set": { params: Record<string, string>; result: {} };
-  /** ucuz canlı doğrulama (GET /models); key verilirse kaydetmeden dener.
-      code: "" | "auth" | "network" | "http" */
+  /** ucuz canlı doğrulama; key verilirse kaydetmeden dener. Normal
+      sağlayıcılar GET /models, Jev (typesafe) salt SDK modeller-listesi
+      testidir — proje içeriği taşımaz.
+      code: "" | "auth" | "network" | "http" | "no_key" | "sdk_missing"
+            | "invalid_key" | "sdk" */
   "keys.test": {
     params: { provider: string; key?: string };
     result: { ok: boolean; code: string; detail: string };
@@ -324,6 +480,23 @@ export interface ProviderInfo {
   masked?: string;
 }
 
+/** Jev karar katmanı sağlayıcısı — ProviderInfo kataloğundan BİLEŞİK DEĞİLDİR
+    (keys.status decisionProviders alanında ayrı döner; planner/coder/reviewer
+    yönlendirmesine katılmaz). `ok` yalnız anahtarın KAYITLI olduğunu belirtir:
+    SDK kurulu mu (sdkAvailable) ve bağlantı canlı mı ayrı durumlardır —
+    "anahtar var" asla "doğrulandı" anlamına gelmez. Anahtar değeri hiçbir
+    alanda taşınmaz; yalnız son dört haneli `masked`. */
+export interface DecisionProviderInfo {
+  id: string;
+  label: string;
+  ok: boolean;
+  masked?: string;
+  keyHint?: string;
+  docsUrl?: string;
+  /** TypeSafe SDK kurulu mu (anahtar testi için gerekir) */
+  sdkAvailable?: boolean;
+}
+
 export interface HistoryItem {
   ts: number;
   task: string;
@@ -407,7 +580,7 @@ export interface Events {
   "run.finished": {
     runId: string; status: "done" | "failed" | "cancelled"; error?: string;
     errorCode?: string; errorTitle?: string; errorDescription?: string;
-    engine?: "pipeline" | "legacy";
+    engine?: "agent" | "pipeline" | "legacy";
   };
   /** F1 (canlı ajan etkinliği) — run_runtime.activity_projection.project_event
       çıktısıyla birebir; `id` aynı öğenin (ör. bir araç çağrısı) sonraki

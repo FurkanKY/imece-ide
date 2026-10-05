@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "name": "pytest_adversarial_caught_timeout_traceback",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "pytest",
+  "command": [
+    "pytest",
+    "-q",
+    "tests/"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"tests/test_sync.py\", line 9, in test_poll\n    wait_for_event(timeout=5.0)\n  File \"src/sync.py\", line 40, in wait_for_event\n    raise TimeoutError(\"fixture did not settle within 5s\")\nTimeoutError: fixture did not settle within 5s\n",
+  "exit_code": 1,
+  "timed_out": false,
+  "changed_paths": [
+    "src/sync.py",
+    "tests/test_sync.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "code_bug",
+  "expected_rule_action": "continue_fix_loop",
+  "expected_gate_action": "continue_fix_loop",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once",
+  "note": "the runner-level timed_out flag is False (the timeout was raised and caught INSIDE the test); the rule backend only trusts the flag, so this reads as a low-confidence code_bug"
+}

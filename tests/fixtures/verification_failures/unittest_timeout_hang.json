@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "name": "unittest_timeout_hang",
+  "origin": "synthetic",
+  "language": "python",
+  "tool": "unittest",
+  "command": [
+    "python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests"
+  ],
+  "provenance": "hand-written for the S1b eval; scenario pattern from docs/JEV-DESIGN.md Spike S1",
+  "real_capture": null,
+  "stdout": "test_reads_stream (tests.test_stream.TestStream) ... ",
+  "stderr": "",
+  "exit_code": null,
+  "timed_out": true,
+  "changed_paths": [
+    "src/stream.py"
+  ],
+  "baseline_status": null,
+  "baseline_exit_code": null,
+  "expected_rule_kind": "flaky_or_timeout",
+  "expected_rule_action": "rerun_verification_once",
+  "expected_gate_action": "rerun_verification_once",
+  "gold_kind": "flaky_or_timeout",
+  "gold_action": "rerun_verification_once",
+  "note": "unittest hung mid-test and the runner was killed by the harness timeout"
+}

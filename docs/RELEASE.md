@@ -2,12 +2,19 @@
 
 ## Current release
 
-**v0.4.0-beta.1** — source-only release; installation is described in the
+**v0.4.0-beta.1** — the current public **source-only** release. There are no
+published binaries: installation is described in the
 [README](../README.md). The Windows `onedir` packaging pipeline
-(`packaging/build.ps1` + the **Build Windows beta release** workflow) is
-implemented and CI-verified, but publishing prebuilt binaries is postponed
-until the beta stabilizes. The rest of this guide applies when binary
-releases resume.
+(`packaging/build.ps1` + the **Build Windows beta release** workflow) exists and
+is CI-verified, but publishing prebuilt binaries is **postponed until the beta
+stabilizes**.
+
+Nothing in this guide announces a new release, a tag, or a binary. There is no
+v0.5 and no date. The role-free single-task default flow described in the
+[README](../README.md) and [PRODUCT-PLAN.md](PRODUCT-PLAN.md) is
+**unreleased development work** on top of `v0.4.0-beta.1`, not a shipped
+feature. Real-provider and supported-platform acceptance is still an **open
+gate** — it must be met before any packaged release (milestone M5).
 
 ## Quick start for end users (packaged app)
 
@@ -43,14 +50,26 @@ and logs live under `%LOCALAPPDATA%/ImeceIDE`.
 
 ## Known limits
 
-- This beta is Windows-only; there is no auto-update.
+- This beta is **Windows-first** and usable from source on Linux; there is no
+  auto-update.
+- **Real-provider and supported-platform acceptance is an open gate.** The
+  role-free default flow is verified by local fixture runs only. Live-provider
+  quality, and Windows/Linux end-to-end acceptance, are **not** demonstrated and
+  are **not** claimed. Windows-native evidence fingerprinting has a documented
+  capability limitation (see [SECURITY.md](../SECURITY.md)); where the required
+  no-follow inventory capability is missing, a PASS cannot be proven.
+- **One active run at a time.** Concurrency and restart durability are later
+  milestones and are **not implemented**. See
+  [PRODUCT-PLAN.md](PRODUCT-PLAN.md).
 - The package is large (it bundles QtWebEngine, the Python language server
   and terminal helpers).
 - Hosted API providers require their own API keys; agent CLIs (Claude Code,
   Gemini CLI, Codex CLI, Qwen Code) require their own installation and
-  account. Ollama needs a locally running server.
-- Single dark theme. A light theme, split editor, token cost dashboard,
-  inline AI editing and autonomy levels are on the v1 scope.
+  account. Ollama needs a locally running server. Not every catalog entry can
+  drive the single-agent flow; the UI refuses an unsupported provider with a
+  reason instead of silently substituting another.
+- Collaboration is an **experimental, loopback-only** foundation, not a team
+  product: no LAN pairing, no LAN/WAN deployment, no TLS.
 - The Git surface covers local status, stage/unstage, discard, diff and
   commit; remote push/pull/branch operations are not included.
 - The package is unsigned; release notes must explain the SmartScreen warning

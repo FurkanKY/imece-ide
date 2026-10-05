@@ -1,6 +1,16 @@
 {
+  "schema_version": 2,
   "name": "go_missing_package",
+  "origin": "synthetic",
+  "language": "go",
   "tool": "go test",
+  "command": [
+    "go",
+    "test",
+    "./..."
+  ],
+  "provenance": "hand-written (S1a fixture set); migrated to the S1b schema (v2) with explicit gold/rule split",
+  "real_capture": null,
   "stdout": "",
   "stderr": "go: github.com/some/pkg@v1.2.3: missing go.sum entry\ncannot find package \"github.com/some/pkg\" in any of:\n\t/usr/local/go/src/github.com/some/pkg (from $GOROOT)\n\t/root/go/src/github.com/some/pkg (from $GOPATH)\n",
   "exit_code": 1,
@@ -9,5 +19,10 @@
     "cmd/server/main.go"
   ],
   "baseline_status": null,
-  "expected_label": "missing_dependency"
+  "baseline_exit_code": null,
+  "expected_rule_kind": "missing_dependency",
+  "expected_rule_action": "needs_user",
+  "expected_gate_action": "needs_user",
+  "gold_kind": "missing_dependency",
+  "gold_action": "needs_user"
 }

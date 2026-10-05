@@ -62,14 +62,14 @@ export function StatusBar() {
         <span className="flex shrink-0 items-center gap-2.5 text-text2">
           <span className="flex items-center gap-1">
             <Cpu size={11} className="text-faint" />
-            <CountUp value={totals.tokens} format={(v) => `${Math.round(v)} tok`} />
+            {totals.tokens == null ? "—" : <CountUp value={totals.tokens} format={(v) => `${Math.round(v)} tok`} />}
           </span>
           <span className="flex items-center gap-1">
             <Coins size={11} className="text-faint" />
-            <CountUp value={totals.cost_usd} format={(v) => `$${v.toFixed(4)}`} />
+            {totals.cost_usd == null ? "—" : <CountUp value={totals.cost_usd} format={(v) => `$${v.toFixed(4)}`} />}
           </span>
           {/* süre en düşük öncelik — dar pencerede gizlenir (taşma önleme) */}
-          <span className="hidden text-faint min-[900px]:inline">{totals.latency_s.toFixed(1)} sn</span>
+          <span className="hidden text-faint min-[900px]:inline">{totals.latency_s == null ? "—" : `${totals.latency_s.toFixed(1)} sn`}</span>
         </span>
       )}
       <div className="min-w-2 flex-1" />

@@ -32,7 +32,10 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from collab_runtime.safe_point import NativeWorkerSafePoint
 
 import providers as provider_registry
 from anthropic_catalog import AnthropicKeyMissingError, anthropic_backend_from_config
@@ -189,6 +192,7 @@ def build_pipeline_ports(
     backend_factory: Callable[[str], object] | None = None,
     acp_client_factory: Callable[[], object] | None = None,
     change_provider: ChangeProvider | None = None,
+    worker_safe_point: NativeWorkerSafePoint | None = None,
 ) -> PipelinePorts:
     """routing'e göre gerçek (veya test enjeksiyonlu) pipeline port'larını inşa eder.
 
@@ -200,6 +204,11 @@ def build_pipeline_ports(
     Her rol İÇİN AYRI bir backend/acp_client örneği kurulur (paylaşılan
     mutable durum yok) — yalnızca `verification` hiçbir routing'e bağlı
     değildir ve her zaman native'dir.
+
+    `worker_safe_point` yalnız native Worker için açık opt-in enjeksiyonudur.
+    ACP Worker ile kullanımı herhangi bir port kurulmadan reddedilir. Fabrika
+    consumer yaşam döngüsüne veya snapshot/cursor işlemlerine sahip değildir;
+    planner/reviewer context'i bu parametre ile yenilenmez.
     """
     backend_factory = backend_factory or _default_backend_factory
     acp_client_factory = acp_client_factory or _default_acp_client_factory
@@ -215,12 +224,18 @@ def build_pipeline_ports(
         entry, kind = _provider_kind(provider_id)
         resolved[role] = (entry, kind)
 
+    if worker_safe_point is not None and resolved["worker"][1] not in _NATIVE_KINDS:
+        raise EngineUnsupportedError(
+            "Collaboration safe points require a native worker provider."
+        )
+
     planner = _build_planner(runtime, run_id, provider_id=routing[_LEGACY_ROUTING_KEY["planner"]],
                               entry=resolved["planner"][0], kind=resolved["planner"][1],
                               backend_factory=backend_factory, acp_client_factory=acp_client_factory)
     worker = _build_worker(runtime, run_id, provider_id=routing[_LEGACY_ROUTING_KEY["worker"]],
                             entry=resolved["worker"][0], kind=resolved["worker"][1],
-                            backend_factory=backend_factory, acp_client_factory=acp_client_factory)
+                            backend_factory=backend_factory, acp_client_factory=acp_client_factory,
+                            worker_safe_point=worker_safe_point)
     reviewer = _build_reviewer(runtime, run_id, provider_id=routing[_LEGACY_ROUTING_KEY["reviewer"]],
                                 entry=resolved["reviewer"][0], kind=resolved["reviewer"][1],
                                 backend_factory=backend_factory, acp_client_factory=acp_client_factory)
@@ -270,10 +285,13 @@ def _build_planner(runtime, run_id, *, provider_id, entry, kind, backend_factory
     return AcpPlanAttemptRunner(runtime, run_id, launch_profile, acp_client)
 
 
-def _build_worker(runtime, run_id, *, provider_id, entry, kind, backend_factory, acp_client_factory):
+def _build_worker(runtime, run_id, *, provider_id, entry, kind, backend_factory, acp_client_factory,
+                  worker_safe_point=None):
     if kind in _NATIVE_KINDS:
         backend = backend_factory(provider_id)
-        return NativeWorkerAttemptAdapter(runtime, run_id, backend)
+        if worker_safe_point is None:
+            return NativeWorkerAttemptAdapter(runtime, run_id, backend)
+        return NativeWorkerAttemptAdapter(runtime, run_id, backend, safe_point=worker_safe_point)
     launch_profile = _acp_launch_profile(provider_id)
     acp_client = acp_client_factory()
     return AcpWorkerAttemptAdapter(runtime, run_id, launch_profile, acp_client)
@@ -353,21 +371,24 @@ def _discover_repo_root_for_worktree(worktree_dir: Path) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# Jev System One decision layer (docs/JEV-DESIGN.md Spike S1a): "decision_layer"
-# ui_pref (off | rules | jev) -> a decision_runtime.DecisionPort backend and,
-# for the fix-loop's verification-failure triage hook, a VerificationFailureGate.
+# Jev System One decision layer (docs/JEV-DESIGN.md Spike S1a/S1b):
+# "decision_layer" ui_pref (off | rules | jev) -> a decision_runtime.
+# DecisionPort backend and, for the fix-loop's verification-failure triage
+# hook, a VerificationFailureGate.
 #
 # "off" (the default) returns None everywhere below -- PipelineRunner/
 # FixLoopRunner treat None exactly as "the decision layer is disabled", so
-# nothing here changes today's behaviour unless a caller opts in. "rules" and
-# "jev" both currently resolve to RuleDecisionBackend: no JevDecisionBackend
-# exists yet (S1a is fully offline, no typesafe-sdk import anywhere) -- see
-# decision_runtime.ports.DecisionPort's docstring for the seam a future S1b
-# JevDecisionBackend fills without any caller of this module changing.
-#
-# webhost/api/run.py does not call these yet (out of scope for this slice --
-# it constructs PipelineRunner without decision_gate, so "off" is what
-# actually ships today); this is the wiring a later pass hands to it.
+# nothing here changes today's behaviour unless a caller opts in. "rules"
+# resolves to RuleDecisionBackend; "jev" (S1b) resolves to the real
+# JevDecisionBackend (typesafe-sdk, optional dependency). Construction of
+# the Jev backend is deliberately LAZY about key/SDK: it neither reads
+# TYPESAFE_API_KEY nor imports typesafe-sdk here, so a missing key or
+# missing optional dependency can NEVER raise at run construction -- which
+# means it can never trip the caller's "yeni motor kullanılamadı -> klasik
+# motor" engine fallback (webhost/api/run.py wraps gate construction and
+# pipeline port construction in the same try/except). A missing key/SDK
+# only surfaces at decide() time as a typed DecisionBackendError, which the
+# gate maps to the deterministic rule fallback.
 # ---------------------------------------------------------------------------
 
 VALID_DECISION_LAYER_VALUES = ("off", "rules", "jev")
@@ -375,16 +396,23 @@ VALID_DECISION_LAYER_VALUES = ("off", "rules", "jev")
 
 def build_decision_backend(decision_layer: str):
     """The decision_runtime.DecisionPort backend for a "decision_layer"
-    preference value, or None for "off"."""
+    preference value, or None for "off".
+
+    Never raises for a missing TYPESAFE_API_KEY or a missing typesafe-sdk:
+    JevDecisionBackend's constructor is lazy (see
+    decision_runtime.jev_backend), so run construction is always safe.
+    """
     from decision_runtime.ports import DecisionPort
     from decision_runtime.triage import RuleDecisionBackend
 
     if decision_layer == "off":
         return None
-    if decision_layer in ("rules", "jev"):
-        # "jev" falls back to the rule backend until a JevDecisionBackend
-        # exists (S1b) -- see docs/JEV-DESIGN.md's Plan, step S1a.
+    if decision_layer == "rules":
         return RuleDecisionBackend()
+    if decision_layer == "jev":
+        from decision_runtime.jev_backend import JevDecisionBackend
+
+        return JevDecisionBackend()
     raise ValueError(f"Unknown decision_layer preference: {decision_layer!r}")
 
 
