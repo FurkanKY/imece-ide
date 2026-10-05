@@ -8,6 +8,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: secrets-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
