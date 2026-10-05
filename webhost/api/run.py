@@ -42,6 +42,7 @@ webhost/api/checkpoint.py, DEĞİŞTİRİLMEDİ).
 
 import os
 import re
+import copy
 import threading
 import time
 from contextlib import contextmanager
@@ -68,6 +69,7 @@ from context_runtime import load_project_rules
 from webhost import state
 from webhost.api.activity import ActivityStreamer
 from webhost.bridge import handler, BridgeError
+from webhost.run_registry import RunSlot, registry as _run_registry
 
 try:
     from pipeline_runtime import PipelineRunner, PipelineStatus
@@ -159,6 +161,49 @@ _draining_workers: list[tuple[object, object, object, str | None]] = []
 _delivery_lock = threading.RLock()
 _delivery_leases: dict[tuple[int, str], int] = {}
 _delivery_closing: set[tuple[int, str]] = set()
+_project_apply_locks_guard = threading.Lock()
+_project_apply_locks: dict[str, threading.RLock] = {}
+
+
+def _project_apply_lock(root):
+    key = str(Path(root).resolve())
+    with _project_apply_locks_guard:
+        return _project_apply_locks.setdefault(key, threading.RLock())
+
+
+def _resolve_agent_slot(run_id=None, project_root=None):
+    eligible = [s for s in _run_registry.open_slots(project_root) if s.proposals or s.phase in ("running", "starting", "waiting_user")]
+    if run_id is not None:
+        slot = _run_registry.get(run_id)
+        if slot is None:
+            raise BridgeError("unknown_run", "Koşu bulunamadı.")
+        if slot not in eligible:
+            raise BridgeError("run_not_active", "Koşu artık işlem kabul etmiyor.")
+        return slot
+    if len(eligible) != 1:
+        raise BridgeError("run_id_required", "Belirsiz koşu için runId gereklidir.")
+    return eligible[0]
+
+
+def _legacy_run_id_matches(params):
+    # Registry ownership survives changes to the legacy compatibility mirror,
+    # including a later agent's failed admission.
+    if "runId" in params and _run_registry.get(params["runId"]) is not None:
+        return False
+    if _active.get("engine") == "agent":
+        return False
+    if "runId" not in params:
+        return False
+    if params.get("runId") != _active.get("run_id") or not _active.get("run_id"):
+        raise BridgeError("unknown_run", "Koşu bulunamadı.")
+    return True
+
+
+def _validate_run_rpc_params(params, allowed, *, required=()):
+    if not isinstance(params, dict) or set(params) - set(allowed) or any(key not in params for key in required):
+        raise BridgeError("invalid_params", "Koşu isteğinin alanları geçersiz.")
+    if "runId" in params and (type(params["runId"]) is not str or not 0 < len(params["runId"]) <= 256):
+        raise BridgeError("invalid_run_id", "runId geçersiz.")
 
 
 def _delivery_is_busy(session=None, run_id=None):
@@ -924,6 +969,47 @@ def _providers(params, ctx):
     return {"providers": items, "recommendedRouting": provider_registry.recommended_routing()}
 
 
+@handler("run.list")
+def _list_runs(params, ctx):
+    _validate_run_rpc_params(params, set())
+    project = _require_project()
+    root = str(Path(project.root).resolve())
+    items = []
+    for slot in _run_registry.slots():
+        if slot.project_root != root:
+            continue
+        try:
+            run = slot.coordinator.get_run()
+            status = run.status.value
+        except Exception:
+            status = "unavailable"
+        items.append({"runId": slot.run_id, "taskId": slot.task_id, "task": slot.task,
+                      "status": status, "phase": slot.phase, "providerId": slot.provider_id,
+                      "engine": "agent", "changedPathCount": len(slot.proposals),
+                      "errorCode": slot.error_code})
+    return {"runs": items}
+
+
+@handler("run.get")
+def _get_run(params, ctx):
+    _validate_run_rpc_params(params, {"runId"}, required={"runId"})
+    project = _require_project()
+    run_id = params.get("runId")
+    slot = _run_registry.get(run_id) if isinstance(run_id, str) else None
+    if slot is None:
+        raise BridgeError("unknown_run", "Koşu bulunamadı.")
+    if str(Path(project.root).resolve()) != slot.project_root:
+        raise BridgeError("run_project_mismatch", "Koşu başka bir projeye ait.")
+    try:
+        status = slot.coordinator.get_run().status.value
+    except Exception:
+        status = "unavailable"
+    return {"runId": slot.run_id, "task": slot.task, "providerId": slot.provider_id,
+            "status": status, "phase": slot.phase, "engine": "agent",
+            "evidence": copy.deepcopy(slot.evidence), "proposals": copy.deepcopy(slot.proposals),
+            "totals": dict(slot.totals), "errorCode": slot.error_code, "checkpointId": slot.checkpoint_id}
+
+
 _MAX_WORKER_FINAL_MESSAGE_CHARS = 1_500
 
 
@@ -1099,6 +1185,7 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=
 @handler("run.start")
 def _start(params, ctx):
     proj = _require_project()
+    agent_mode = "providerId" in params
     collab_requested = "collabApprovalHandle" in params
     collab_handle = params.get("collabApprovalHandle") if collab_requested else None
     if collab_requested and (type(collab_handle) is not str or not collab_handle):
@@ -1111,16 +1198,20 @@ def _start(params, ctx):
            Path(proj.root).resolve() == Path(item[1].project_root).resolve()
            for item in list(_draining_workers)):
         raise BridgeError("collab_cleanup_failed", "Önceki yerel işbirliği kaynağı güvenle kapatılamadı.")
-    if _active["worker"] is not None and _active["worker"].isRunning():
+    if _active["worker"] is not None and _active["worker"].isRunning() and not agent_mode:
         raise BridgeError("busy", "Zaten bir koşu sürüyor.")
     if _delivery_is_busy():
         raise BridgeError("busy", "Teslimat işlemi sürüyor.")
-    if _active_canonical_run_blocks_start():
+    if not agent_mode and _run_registry.open_slots():
+        raise BridgeError("busy", "Tek ajan koşuları sürüyor.")
+    if not agent_mode and _active_canonical_run_blocks_start():
         # Kanonik Run hâlâ terminal-olmayan bir durumda (CREATED/RUNNING/
         # WAITING_USER) olabilir; yeni bir koşu başlatmak bu durumu sessizce
         # terk ederdi.
         raise BridgeError("pending_proposals", "Bekleyen öneriler var; önce uygula veya reddet.")
-    if _active.get("engine") == "agent" and _active.get("workspace") is not None:
+    if agent_mode and _active.get("engine") != "agent" and _active_canonical_run_blocks_start():
+        raise BridgeError("busy", "Başka bir koşu sürüyor.")
+    if not agent_mode and _active.get("engine") == "agent" and _active.get("workspace") is not None:
         if not _dispose_agent_workspace(_active["workspace"]):
             raise BridgeError("workspace_cleanup_failed", "Tek ajan çalışma alanı güvenle kapatılamadı.")
 
@@ -1141,21 +1232,47 @@ def _start(params, ctx):
         if len(task) > 20_000:
             raise BridgeError("task_too_long", "Görev çok uzun.")
         mentions, invalid_mentions = _validate_mentions(proj, params.get("mentions") or [])
-        runtime = state.get_run_runtime()
-        coordinator = AgentRunCoordinator.start(
-            runtime, project_root=proj.root, task=task, provider_id=provider_id,
-        )
+        project_root = str(Path(proj.root).resolve())
+        if not _run_registry.reserve(project_root):
+            raise BridgeError("run_capacity", "Bu proje için en fazla iki ajan koşusu tutulabilir.")
+        coordinator = None
+        try:
+            runtime = state.get_run_runtime()
+            coordinator = AgentRunCoordinator.start(
+                runtime, project_root=proj.root, task=task, provider_id=provider_id,
+            )
+        except Exception:
+            _run_registry.release(project_root)
+            raise
         run_id = coordinator.run_id
         workspace = None
         try:
             workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
             ports = build_agent_ports(runtime, run_id, provider_id)
         except Exception:
+            _run_registry.release(project_root)
+            if coordinator is not None:
+                try:
+                    coordinator.finish_failed("agent_worker_unavailable")
+                except Exception:
+                    pass
             if workspace is not None:
-                workspace.dispose()
-            coordinator.finish_failed("agent_worker_unavailable")
+                try:
+                    workspace.dispose()
+                except Exception:
+                    if coordinator is not None:
+                        record = coordinator.get_run()
+                        retained = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
+                                           workspace=workspace, task=task, phase="cleanup_failed",
+                                           error_code="workspace_cleanup_failed")
+                        _run_registry.add(retained)
             raise BridgeError("worker_start_failed", "Tek ajan worker'ı başlatılamadı.") from None
         cancel_event = threading.Event()
+        record = coordinator.get_run()
+        slot = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
+                       workspace=workspace, ports=ports, task=task,
+                       pinned_paths=list(mentions), cancel_event=cancel_event)
+        _run_registry.add(slot)
         _active.update({"worker": None, "coordinator": coordinator, "run_id": run_id, "proposals": [],
                         "engine": "agent", "workspace": workspace, "cancel_event": cancel_event,
                         "activity_streamer": None, "pipeline_ports": ports, "task": task,
@@ -1165,13 +1282,16 @@ def _start(params, ctx):
         bridge = ctx._bridge
         ended = {"flag": False}
         emit_ui = lambda ev: bridge.emit_event("run.event", {"runId": run_id, "ev": ev})
-        worker = _AgentWorker(runtime, run_id, workspace, ports, task, provider_id, cancel_event, mentions)
-        _active["worker"] = worker
+        worker = None
         try:
+            worker = _AgentWorker(runtime, run_id, workspace, ports, task, provider_id, cancel_event, mentions)
+            if _active.get("run_id") == run_id:
+                _active["worker"] = worker
             _wire_agent_worker(worker, runtime=runtime, run_id=run_id, coordinator=coordinator,
-                               workspace=workspace, proj=proj, emit_ui=emit_ui, bridge=bridge, ended=ended)
+                               workspace=workspace, proj=proj, emit_ui=emit_ui, bridge=bridge, ended=ended,
+                               slot=slot)
         except Exception as exc:
-            if worker.isRunning() or getattr(worker, "agent_started", False):
+            if worker is not None and (worker.isRunning() or getattr(worker, "agent_started", False)):
                 # Started workers must remain reachable by cancel/shutdown.
                 if isinstance(exc, BridgeError):
                     raise
@@ -1181,7 +1301,12 @@ def _start(params, ctx):
             except Exception:
                 pass
             disposed = _dispose_agent_workspace(workspace)
-            if _active.get("worker") is worker and disposed:
+            slot.worker = None  # this worker never started; no drain is owed
+            slot.error_code = "agent_worker_unavailable"
+            slot.phase = "failed"
+            if disposed:
+                slot.workspace = None
+            if _active.get("run_id") == run_id and _active.get("worker") is worker and disposed:
                 _active.update({"worker": None, "coordinator": None, "run_id": None,
                                 "workspace": None, "cancel_event": None, "engine": "legacy",
                                 "pipeline_ports": None, "activity_streamer": None})
@@ -1518,7 +1643,7 @@ def _start_pipeline_run(runtime, coordinator, workspace, ports, task, *, emit_ui
     return worker
 
 
-def _dispose_agent_workspace(workspace) -> bool:
+def _dispose_agent_workspace(workspace, run_id=None) -> bool:
     """Dispose a quiescent agent workspace; retain host ownership on failure."""
     if workspace is None:
         return True
@@ -1526,7 +1651,7 @@ def _dispose_agent_workspace(workspace) -> bool:
         workspace.dispose()
     except Exception:
         return False
-    if _active.get("workspace") is workspace:
+    if _active.get("workspace") is workspace and (run_id is None or _active.get("run_id") == run_id):
         _active["workspace"] = None
     return True
 
@@ -1555,11 +1680,18 @@ def _agent_event_for_execution(runtime, run_id, event_type, execution_id):
 
 
 def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj, emit_ui, bridge, ended,
-                       activity_after_seq=0):
+                       activity_after_seq=0, slot=None, on_started=None):
     """Bridge the agent core's canonical result without synthesizing pipeline events."""
     def dispose_after_quiescent():
         def dispose():
-            _dispose_agent_workspace(workspace)
+            if slot is not None:
+                if _dispose_agent_workspace(workspace, run_id):
+                    slot.workspace = None
+                else:
+                    slot.phase = "cleanup_failed"
+                    slot.error_code = "workspace_cleanup_failed"
+            else:
+                _dispose_agent_workspace(workspace)
         if worker.isFinished():
             dispose()
         else:
@@ -1574,7 +1706,30 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
         if ended["flag"]:
             return
         ended["flag"] = True
-        _stop_activity_streamer()
+        if slot is not None:
+            streamer = slot.activity_streamer
+            if streamer is not None:
+                try:
+                    streamer.request_stop()
+                    streamer.wait(2000)
+                except Exception:
+                    pass
+                if _worker_is_finished(streamer):
+                    if slot.activity_streamer is streamer:
+                        slot.activity_streamer = None
+                else:
+                    slot.phase = "cleanup_failed"
+                    slot.error_code = "activity_streamer_cleanup_pending"
+            if slot.phase != "cleanup_failed":
+                try:
+                    slot.phase = ("waiting_user" if coordinator.get_run().status is RunStatus.WAITING_USER
+                                  else status)
+                except Exception:
+                    slot.phase = "cleanup_failed"
+            if error and slot.phase != "cleanup_failed":
+                slot.error_code = error
+        else:
+            _stop_activity_streamer()
         payload = {"runId": run_id, "status": status, "engine": "agent"}
         if error:
             payload["error"] = error
@@ -1599,8 +1754,14 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
                     evidence["verification"] = dict(evidence.get("verification") or {})
                     if evidence["verification"].get("outcome") == "pass":
                         evidence["verification"]["outcome"] = "invalidated"
+                if slot is not None:
+                    slot.evidence = evidence
                 proposals, skipped = _build_pipeline_proposals(proj, workspace, change_set)
-                _active["proposals"] = proposals
+                if slot is not None:
+                    slot.proposals = proposals
+                    slot.phase = "waiting_user"
+                if slot is None or _active.get("run_id") == run_id:
+                    _active["proposals"] = proposals
                 emit_ui({"type": "diff", "files": list(result.changed_paths)})
                 emit_ui({"type": "proposal", "proposals": proposals,
                          "totals": {"latency_s": None, "tokens": None, "cost_usd": None}})
@@ -1628,21 +1789,68 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
     worker.stage.connect(stage)
     worker.failed.connect(failed)
     worker.finished_ok.connect(complete)
+    if slot is not None:
+        slot.worker = worker
+        slot.phase = "running"
+        def release_worker_reference():
+            if slot.worker is worker and _worker_is_finished(worker):
+                slot.worker = None
+        worker.finished.connect(release_worker_reference)
     worker.start()
     worker.agent_started = True
+    if on_started is not None:
+        on_started()
     # Activity streaming is optional: it must not invalidate an already-started
     # native worker or sever the host's ownership/cancellation handle.
     try:
-        _stop_activity_streamer()
+        if slot is None:
+            _stop_activity_streamer()
         streamer = ActivityStreamer(runtime, run_id, after_seq=activity_after_seq)
-        streamer.activity.connect(lambda item: bridge.emit_event("run.activity", item))
+        streamer.activity.connect(lambda item: bridge.emit_event("run.activity", {**item, "runId": run_id}))
+        if slot is not None:
+            slot.activity_streamer = streamer
+            def release_streamer_reference():
+                if slot.activity_streamer is streamer and _worker_is_finished(streamer):
+                    slot.activity_streamer = None
+                    if slot.error_code == "activity_streamer_cleanup_pending":
+                        slot.error_code = None
+                        try:
+                            slot.phase = slot.coordinator.get_run().status.value
+                        except Exception:
+                            slot.phase = "cleanup_failed"
+            streamer.finished.connect(release_streamer_reference)
+        else:
+            _active["activity_streamer"] = streamer
         streamer.start()
-        _active["activity_streamer"] = streamer
+        if worker.isFinished():
+            streamer.request_stop()
+            streamer.wait(2000)
+            if _worker_is_finished(streamer):
+                if slot is not None and slot.activity_streamer is streamer:
+                    slot.activity_streamer = None
+                    if slot.error_code == "activity_streamer_cleanup_pending":
+                        slot.error_code = None
+                elif _active.get("activity_streamer") is streamer:
+                    _active["activity_streamer"] = None
+            elif slot is not None and slot.activity_streamer is streamer:
+                slot.phase = "cleanup_failed"
+                slot.error_code = "activity_streamer_cleanup_pending"
     except Exception:
         try:
             if "streamer" in locals():
                 streamer.request_stop()
-                streamer.wait(1000)
+                drained = streamer.wait(1000)
+                is_finished = getattr(streamer, "isFinished", None)
+                finished = bool(is_finished()) if callable(is_finished) else bool(drained)
+                if finished and slot is not None and slot.activity_streamer is streamer:
+                    slot.activity_streamer = None
+                    if slot.error_code == "activity_streamer_cleanup_pending":
+                        slot.error_code = None
+                        try:
+                            slot.phase = ("waiting_user" if coordinator.get_run().status is RunStatus.WAITING_USER
+                                          else "running" if worker.isRunning() else "done")
+                        except Exception:
+                            slot.phase = "cleanup_failed"
         except Exception:
             pass
         emit_ui({"type": "info", "text": "Canlı etkinlik akışı kullanılamıyor; ajan koşusu devam ediyor."})
@@ -1897,6 +2105,7 @@ def _follow_up(params, ctx):
     aksi halde BridgeError (klasik motorda Türkçe, kullanıcıya gösterilecek
     özel bir mesajla)."""
     proj = _require_project()
+    _validate_run_rpc_params(params, {"runId", "feedback", "collabApprovalHandle", "mentions"})
     if _delivery_is_busy():
         raise BridgeError("busy", "Teslimat işlemi sürüyor.")
     collab_handle_present = "collabApprovalHandle" in params
@@ -1906,6 +2115,58 @@ def _follow_up(params, ctx):
     feedback = (params.get("feedback") or "").strip()
     if not feedback:
         raise BridgeError("empty_feedback", "Takip isteği boş.")
+
+    if _active.get("engine") == "agent" or ("runId" in params and not _legacy_run_id_matches(params)):
+        slot = _resolve_agent_slot(params.get("runId"), str(Path(proj.root).resolve()))
+        _validate_slot_project(proj, slot)
+        if collab_handle_present:
+            raise BridgeError("collab_unsupported", "Tek ajan koşuları yerel işbirliğini desteklemiyor.")
+        with slot.lock:
+            if slot.worker is not None and slot.worker.isRunning():
+                raise BridgeError("busy", "Zaten bir koşu sürüyor.")
+            try:
+                waiting = slot.coordinator.get_run().status is RunStatus.WAITING_USER
+            except Exception:
+                raise BridgeError("canonical_state_unavailable", "Koşu durumu doğrulanamadı.") from None
+            if (slot.phase != "waiting_user" or not slot.proposals or slot.workspace is None or
+                    slot.ports is None or not waiting):
+                raise BridgeError("no_active_run", "Takip isteği için bekleyen bir öneri yok.")
+            mentions, _invalid = _validate_mentions(proj, params.get("mentions") or [])
+            slot.pinned_paths = list(dict.fromkeys(slot.pinned_paths + mentions))
+            CanonicalPipelineRecorder(state.get_run_runtime(), slot.run_id).resumed(reason="user_feedback")
+            slot.proposals = []
+            slot.evidence = None
+            slot.cancel_event = threading.Event()
+            bridge = ctx._bridge
+            emit_ui = lambda ev: bridge.emit_event("run.event", {"runId": slot.run_id, "ev": ev})
+            worker = None
+            try:
+                worker = _AgentWorker(state.get_run_runtime(), slot.run_id, slot.workspace, slot.ports,
+                                      slot.task, slot.provider_id, slot.cancel_event, slot.pinned_paths)
+                worker.feedback = feedback
+                _wire_agent_worker(worker, runtime=state.get_run_runtime(), run_id=slot.run_id,
+                                   coordinator=slot.coordinator, workspace=slot.workspace, proj=proj,
+                                   emit_ui=emit_ui, bridge=bridge, ended={"flag": False},
+                                   activity_after_seq=slot.coordinator.get_run().last_event_seq, slot=slot,
+                                   on_started=lambda: emit_ui({"type": "followUpStarted", "feedback": feedback}))
+            except Exception:
+                if worker is not None and (worker.isRunning() or getattr(worker, "agent_started", False)):
+                    # A launched continuation remains slot-owned and cancellable.
+                    return {"runId": slot.run_id}
+                try:
+                    slot.coordinator.finish_failed("agent_worker_unavailable")
+                except Exception:
+                    pass
+                slot.worker = None
+                slot.phase = "failed"
+                slot.error_code = "agent_worker_unavailable"
+                if _dispose_agent_workspace(slot.workspace, slot.run_id):
+                    slot.workspace = None
+                else:
+                    slot.phase = "cleanup_failed"
+                    slot.error_code = "workspace_cleanup_failed"
+                raise BridgeError("worker_start_failed", "Takip worker'ı başlatılamadı.") from None
+            return {"runId": slot.run_id}
 
     if _active.get("engine") != "pipeline":
         if _active.get("engine") == "agent":
@@ -2064,6 +2325,24 @@ def _follow_up(params, ctx):
 
 @handler("run.cancel")
 def _cancel(params, ctx):
+    _validate_run_rpc_params(params, {"runId"})
+    if ("runId" in params and not _legacy_run_id_matches(params)) or _active.get("engine") == "agent":
+        root = str(Path(_require_project().root).resolve())
+        if "runId" in params:
+            slot = _run_registry.get(params["runId"])
+            if slot is None:
+                raise BridgeError("unknown_run", "Koşu bulunamadı.")
+            if slot.project_root != root:
+                raise BridgeError("run_project_mismatch", "Koşu başka bir projeye ait.")
+        else:
+            slot = _resolve_agent_slot(None, root)
+        with slot.lock:
+            worker = slot.worker
+            if worker is not None and worker.isRunning():
+                slot.cancel_event.set()
+                ctx._bridge.emit_event("run.event", {"runId": slot.run_id,
+                    "ev": {"type": "info", "text": "Durduruluyor…"}})
+        return {"runId": slot.run_id}
     w = _active.get("worker")
     if w is None or not w.isRunning():
         return {}
@@ -2116,9 +2395,117 @@ def _stale_apply_conflicts(proj: Project, proposals: list[dict]) -> list[dict]:
     return conflicts
 
 
+def _validate_slot_project(proj, slot):
+    try:
+        valid = Path(proj.root).resolve(strict=True) == Path(slot.project_root).resolve(strict=True)
+    except (OSError, RuntimeError):
+        valid = False
+    if not valid:
+        raise BridgeError("run_project_mismatch", "Koşu başka bir projeye ait.")
+
+
+def _apply_agent(params, ctx, proj, slot):
+    _validate_slot_project(proj, slot)
+    wanted = params.get("paths") or []
+    if not isinstance(wanted, list) or any(not isinstance(p, str) for p in wanted):
+        raise BridgeError("invalid_paths", "Öneri yolları geçersiz.")
+    with slot.lock, _project_apply_lock(slot.project_root):
+        if slot.worker is not None and not _worker_is_finished(slot.worker):
+            raise BridgeError("busy", "Ajan worker'ı henüz durmadı.")
+        if slot.phase != "waiting_user":
+            raise BridgeError("not_waiting_user", "Bu koşuda bekleyen öneri yok.")
+        proposals_by_path = {p.get("path"): p for p in slot.proposals if isinstance(p, dict)}
+        if any(path not in proposals_by_path for path in wanted):
+            raise BridgeError("invalid_paths", "Seçilen yol bu koşunun önerileri arasında değil.")
+        proposals = [proposals_by_path[p] for p in dict.fromkeys(wanted)]
+        if not proposals:
+            return {"applied": [], "errors": [], "conflicts": [], "checkpointId": None}
+        try:
+            if slot.coordinator.get_run().status != RunStatus.WAITING_USER:
+                raise BridgeError("not_waiting_user", "Bu koşuda bekleyen öneri yok.")
+        except BridgeError:
+            raise
+        except Exception:
+            raise BridgeError("canonical_state_unavailable", "Koşu durumu doğrulanamadı.") from None
+        conflicts = _stale_apply_conflicts(proj, proposals)
+        if conflicts:
+            return {"applied": [], "errors": [], "conflicts": conflicts, "checkpointId": None}
+        try:
+            checkpoint = CheckpointStore(proj.root).create(proj, [p["path"] for p in proposals], slot.run_id)
+        except Exception as exc:
+            raise BridgeError("checkpoint", f"Checkpoint oluşturulamadı: {exc}") from None
+        applied, errors = [], []
+        for proposal in proposals:
+            try:
+                if proposal.get("is_deleted"):
+                    if proj.exists(proposal["path"]):
+                        proj.delete(proposal["path"])
+                else:
+                    proj.apply(proposal["path"], proposal.get("new", ""), backup=False)
+                applied.append(proposal["path"])
+            except Exception as exc:
+                errors.append({"path": proposal["path"], "message": str(exc)})
+        if errors:
+            restored, restore_error = _safe_restore_checkpoint(proj, checkpoint["id"])
+            if not restored:
+                raise BridgeError("apply_rollback_failed", f"Apply geri alınamadı: {restore_error}")
+            return {"applied": [], "errors": errors, "conflicts": [], "checkpointId": None}
+        try:
+            slot.coordinator.record_proposal_applied(applied_paths=applied, checkpoint_id=checkpoint["id"])
+        except Exception as exc:
+            restored, restore_error = _safe_restore_checkpoint(proj, checkpoint["id"])
+            if not restored:
+                raise BridgeError("canonical_apply_rollback_failed", f"Geri alma başarısız: {restore_error}")
+            raise BridgeError("canonical_apply_failed", f"Dosyalar geri alındı: {exc}") from None
+        slot.proposals = []
+        slot.phase = "applied"
+        slot.checkpoint_id = checkpoint["id"]
+        if _active.get("run_id") == slot.run_id:
+            _active["proposals"] = []
+        if slot.workspace is not None and _worker_is_finished(slot.worker):
+            if _dispose_agent_workspace(slot.workspace, slot.run_id):
+                slot.workspace = None
+            else:
+                slot.phase = "cleanup_failed"
+                slot.error_code = "workspace_cleanup_failed"
+        ctx._bridge.emit_event("fs.changed", {"kind": "modified", "paths": applied})
+        return {"applied": applied, "errors": [], "conflicts": [], "checkpointId": checkpoint["id"]}
+
+
+def _reject_agent(ctx, proj, slot):
+    _validate_slot_project(proj, slot)
+    with slot.lock:
+        if slot.worker is not None and not _worker_is_finished(slot.worker):
+            raise BridgeError("busy", "Ajan worker'ı henüz durmadı.")
+        if slot.phase != "waiting_user":
+            raise BridgeError("not_waiting_user", "Bu koşuda bekleyen öneri yok.")
+        if not slot.proposals:
+            return {}
+        try:
+            slot.coordinator.record_proposal_rejected(
+                rejected_paths=[p.get("path", "") for p in slot.proposals])
+        except Exception as exc:
+            raise BridgeError("canonical_reject_failed", f"Kanonik ret kalıcılığı başarısız oldu: {exc}") from None
+        slot.proposals = []
+        slot.phase = "rejected"
+        slot.evidence = None
+        if _active.get("run_id") == slot.run_id:
+            _active["proposals"] = []
+        if slot.workspace is not None and _worker_is_finished(slot.worker):
+            if _dispose_agent_workspace(slot.workspace, slot.run_id):
+                slot.workspace = None
+            else:
+                slot.phase = "cleanup_failed"
+                slot.error_code = "workspace_cleanup_failed"
+        return {}
+
+
 @handler("run.applyProposals")
 def _apply(params, ctx):
+    _validate_run_rpc_params(params, {"runId", "paths"})
     proj = _require_project()
+    if ("runId" in params and not _legacy_run_id_matches(params)) or _active.get("engine") == "agent":
+        return _apply_agent(params, ctx, proj, _resolve_agent_slot(params.get("runId"), str(Path(proj.root).resolve())))
     _require_agent_project(proj)
     session = _active.get("collab_session")
     if _delivery_is_busy(session, _active.get("run_id")):
@@ -2234,7 +2621,10 @@ def _apply(params, ctx):
 
 @handler("run.rejectProposals")
 def _reject(params, ctx):
+    _validate_run_rpc_params(params, {"runId"})
     proj = _require_project()
+    if ("runId" in params and not _legacy_run_id_matches(params)) or _active.get("engine") == "agent":
+        return _reject_agent(ctx, proj, _resolve_agent_slot(params.get("runId"), str(Path(proj.root).resolve())))
     _require_agent_project(proj)
     session = _active.get("collab_session")
     if _delivery_is_busy(session, _active.get("run_id")):
@@ -2271,6 +2661,31 @@ def _reject(params, ctx):
 
 def shutdown():
     """Uygulama kapanırken koşuyu iptal et (zombi thread önleme)."""
+    for slot in _run_registry.slots():
+        worker = slot.worker
+        if worker is not None and worker.isRunning():
+            if slot.cancel_event is not None:
+                slot.cancel_event.set()
+            worker.wait(2000)
+        streamer = slot.activity_streamer
+        if streamer is not None:
+            try:
+                streamer.request_stop()
+                streamer.wait(2000)
+            except Exception:
+                pass
+            if _worker_is_finished(streamer):
+                if slot.activity_streamer is streamer:
+                    slot.activity_streamer = None
+            else:
+                slot.phase = "cleanup_failed"
+                slot.error_code = "activity_streamer_cleanup_pending"
+        if slot.workspace is not None and _worker_is_finished(worker):
+            if _dispose_agent_workspace(slot.workspace, slot.run_id):
+                slot.workspace = None
+            else:
+                slot.phase = "cleanup_failed"
+                slot.error_code = "workspace_cleanup_failed"
     w = _active.get("worker")
     session = _active.get("collab_session")
     workspace = _active.get("workspace")

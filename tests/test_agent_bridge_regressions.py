@@ -291,6 +291,25 @@ def agent_host(ports, monkeypatch, git_repo, tmp_path):
     # a live ActivityStreamer must be stopped before _active drops its handle
     run_api._stop_activity_streamer()
     run_api._dispose_workspace()
+    root = str(git_repo.resolve())
+    for slot in run_api._run_registry.slots():
+        if slot.project_root != root:
+            continue
+        if slot.worker is not None and slot.worker.isRunning():
+            if slot.cancel_event is not None:
+                slot.cancel_event.set()
+            slot.worker.wait(5000)
+        if slot.activity_streamer is not None:
+            slot.activity_streamer.request_stop()
+            slot.activity_streamer.wait(2000)
+            assert slot.activity_streamer.isFinished()
+            slot.activity_streamer = None
+        if slot.workspace is not None:
+            slot.workspace.dispose()
+            slot.workspace = None
+        if slot.worker is not None and slot.worker.isFinished():
+            slot.worker = None
+        assert run_api._run_registry.forget_cleaned(slot.run_id)
     run_api._active.clear()
     run_api._active.update(saved_active)
     state._active = saved_project
@@ -397,6 +416,189 @@ def test_start_worker_construction_failure_settles_failed_and_frees_start(
     assert run_api._active["coordinator"] is None
     assert run_api._active["engine"] == "legacy"
     assert run_api._active_canonical_run_blocks_start() is False
+
+
+def test_agent_worker_constructor_failure_settles_slot_and_cleans_workspace(
+        ports, bridge, qapp, git_repo, tmp_path, monkeypatch):
+    ports.add(writes=(("agent.txt", "never written\n"),))
+
+    def fail_constructor(*_args, **_kwargs):
+        raise RuntimeError("worker constructor exploded")
+
+    monkeypatch.setattr(run_api, "_AgentWorker", fail_constructor)
+    reply = rpc(bridge, "run.start", {"task": "write agent.txt", "providerId": "openai"})
+
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "worker_start_failed"
+    runtime = state.get_run_runtime()
+    record = runtime.store.list_runs()[0]
+    assert record.status.value == "failed"
+    assert record.error_message == "agent_worker_unavailable"
+    assert not _worktree(record.run_id, tmp_path).exists()
+    slot = run_api._run_registry.get(record.run_id)
+    assert slot is not None and slot.worker is None and slot.workspace is None
+    assert run_api._active["run_id"] is None
+
+
+def test_agent_start_failure_releases_never_started_worker_ownership(
+        ports, bridge, qapp, git_repo, monkeypatch):
+    ports.add(writes=(("agent.txt", "never written\n"),))
+
+    class FailedStartWorker(run_api._AgentWorker):
+        def start(self):
+            raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(run_api, "_AgentWorker", FailedStartWorker)
+    reply = rpc(bridge, "run.start", {"task": "write agent.txt", "providerId": "openai"})
+    assert reply["error"]["code"] == "worker_start_failed"
+    record = state.get_run_runtime().store.list_runs()[0]
+    slot = run_api._run_registry.get(record.run_id)
+    assert record.status.value == "failed"
+    assert slot.worker is None and slot.workspace is None
+    assert slot not in run_api._run_registry.open_slots(str(git_repo.resolve()))
+
+
+def test_failed_second_start_does_not_hide_first_run_from_targeted_cancel(
+        ports, bridge, qapp, git_repo, monkeypatch):
+    gate = threading.Event()
+    ports.add(writes=(("agent.txt", "first\n"),), gate=gate)
+    first = _start_agent_run(bridge)
+
+    def fail_constructor(*_args, **_kwargs):
+        raise RuntimeError("second constructor exploded")
+
+    monkeypatch.setattr(run_api, "_AgentWorker", fail_constructor)
+    failed = rpc(bridge, "run.start", {"task": "second", "providerId": "openai"})
+    assert failed["error"]["code"] == "worker_start_failed"
+    assert run_api._active["engine"] == "legacy"
+    cancelled = rpc(bridge, "run.cancel", {"runId": first})
+    assert cancelled["ok"], cancelled
+    assert run_api._run_registry.get(first).cancel_event.is_set()
+    gate.set()
+    assert _pump_until(qapp, lambda: state.get_run_runtime().get_run(first).status.value == "cancelled")
+
+
+def test_followup_started_precedes_optional_streamer_setup(
+        ports, bridge, qapp, git_repo, monkeypatch):
+    ports.add(writes=(("agent.txt", "first\n"),))
+    run_id = _start_agent_run(bridge)
+    _await_proposal(qapp, run_id)
+    seen = _ui_events(bridge)
+    observed = []
+
+    class ProbeStreamer(BrokenActivityStreamer):
+        def __init__(self, *args, **kwargs):
+            observed.append(any(e.get("type") == "followUpStarted" for e in _ui_payloads(seen)))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(run_api, "ActivityStreamer", ProbeStreamer)
+    reply = rpc(bridge, "run.followUp", {"runId": run_id, "feedback": "continue"})
+    assert reply["ok"], reply
+    assert observed == [True], "continuation reset must precede optional stream setup and waits"
+
+
+def test_fast_finished_agent_retains_stalled_streamer_until_confirmed_finished(
+        ports, bridge, qapp, git_repo, monkeypatch):
+    from types import SimpleNamespace
+    from webhost.run_registry import RunRegistry, RunSlot
+
+    class Signal:
+        def __init__(self):
+            self.callbacks = []
+
+        def connect(self, callback):
+            self.callbacks.append(callback)
+
+        def emit(self):
+            for callback in self.callbacks:
+                callback()
+
+    class StalledStreamer:
+        def __init__(self, *_args, **_kwargs):
+            self.activity, self.finished = Signal(), Signal()
+            self.done = False
+
+        def start(self):
+            pass
+
+        def request_stop(self):
+            pass
+
+        def wait(self, _timeout):
+            return self.done
+
+        def isFinished(self):
+            return self.done
+
+    monkeypatch.setattr(run_api, "ActivityStreamer", StalledStreamer)
+    worker = SimpleNamespace(stage=Signal(), failed=Signal(), finished_ok=Signal(), finished=Signal(),
+                             start=lambda: None, isFinished=lambda: True, isRunning=lambda: False)
+    runtime = state.get_run_runtime()
+    coordinator = run_api.AgentRunCoordinator.start(
+        runtime, project_root=str(git_repo), task="already finished", provider_id="openai")
+    coordinator.finish_failed("fixture_finished")
+    slot = RunSlot(coordinator.run_id, coordinator.get_run().task_id, str(git_repo.resolve()),
+                   "openai", coordinator)
+    run_api._wire_agent_worker(worker, runtime=runtime, run_id=slot.run_id, coordinator=coordinator,
+                               workspace=None, proj=None, emit_ui=lambda _ev: None, bridge=bridge,
+                               ended={"flag": False}, slot=slot)
+    worker.finished.emit()
+    streamer = slot.activity_streamer
+    assert streamer is not None and not streamer.isFinished()
+    assert slot.phase == "cleanup_failed" and slot.error_code == "activity_streamer_cleanup_pending"
+    registry = RunRegistry()
+    registry.add(slot)
+    assert registry.open_slots(slot.project_root) == (slot,)
+    assert registry.reserve(slot.project_root) and not registry.reserve(slot.project_root)
+    streamer.done = True
+    streamer.finished.emit()
+    assert slot.activity_streamer is None and slot.error_code is None
+    assert not registry.open_slots(slot.project_root)
+
+
+def test_agent_followup_constructor_failure_settles_and_emits_no_started_event(
+        ports, bridge, qapp, git_repo, monkeypatch):
+    ports.add(writes=(("agent.txt", "first\n"),))
+    run_id = _start_agent_run(bridge)
+    _await_proposal(qapp, run_id)
+    seen = _ui_events(bridge)
+
+    def fail_constructor(*_args, **_kwargs):
+        raise RuntimeError("follow-up constructor exploded")
+
+    monkeypatch.setattr(run_api, "_AgentWorker", fail_constructor)
+    reply = rpc(bridge, "run.followUp", {"runId": run_id, "feedback": "continue"})
+
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "worker_start_failed"
+    assert state.get_run_runtime().get_run(run_id).status.value == "failed"
+    slot = run_api._run_registry.get(run_id)
+    assert slot.phase == "failed" and slot.worker is None and slot.workspace is None
+    assert slot.proposals == [] and slot.evidence is None
+    assert not any(event.get("type") == "followUpStarted" for event in _ui_payloads(seen))
+
+
+def test_agent_followup_start_failure_settles_and_emits_no_started_event(
+        ports, bridge, qapp, git_repo, monkeypatch):
+    ports.add(writes=(("agent.txt", "first\n"),))
+    run_id = _start_agent_run(bridge)
+    _await_proposal(qapp, run_id)
+    seen = _ui_events(bridge)
+
+    class FailedStartWorker(run_api._AgentWorker):
+        def start(self):
+            raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(run_api, "_AgentWorker", FailedStartWorker)
+    reply = rpc(bridge, "run.followUp", {"runId": run_id, "feedback": "continue"})
+
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "worker_start_failed"
+    assert state.get_run_runtime().get_run(run_id).status.value == "failed"
+    slot = run_api._run_registry.get(run_id)
+    assert slot.phase == "failed" and slot.worker is None and slot.workspace is None
+    assert slot.proposals == [] and slot.evidence is None
+    assert not any(event.get("type") == "followUpStarted" for event in _ui_payloads(seen))
 
 
 # --------------------------------------------------------------------------

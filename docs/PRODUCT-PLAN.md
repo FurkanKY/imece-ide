@@ -5,7 +5,7 @@
 > A local `ROADMAP.md` progress journal exists on contributors' machines but is
 > **git-ignored and not published**, so it is deliberately not linked from here;
 > where a local note and this file disagree, **this file wins**.
-> Last updated: 2026-10-05.
+> Last updated: 2026-10-06.
 
 ## 1. What Imece is
 
@@ -97,24 +97,28 @@ What the implemented default flow actually does:
   backend and historical record**. They are **not the default** and are not
   planned for v1.
 
-### M2 — Task-first main screen, real concurrency — **authorized, implementation starting**
+### M2 — Task-first main screen, real concurrency — **backend in development, UI pending**
 
 > **M1 is not closed, and its acceptance gate is not met — that has not
 > changed.** Real-provider and supported-platform validation was **deferred**,
 > because the provider/platform environments needed to run it were not
 > available. It stays a **tracked validation debt** and a **release gate before
 > M5**, and it is recorded as open, not waived. It **does not block M2**: M2 is
-> authorized now and is being worked on. M2 is **not implemented yet**.
+> authorized now and is being worked on. The M2 **user-visible delivery is not
+> implemented yet**. Its backend registry is fixture-tested on the
+> `m2-run-manager` development branch; this is not a completed task-first UI.
 
 - The main screen is a **task list**, not a role pipeline.
 - At least **two independent Executions run concurrently**, each in its own
   worktree.
 - The current **global single-active-run assumption is replaced** by a run
   manager; two runs must be live at once and independently completable.
-- Target shape for the run manager: a **run-ID registry** with a bounded
-  concurrency ceiling (e.g. at most 2 concurrent runs), **independent leases**
-  per run, and explicit **cancel** and **apply** actions that address one run by
-  ID. This is the design target, **not** an implementation claim.
+- The backend on the development branch has a **run-ID registry** with a
+  ceiling of **two owned runs per project**, independent worktrees and
+  cancellation, and explicit **cancel**, **continue**, **apply** and **reject**
+  actions addressed by ID. Waiting proposals and retained cleanup resources
+  consume capacity too. The default frontend is **not yet connected to this
+  multi-run model**; backend fixtures are not M2 acceptance.
 - Acceptance: two Tasks progress simultaneously with no shared worktree, no
   cross-talk and no lost results.
 
@@ -211,14 +215,35 @@ Already implemented and deliberately reused rather than replaced:
 
 - The **application shell is still IDE-shaped** — project explorer, Monaco
   editor, terminal, Git surface, LSP, debugger — and those stay as
-  **secondary** tools. The **task-first main screen and real concurrency (M2)
-  are authorized and being started, but are not implemented yet**; the global
-  single-active-run assumption still holds in the current tree.
+  **secondary** tools. The **task-first main screen and multi-run frontend (M2)
+  are not implemented yet**. The development branch backend can own two
+  independent runs, but the frontend still has a single-run state model. It
+  must be replaced without dropping background activity/results or
+  misattributing an in-flight decision.
 - **Restart durability (M3) is not done.** Tasks and results do not yet
   survive an app restart and get reopened/continued.
-- **M3, M4 and M5 are not started. M2 is authorized and starting, not
+- **M3, M4 and M5 are not started. M2 is in development, not
   finished.** M1's deferred acceptance gate remains open and stays a release
   gate before M5.
+
+### M2 backend checkpoint — development branch only
+
+- Headless Qt/Git/SQLite fixtures exercise two live runs in distinct
+  worktrees, targeted cancellation while the other run continues, independent
+  follow-up/results, explicit apply/checkpoint and reject, capacity limits,
+  and source-hash conflict refusal for overlapping proposals.
+- Failed admissions and delayed activity shutdown retain or release resources
+  explicitly. A later failed start must not hide an earlier run from control.
+- The registry is **process-local** with bounded terminal history. This does
+  not implement M3's task/result reopening after restart.
+- Run-indexed frontend state, independent mock flows, the task-first main
+  screen, and a **two-run browser acceptance** remain unfinished. Incomplete
+  frontend changes were removed rather than represented as a working delivery.
+- Reproduce the backend scope on this branch with `python -m pytest -q
+  tests/test_run_registry.py tests/test_agent_application_e2e.py
+  tests/test_agent_bridge_regressions.py` in the configured development
+  environment. These are local fixture checks, not live-provider or Windows
+  desktop acceptance.
 
 ### Collaboration honesty
 
