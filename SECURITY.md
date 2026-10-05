@@ -31,6 +31,10 @@ today. Earlier `0.3.x` and below are no longer the supported line.
   input inventory is treated as incomplete and a PASS cannot be proven. This is
   a documented product limitation — it is **not** a claim that Windows is
   CI-verified.
+- **Windows stream shutdown can wait for the idle read timeout.** Lifecycle
+  shutdown is requested immediately, but buffered Winsock readers can drain at
+  the fixed five-second idle timeout. Ownership is retained until the worker
+  finishes; this is not a sub-second shutdown or live-readiness guarantee.
 - **Collaboration is loopback-only and experimental.** The collaboration
   listener binds literal `127.0.0.1` and requires an explicit per-epoch member
   credential. **LAN pairing, LAN/WAN deployment and TLS are not implemented**,
