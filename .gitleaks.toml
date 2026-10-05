@@ -5,23 +5,53 @@ useDefault = true
 
 # Never ignore whole test directories: both the path and the deterministic
 # fixture marker must match. Real credentials in these files remain findings.
-[[allowlists]]
+[[rules]]
+id = "aws-access-token"
+[[rules.allowlists]]
 description = "Deterministic AWS-shaped redaction fixture"
 condition = "AND"
 regexTarget = "match"
 paths = ['''^tests/test_decision_remote_state\.py$''']
 regexes = ['''AKIAABCDEFGHIJKLMNOP''']
 
-[[allowlists]]
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
 description = "Deterministic provider-error regression fixture"
 condition = "AND"
 regexTarget = "match"
 paths = ['''^tests/test_agent_security_regressions\.py$''']
 regexes = ['''sk-regression-c0ffee-SECRET-4f21ba7e9d''']
-
-[[allowlists]]
+[[rules.allowlists]]
 description = "Deterministic non-output host credential fixture"
 condition = "AND"
 regexTarget = "match"
 paths = ['''^tests/test_collab_host\.py$''']
 regexes = ['''secretcredential_not_for_output_123456''']
+[[rules.allowlists]]
+description = "Deterministic shared-metadata confidentiality fixtures"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/test_collab_product_changes\.py$''', '''^tests/test_collab_coordination_regressions\.py$''']
+regexes = ['''decision-secret-(4b71|9f2c)''']
+[[rules.allowlists]]
+description = "Deterministic packaged-key migration fixture"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/test_bridge\.py$''']
+regexes = ['''ts-migrate-1234''']
+[[rules.allowlists]]
+description = "Deterministic command-argument redaction fixtures"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^tests/test_decision_remote_state\.py$''']
+regexes = ['''abcd1234efgh(ij)?''']
+
+[[rules]]
+id = "private-key"
+[[rules.allowlists]]
+description = "Python expression constructing a synthetic multiline redaction fixture"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^tests/test_decision_remote_state\.py$''']
+regexes = ['''key_block = "-----BEGIN RSA PRIVATE KEY-----\\n" \+ body \+ "\\n-----END RSA PRIVATE KEY-----"''']
