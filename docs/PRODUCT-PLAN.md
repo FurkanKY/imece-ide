@@ -5,7 +5,7 @@
 > A local `ROADMAP.md` progress journal exists on contributors' machines but is
 > **git-ignored and not published**, so it is deliberately not linked from here;
 > where a local note and this file disagree, **this file wins**.
-> Last updated: 2026-10-05.
+> Last updated: 2026-10-06.
 
 ## 1. What Imece is
 
@@ -97,26 +97,35 @@ What the implemented default flow actually does:
   backend and historical record**. They are **not the default** and are not
   planned for v1.
 
-### M2 — Task-first main screen, real concurrency — **authorized, implementation starting**
+### M2 — Task-first main screen, real concurrency — **implemented on separate branch; not merged**
 
 > **M1 is not closed, and its acceptance gate is not met — that has not
 > changed.** Real-provider and supported-platform validation was **deferred**,
 > because the provider/platform environments needed to run it were not
 > available. It stays a **tracked validation debt** and a **release gate before
-> M5**, and it is recorded as open, not waived. It **does not block M2**: M2 is
-> authorized now and is being worked on. M2 is **not implemented yet**.
+> M5**, and it is recorded as open, not waived. It **does not block M2**.
+> M2 is implemented on the public
+> [`m2-run-manager` branch](https://github.com/FurkanKY/imece-ide/tree/m2-run-manager),
+> not merged into `main`. The branch has fixture/mock validation; consult its
+> [current CI results](https://github.com/FurkanKY/imece-ide/actions/workflows/verify.yml?query=branch%3Am2-run-manager)
+> before integration. Provider and
+> supported-platform acceptance remain pending; no live-provider or
+> native-platform quality claim is made. `main` remains IDE-shaped and
+> single-run.
 
 - The main screen is a **task list**, not a role pipeline.
 - At least **two independent Executions run concurrently**, each in its own
   worktree.
 - The current **global single-active-run assumption is replaced** by a run
   manager; two runs must be live at once and independently completable.
-- Target shape for the run manager: a **run-ID registry** with a bounded
+- The branch implementation uses a **run-ID registry** with a bounded
   concurrency ceiling (e.g. at most 2 concurrent runs), **independent leases**
   per run, and explicit **cancel** and **apply** actions that address one run by
-  ID. This is the design target, **not** an implementation claim.
-- Acceptance: two Tasks progress simultaneously with no shared worktree, no
-  cross-talk and no lost results.
+  ID. This remains the acceptance contract; branch implementation does not
+  establish provider/platform acceptance.
+- Acceptance remains pending: two Tasks must progress simultaneously with no
+  shared worktree, no cross-talk and no lost results; provider/platform
+  acceptance also remains pending.
 
 ### M3 — Durable tasks and results, controlled integration — **not started**
 
@@ -148,7 +157,7 @@ What the implemented default flow actually does:
 
 **Value ladder:** M1–M3 are useful **solo**. M4 makes it **team-complete**.
 M5 is the **release** gate. M1's acceptance gate is still open (deferred,
-tracked); **M2 is the active implementation target** right now.
+tracked); M2 is implemented on a separate branch and awaits acceptance/merge.
 
 ## 4. What is explicitly not v1 scope
 
@@ -209,15 +218,15 @@ Already implemented and deliberately reused rather than replaced:
 
 ### What is still not done
 
-- The **application shell is still IDE-shaped** — project explorer, Monaco
+- On `main`, the **application shell is still IDE-shaped** — project explorer, Monaco
   editor, terminal, Git surface, LSP, debugger — and those stay as
   **secondary** tools. The **task-first main screen and real concurrency (M2)
-  are authorized and being started, but are not implemented yet**; the global
-  single-active-run assumption still holds in the current tree.
+  are implemented on the separate `m2-run-manager` branch**, not merged; the
+  global single-active-run assumption still holds in `main`.
 - **Restart durability (M3) is not done.** Tasks and results do not yet
   survive an app restart and get reopened/continued.
-- **M3, M4 and M5 are not started. M2 is authorized and starting, not
-  finished.** M1's deferred acceptance gate remains open and stays a release
+- **M3, M4 and M5 are not started. M2 implementation is on a separate branch;
+  provider/platform acceptance is pending.** M1's deferred acceptance gate remains open and stays a release
   gate before M5.
 
 ### Collaboration honesty
@@ -332,11 +341,13 @@ What that scope actually exercises:
 
 ## 8. Delivery order
 
-1. **M2 — active now, and authorized.** Task-first main screen plus a run
+1. **M2 — implemented on the separate `m2-run-manager` branch, not merged.** Task-first main screen plus a run
    manager: a **run-ID registry** with a bounded concurrency ceiling,
    **independent per-run leases**, and explicit **cancel** / **apply** addressed
    to one run by ID, replacing the current global single-active-run assumption.
-   Implementation is **starting**; nothing here claims it is built.
+   Branch validation is fixture/mock-based; integration depends on current CI
+   results, and provider/platform acceptance remains pending. This does not claim
+   live-provider or native-platform quality, nor that `main` has M2.
 2. **M1's deferred acceptance gate is not dropped.** Actual-provider and
    supported-platform validation is **tracked validation debt**, deferred
    because those environments were unavailable. It is a **release gate before

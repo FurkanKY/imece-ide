@@ -4,27 +4,57 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.3.0-beta.1
+        description: Existing release tag to build (for example v0.4.0-beta.1)
         required: true
         type: string
       publish:
-        description: Publish a GitHub Release (false = build and smoke only; the ZIP is uploaded as a workflow artifact for acceptance testing)
+        description: Publish a GitHub Release (false builds and uploads an artifact only)
         required: false
         default: false
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   package:
     runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      commit: ${{ steps.revision.outputs.commit }}
+      tag: ${{ steps.validate.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Validate existing version tag
+        id: validate
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $pattern = '\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\z'
+          $tagMatch = [regex]::Match($env:RELEASE_TAG, $pattern, [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+          if (-not $tagMatch.Success) {
+            throw 'Tag must be a strict v-prefixed semver tag, optionally with a prerelease.'
+          }
+          foreach ($identifier in $tagMatch.Groups[4].Value -split '\.') {
+            if ($identifier -cmatch '^[0-9]+$' -and $identifier.Length -gt 1 -and $identifier.StartsWith('0')) {
+              throw 'Numeric prerelease identifiers must not contain leading zeroes.'
+            }
+          }
+          "tag=$env:RELEASE_TAG" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ steps.validate.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Capture checked-out revision
+        id: revision
+        shell: pwsh
+        run: |
+          "commit=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.14'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -38,15 +68,46 @@ jobs:
       - run: node packaging\smoke.mjs
       - run: Compress-Archive -Path dist\ImeceIDE\* -DestinationPath ImeceIDE-windows.zip
       - run: (Get-FileHash ImeceIDE-windows.zip -Algorithm SHA256).Hash + '  ImeceIDE-windows.zip' | Out-File -Encoding ascii SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ImeceIDE-windows
           path: |
             ImeceIDE-windows.zip
             SHA256SUMS.txt
-      - name: Publish GitHub Release
-        if: ${{ inputs.publish }}
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ImeceIDE-windows
+      - name: Confirm tag still resolves to the built commit
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.package.outputs.tag }}
+          BUILD_COMMIT: ${{ needs.package.outputs.commit }}
         run: |
-          gh release create "${{ inputs.tag }}" ImeceIDE-windows.zip SHA256SUMS.txt --target "${{ github.sha }}" --prerelease --title "${{ inputs.tag }}" --notes "Windows public beta. This package is unsigned; Windows SmartScreen may show a warning. Verify SHA256SUMS.txt before use."
+          $tagRef = [Uri]::EscapeDataString("refs/tags/$env:RELEASE_TAG")
+          $tagCommit = gh api "repos/$env:GH_REPOSITORY/commits/$tagRef" --jq .sha
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve the release tag through the GitHub API.' }
+          if ($tagCommit.Trim() -cne $env:BUILD_COMMIT) {
+            throw 'The release tag no longer resolves to the commit used to build this artifact.'
+          }
+      - name: Publish artifact against the built revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.package.outputs.tag }}
+          BUILD_COMMIT: ${{ needs.package.outputs.commit }}
+        run: >-
+          gh release create "$RELEASE_TAG" ImeceIDE-windows.zip SHA256SUMS.txt
+          --repo "$GH_REPOSITORY" --verify-tag --prerelease
+          --title "$RELEASE_TAG"
+          --notes "Windows public beta. This package is unsigned; Windows SmartScreen may show a warning. Verify SHA256SUMS.txt before use."

@@ -1,25 +1,64 @@
 name: Bug report
 description: Report a reproducible problem
+labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Do not include API keys, private source code, or security vulnerabilities.
+      value: >-
+        Never include API keys, private source code, personal data, or security
+        vulnerabilities. Use the private security reporting link instead.
   - type: input
     id: version
     attributes:
       label: Version
-      placeholder: v0.3.0-beta.1
+      placeholder: v0.4.0-beta.1 or main commit SHA
     validations:
       required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10/11
+        - Linux
+        - Other / unsure
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime / application context
+      description: Include Python/Node versions and whether this is the native desktop shell or browser mock.
+      placeholder: Python 3.14, Node 22.12; Windows desktop / browser mock
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider route (optional)
+      description: Provider or CLI identifier only; never include a key, account detail, or prompt contents.
+      placeholder: deepseek / claude / none
   - type: textarea
     id: reproduce
     attributes:
       label: Steps to reproduce
+      description: Give the smallest repeatable steps; sanitize logs and remove private data.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected and actual behavior
+      label: Expected behavior
     validations:
       required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Relevant error text or logs with secrets, personal data, and private paths removed.

@@ -32,42 +32,53 @@ per-run case counts) out of the published set.
 
 ## Dev environment
 
-Follow [SETUP.md](SETUP.md). In short: Python 3.14 venv +
-`requirements-dev.txt`, Node ≥ 20 for `web/ui`, and optionally one configured
-model provider for end-to-end AI runs. The desktop shell targets Windows;
-the engine and frontend build also work on Linux/macOS for development.
+Follow [SETUP.md](SETUP.md). In short: Python 3.14 venv with
+`requirements-dev.txt`, Node 22 LTS (22.12+ recommended; Vite 7 supports
+20.19+/22.12+) for `web/ui`, and optionally a configured provider for an
+explicit live run. The desktop shell targets Windows and runs from source on
+Linux; macOS desktop support is not claimed.
 
 ## Verify your change
 
 Every change should pass the following before a PR:
 
 ```bash
-cd web/ui && npm run typecheck && npm run build && cd ../..
-python -m pytest -q
+(cd web/ui && npm run typecheck && npm run build)
+.venv/bin/python -m pytest -q
 ```
+
+On Windows PowerShell use `.\.venv\Scripts\python.exe -m pytest -q`; run the
+frontend commands from `web/ui` (`npm run typecheck`, then `npm run build`).
 
 - **UI changes** additionally need a visual check:
   `node tools/webshot.mjs` renders the mock-bridge UI in real Chromium and
   writes `.uishots/*.png` (Monaco/xterm included). UI work is not "done"
   until the screenshots have been looked at. For the real app use
-  `python shell.py --dev`.
-- **Bridge/engine changes:** `python -m pytest tests/test_bridge.py -q` runs
+  `.venv/bin/python shell.py --dev` on Linux, or
+   `.\.venv\Scripts\python.exe shell.py --dev` on Windows.
+- **Bridge/engine changes:** `.venv/bin/python -m pytest tests/test_bridge.py -q` runs
   the contract tests without a webview.
-- CI runs the same typecheck/build and pytest on every push and PR (Ubuntu for
-  the frontend build and the suite, plus a Windows pytest job), and a gitleaks
-  secret scan. **A green CI is not platform acceptance** — in particular the
+- Documentation links can be checked with `.venv/bin/python tools/check_repo_hygiene.py`
+  (or the Windows venv interpreter). The checker uses Git's tracked-file index:
+  stage intended new documentation files first. It validates local file and
+  directory targets, not remote URLs or Markdown anchors.
+- The verification workflow builds/typechecks the frontend and runs Python tests on Ubuntu,
+  runs the Windows collected-test suite in eight shards, and scans full Git
+  history for secrets, with a separate local documentation-link check.
+  **A green CI is not platform acceptance** — in particular the
   Windows job is not a demonstration that the evidence fingerprint works
   natively on Windows; see the known limitation in
   [SECURITY.md](../SECURITY.md).
   Linux runs the complete suite in one process. Windows partitions the collected
-  tests into eight deterministic shards; every collected test belongs to exactly
+  tests into eight deterministic collected-test shards; every collected test belongs to exactly
   one shard. Local runs without shard options still run the complete suite. To
   reproduce one shard:
 
   ```bash
-  python -m pytest --ci-shard-index=0 --ci-shard-count=8
+  .venv/bin/python -m pytest --ci-shard-index=0 --ci-shard-count=8
   ```
-- **The default suite makes no network calls.** Model and backend tests use
+- **The default suite makes no external provider calls.** Some integration
+  fixtures use owned loopback sockets and local child processes. Model and backend tests use
   fakes and injected transports; the decision layer's optional real-SDK tests
   run the actual `typesafe-sdk` client against an in-process
   `httpx2.MockTransport` (still no network) and skip themselves when the SDK
@@ -76,7 +87,7 @@ python -m pytest -q
   quota:
 
   ```bash
-  IMECE_RUN_LIVE_API_TESTS=1 python -m pytest -q
+  IMECE_RUN_LIVE_API_TESTS=1 .venv/bin/python -m pytest -q
   ```
 
   Leave that variable unset for normal work and in CI.
@@ -89,7 +100,7 @@ python -m pytest -q
   the OS and tool versions.
 - **On Linux**, a `PYTHONPATH` exported by an unrelated toolchain (e.g. ROS)
   can break pytest's plugin loading; run the suite as
-  `env -u PYTHONPATH QT_QPA_PLATFORM=offscreen PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q`
+  `env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q`
   (see [SETUP.md](SETUP.md#pre-set-pythonpath-from-another-toolchain-breaks-pytest)).
 
 ## Documentation rule

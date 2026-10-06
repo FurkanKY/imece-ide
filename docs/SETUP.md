@@ -11,25 +11,26 @@ supported way to use it — prebuilt binaries are not published yet (see
 | Windows | 10/11 — the desktop shell targets Windows first (ConPTY terminal, DPAPI key store); packaging (prebuilt binaries) is Windows-only |
 | Linux | also supported from source (real PTY terminal via `ptyprocess`, `.env`-based key storage — no DPAPI); no packaged build yet |
 | Python | 3.14 (what CI and packaging use; PySide6 ≥ 6.11.1 requires a recent Python) |
-| Node.js | ≥ 20, for building the frontend |
-| Claude Code CLI | optional — `claude --version` must work; a Pro/Max subscription is enough, no API key needed |
-| DeepSeek API key | optional — https://platform.deepseek.com → API Keys |
-| Gemini API key | optional — https://aistudio.google.com/apikey |
+| Node.js | Node 22 LTS, 22.12+ recommended, for building the frontend (Vite 7 supports Node 20.19+ or 22.12+) |
+| Git | installed on `PATH`; isolated agent runs require a Git project |
+| Provider / agent CLI | optional for setup and offline verification; configure one only to make an AI run |
 
-At least one provider (Claude CLI, DeepSeek or Gemini) must be configured for
-AI runs; everything else in the IDE works without any keys.
+No provider credentials are needed to install, build or run the offline tests.
+An AI run requires a compatible configured provider or installed agent CLI.
 
 ## 2. Python dependencies
 
-```bash
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
+**Windows PowerShell**, from the repository root:
+
+```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-On Linux, use `python3` and the POSIX venv layout instead:
+**Linux Bash**, from the repository root:
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
@@ -41,11 +42,13 @@ not part of `requirements.txt`. Install it only if you want to opt in to
 Settings → Karar katmanı → **Jev (TypeSafe)**:
 
 ```bash
-# Linux / macOS (source venv)
+# Linux (source venv)
 .venv/bin/python -m pip install -r requirements-jev.txt
+```
 
+```powershell
 # Windows PowerShell
-.venv\Scripts\python -m pip install -r requirements-jev.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-jev.txt
 ```
 
 Its key (`TYPESAFE_API_KEY`) is entered in Settings → **Karar sağlayıcısı**
@@ -69,15 +72,22 @@ install.
 The UI lives in `web/ui/` and is built with Vite (Monaco, xterm and all other
 web dependencies come from npm):
 
-```bash
-cd web/ui
+```powershell
+Push-Location web/ui
 npm ci            # first time (or npm install)
 npm run build     # → web/ui/dist  (python shell.py serves this via app://)
+Pop-Location
+```
+
+Linux Bash equivalent (also from repository root):
+
+```bash
+(cd web/ui && npm ci && npm run build)
 ```
 
 Development loop: `npm run dev` (HMR; the same UI runs in a plain browser with
-a mock bridge) plus `python shell.py --dev` (the real bridge inside the
-embedded window). Visual verification: `node tools/webshot.mjs` →
+a mock bridge) plus `.\.venv\Scripts\python.exe shell.py --dev` on Windows or
+`.venv/bin/python shell.py --dev` on Linux, from the repository root. Visual verification: `node tools/webshot.mjs` →
 `.uishots/*.png`.
 
 ## 4. Providers and API keys
@@ -124,26 +134,44 @@ separate "decision provider" (`TYPESAFE_API_KEY`), it never appears in the
 Planner/Coder/Reviewer provider lists, and the optional SDK it needs is
 installed separately (see §2 and [DECISION-LAYER.md](DECISION-LAYER.md)).
 
-## 5. Verify
+## 5. Offline verification
+
+Run the default suite first; it uses fakes/in-process transports and does not
+call provider services:
 
 ```bash
-python -c "from dotenv import load_dotenv; load_dotenv(); \
-from adapters import call_deepseek, call_gemini; \
-print(call_deepseek('Short answer.', 'one word: test')); \
-print(call_gemini('Short answer.', 'one word: test'))"
+.venv/bin/python -m pytest -q
 ```
 
-To test Claude separately:
+On Windows PowerShell use:
 
-```bash
-python -c "from adapters import call_claude; print(call_claude('Short answer.', '2+2?'))"
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Then run the test suite and the app:
+Launch the desktop app from the repository root after building the frontend:
+
+```powershell
+.\.venv\Scripts\python.exe shell.py
+```
 
 ```bash
-python -m pytest -q
-python shell.py
+.venv/bin/python shell.py
+```
+
+### Optional provider smoke checks
+
+These examples make real network requests, disclose the prompt to the selected
+provider and may consume quota. They are **not** required for setup or normal
+verification. First configure credentials locally as described above; never
+paste keys into commands or issues.
+
+```bash
+.venv/bin/python -c "from dotenv import load_dotenv; load_dotenv(); from adapters import call_deepseek; print(call_deepseek('Short answer.', 'one word: test'))"
+```
+
+```powershell
+.\.venv\Scripts\python.exe -c "from dotenv import load_dotenv; load_dotenv(); from adapters import call_deepseek; print(call_deepseek('Short answer.', 'one word: test'))"
 ```
 
 ---
@@ -188,9 +216,9 @@ request.
 Running from source works the same way as on Windows, with POSIX paths:
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-cd web/ui && npm ci && npm run build && cd ../..
+(cd web/ui && npm ci && npm run build)
 .venv/bin/python shell.py
 ```
 

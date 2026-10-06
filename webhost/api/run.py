@@ -66,7 +66,7 @@ from agent_execution_runtime import (
 )
 from context_runtime import load_project_rules
 from webhost import state
-from webhost.api.activity import ActivityStreamer
+from webhost.api.activity import ActivityStreamer, start_activity_streamer
 from webhost.bridge import handler, BridgeError
 
 try:
@@ -1635,8 +1635,7 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
     try:
         _stop_activity_streamer()
         streamer = ActivityStreamer(runtime, run_id, after_seq=activity_after_seq)
-        streamer.activity.connect(lambda item: bridge.emit_event("run.activity", item))
-        streamer.start()
+        start_activity_streamer(streamer, lambda item: bridge.emit_event("run.activity", item))
         _active["activity_streamer"] = streamer
     except Exception:
         try:
@@ -1880,9 +1879,8 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     def on_activity(item: dict) -> None:
         bridge.emit_event("run.activity", item)
 
-    streamer.activity.connect(on_activity)
+    start_activity_streamer(streamer, on_activity)
     _active["activity_streamer"] = streamer
-    streamer.start()
 
     return worker
 

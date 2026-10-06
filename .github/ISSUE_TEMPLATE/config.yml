@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and community discussion
+    url: https://github.com/FurkanKY/imece-ide/discussions
+    about: Ask setup questions or discuss ideas.
+  - name: Report a security vulnerability privately
+    url: https://github.com/FurkanKY/imece-ide/security/advisories/new
+    about: Do not report vulnerabilities in public issues or discussions.

@@ -194,6 +194,18 @@ def _all_native_routing():
     return {"planner": "gemini", "coder": "deepseek", "reviewer": "openai"}
 
 
+def _has_required_activity_projection(events, run_id):
+    activity = _activity_payloads(events, run_id)
+    roles_seen = {item["role"] for item in activity}
+    write_items = [item for item in activity if "Düzenlendi: a.txt" in item["title"]]
+    check_items = [item for item in activity if item["kind"] == "check"]
+    return (
+        {"planner", "worker", "reviewer", "verification"} <= roles_seen
+        and bool(write_items) and write_items[-1]["status"] == "ok"
+        and bool(check_items) and check_items[-1]["status"] in {"ok", "error"}
+    )
+
+
 def _drive_run(bridge, qapp, monkeypatch, ports_factory, task="a.txt'yi düzelt"):
     monkeypatch.setattr(engine_factory, "build_pipeline_ports", ports_factory)
     events = []
@@ -206,16 +218,45 @@ def _drive_run(bridge, qapp, monkeypatch, ports_factory, task="a.txt'yi düzelt"
         return any(e["channel"] == "run.finished" for e in events)
 
     assert _wait_until(is_finished, qapp), f"run.finished gelmedi; toplanan olaylar: {events}"
-    # Streamer'ın son drain'i (kapalı olsa bile) ana thread'e kuyruklu
-    # bağlantıyla ulaşır -- birkaç ek processEvents() turu bunu akıtır.
-    for _ in range(20):
-        qapp.processEvents()
-        time.sleep(0.01)
+    # run.finished can precede queued delivery of the streamer's final drain.
+    # Keep pumping Qt until the exact projection asserted below is observable.
+    assert _wait_until(lambda: _has_required_activity_projection(events, run_id), qapp), (
+        f"Gerekli run.activity izdüşümü gelmedi; toplanan olaylar: {events}"
+    )
     return run_id, events
 
 
 def _activity_payloads(events, run_id):
     return [e["payload"] for e in events if e["channel"] == "run.activity" and e["payload"].get("runId") == run_id]
+
+
+def test_wait_for_required_projection_until_queued_activity_arrives():
+    events = [{"channel": "run.finished"}]
+
+    class DelayedQueue:
+        rounds = 0
+
+        def processEvents(self):
+            self.rounds += 1
+            # Beyond the old twenty settling rounds: a bounded observable
+            # wait must keep pumping rather than assert on partial delivery.
+            if self.rounds == 45:
+                items = [
+                    {"role": role, "kind": "stage", "title": "stage", "status": "ok"}
+                    for role in ("planner", "worker", "reviewer", "verification")
+                ]
+                items.extend([
+                    {"role": "worker", "kind": "tool", "title": "Düzenlendi: a.txt", "status": "ok"},
+                    {"role": "verification", "kind": "check", "title": "check", "status": "ok"},
+                ])
+                events.extend(
+                    {"channel": "run.activity", "payload": {**item, "runId": "run-1"}}
+                    for item in items
+                )
+
+    queue = DelayedQueue()
+    assert _wait_until(lambda: _has_required_activity_projection(events, "run-1"), queue)
+    assert queue.rounds == 45
 
 
 def test_run_activity_emitted_during_pipeline_run(bridge, qapp, monkeypatch, git_repo):

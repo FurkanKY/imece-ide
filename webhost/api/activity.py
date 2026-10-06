@@ -19,12 +19,55 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from run_runtime.activity_projection import project_event
 from run_runtime.service import RunRuntime
 
 DEFAULT_MAX_ITEMS_PER_SECOND = 20
+
+_activity_deliveries: set["_ActivityDelivery"] = set()
+
+
+class _ActivityDelivery(QObject):
+    """Own a streamer until its queued final activity has reached the host.
+
+    Activity and finished are delivered to this same main-thread QObject.
+    Qt preserves their order for a given sender/receiver pair, so handling
+    finished is the safe point to release the sender and its pending signals.
+    """
+
+    def __init__(self, streamer: "ActivityStreamer", on_activity) -> None:
+        super().__init__()
+        self._streamer = streamer
+        self._on_activity = on_activity
+        streamer.activity.connect(self._deliver)
+        streamer.finished.connect(self._finished)
+
+    @Slot(dict)
+    def _deliver(self, item: dict) -> None:
+        self._on_activity(item)
+
+    @Slot()
+    def _finished(self) -> None:
+        self._streamer = None
+        self._on_activity = None
+        _activity_deliveries.discard(self)
+        self.deleteLater()
+
+
+def start_activity_streamer(streamer: "ActivityStreamer", on_activity) -> None:
+    """Start a streamer and retain it through delivery of its final signals."""
+    delivery = _ActivityDelivery(streamer, on_activity)
+    _activity_deliveries.add(delivery)
+    try:
+        streamer.start()
+    except Exception:
+        _activity_deliveries.discard(delivery)
+        delivery._streamer = None
+        delivery._on_activity = None
+        delivery.deleteLater()
+        raise
 
 
 class ActivityStreamer(QThread):
