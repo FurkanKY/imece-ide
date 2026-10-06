@@ -184,14 +184,14 @@ export type BackendRunStatus = "created" | "queued" | "running" | "waiting_user"
 export interface RunListItem {
   runId: string; taskId: string; task: string; status: BackendRunStatus; phase: string;
   providerId: string; engine: "agent"; changedPathCount: number | null; errorCode: string | null;
-  readOnly?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean;
+  readOnly?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean; retryAvailable?: boolean;
 }
 export interface RunDetails {
   runId: string; task: string; providerId: string; status: BackendRunStatus; phase: string;
   engine: "agent"; evidence: Record<string, unknown> | null; proposals: Proposal[];
   totals: { latency_s: number | null; tokens: number | null; cost_usd: number | null };
   errorCode: string | null; checkpointId: string | null;
-  readOnly?: boolean; historyTruncated?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean;
+  readOnly?: boolean; historyTruncated?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean; retryAvailable?: boolean;
 }
 
 // ---- İstek/yanıt yüzeyi ----
@@ -276,7 +276,7 @@ export interface Api {
       forward-slash yollar (dosya veya klasör); en fazla 10. Sunucu bunları
       Project._safe ile bağımsızca doğrular — mevcut olmayan/proje dışına
       çıkan bir yol sessizce düşürülür ve bir "info" olayıyla bildirilir. */
-  "run.start": { params: { task: string; providerId: string; mentions?: string[]; collabApprovalHandle?: never } | { task: string; routing: Routing; mentions?: string[]; collabApprovalHandle?: string }; result: { runId: string } };
+  "run.start": { params: { task: string; providerId: string; mentions?: string[]; collabApprovalHandle?: never } | { task: string; routing: Routing; mentions?: string[]; collabApprovalHandle?: string } | { retryOfRunId: string }; result: { runId: string } };
   "run.list": { params: {}; result: { runs: RunListItem[]; historyUnavailable?: boolean } };
   "run.get": { params: { runId: string }; result: RunDetails };
   "run.cancel": { params: { runId: string }; result: {} };

@@ -8,6 +8,8 @@ MAX_HISTORY_RUNS = 32
 MAX_HISTORY_EVENTS = 2_000
 EVENT_PAGE = 200
 MAX_TASK_CHARS = 8_000
+MAX_RETRY_TASK_CHARS = 20_000
+MAX_TASK_RUN_SCAN = 129
 
 
 def _bounded_task(prompt: str) -> tuple[str, bool]:
@@ -82,8 +84,79 @@ def list_history(runtime, project_root: str, *, limit: int = MAX_HISTORY_RUNS) -
             "changedPathCount": None, "errorCode": run.error_code,
             "readOnly": True, "createdAt": run.created_at.isoformat(),
             "lastEventSeq": run.last_event_seq, "taskTruncated": task_truncated,
+            "retryAvailable": retry_availability(runtime, project_root, run.run_id),
         })
     return result[:min(max(limit, 0), MAX_HISTORY_RUNS)]
+
+
+def retry_source(runtime, project_root: str, run_id: str) -> dict | None:
+    """Return canonical retry inputs only for terminal native-agent executions."""
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    try:
+        run = runtime.get_run(run_id)
+        if not _is_native_agent(run) or run.status.value not in {
+            "failed", "cancelled",
+        }:
+            return None
+        events, truncated = _events(runtime, run_id)
+        if truncated or not events or events[-1].type not in {
+            "run.failed", "run.cancelled",
+        }:
+            return None
+        if any(event.type in {
+            "proposal.ready", "proposal.applied", "proposal.rejected", "checkpoint.restored",
+            "run.resumed", "run.waiting_user",
+        } for event in events):
+            # Applying/rejecting evidence or retaining a proposal/worktree is
+            # not an exhausted attempt; retry must never recreate that authority.
+            return None
+        # Retry only from the latest known attempt; otherwise the chain could
+        # fork and make attempt numbering ambiguous. First attempts must be 1.
+        if run.attempt < 1 or (run.retry_of_run_id is None and run.attempt != 1):
+            return None
+        # A capped query must contain the complete chain, otherwise latest-attempt
+        # and sibling status cannot be established safely.
+        attempts = runtime.store.list_runs(task_id=run.task_id, limit=MAX_TASK_RUN_SCAN)
+        if (len(attempts) >= MAX_TASK_RUN_SCAN or len(attempts) != run.attempt
+                or any(item.task_id != run.task_id for item in attempts)):
+            return None
+        by_id = {item.run_id: item for item in attempts}
+        if len(by_id) != len(attempts) or run_id not in by_id:
+            return None
+        ordered = sorted(attempts, key=lambda item: item.attempt)
+        if any(item.attempt != index + 1 for index, item in enumerate(ordered)):
+            return None
+        if any(item.attempt > run.attempt for item in attempts):
+            return None
+        providers = {item.routing.get("agent_provider") for item in attempts
+                     if isinstance(item.routing, dict)}
+        if len(providers) != 1 or providers != {run.routing.get("agent_provider")}:
+            return None
+        if any(item.status.value not in {"failed", "cancelled"}
+               for item in attempts):
+            return None
+        for index, item in enumerate(ordered):
+            expected_parent = ordered[index - 1].run_id if index else None
+            if item.retry_of_run_id != expected_parent or not _is_native_agent(item):
+                return None
+        task = runtime.store.get_task(run.task_id)
+        if task.project_root != project_root or len(task.prompt) > MAX_RETRY_TASK_CHARS:
+            return None
+        return {
+            "taskId": task.task_id,
+            "task": task.prompt,
+            "providerId": run.routing["agent_provider"],
+            "attempt": run.attempt,
+            "taskTruncated": False,
+        }
+    except Exception:
+        return None
+
+
+def retry_availability(runtime, project_root: str, run_id: str) -> bool:
+    """Bounded eligibility projection; never returns or copies the prompt."""
+    return retry_source(runtime, project_root, run_id) is not None
 
 
 def get_history(runtime, project_root: str, run_id: str) -> dict | None:
@@ -108,4 +181,5 @@ def get_history(runtime, project_root: str, run_id: str) -> dict | None:
         "errorCode": run.error_code, "checkpointId": None, "readOnly": True,
         "historyTruncated": truncated, "createdAt": run.created_at.isoformat(),
         "lastEventSeq": run.last_event_seq, "taskTruncated": task_truncated,
+        "retryAvailable": retry_availability(runtime, project_root, run.run_id),
     }

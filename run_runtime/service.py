@@ -77,6 +77,15 @@ class RunRuntime:
             created_at=created_at,
         )
 
+    def create_retry_run(
+        self, *, source_run_id: str, project_root: str, run_id: str | None = None,
+        expected_prompt: str | None = None, expected_provider_id: str | None = None,
+    ) -> RunRecord:
+        return self._store.create_retry_run(
+            source_run_id=source_run_id, project_root=project_root, run_id=run_id,
+            expected_prompt=expected_prompt, expected_provider_id=expected_provider_id,
+        )
+
     def get_run(self, run_id: str) -> RunRecord:
         return self._store.get_run(run_id)
 

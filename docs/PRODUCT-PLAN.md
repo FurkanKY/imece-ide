@@ -131,16 +131,22 @@ What the implemented default flow actually does:
 - The current bounded slice is **read-only historical reopening** of persisted
   native-agent task/result records after restart. This is in development; it
   does not restore an owned worker or authorize historical proposals.
-- Safe continuation, durable pending-worktree adoption, and re-run while
-  preserving task identity are **unfinished**.
+- **Safe continuation, durable pending-worktree adoption, and verified
+  CombinedCandidate integration with rollback remain unfinished.**
 - The `m3-task-history` development branch reopens bounded native-agent history
-  from the existing SQLite store. It does not adopt a worker or worktree, retry
-  an execution, or make a historical proposal/checkpoint actionable. Copying a
-  prior task creates a new draft only; it does not automatically start a run.
-- Reopening the same database in fixtures and controlled browser history
-  responses are tested separately. Neither substitutes for native desktop
-  restart or actual-provider acceptance. The focused browser check is
-  `node scripts/run-history-acceptance.mjs` from `web/ui`.
+  from the existing SQLite store. Its bounded retry slice explicitly reruns
+  only a latest failed/cancelled attempt in the same task/provider chain, using
+  the canonical prompt, a new RunID/attempt, and a fresh isolated workspace.
+  SQLite transaction checks serialize concurrent retry admission. Retry does
+  not transfer proposals, checkpoints, credentials, mentions, or worktree
+  authority; active, interrupted, malformed, changed-provider, and otherwise
+  ineligible histories fail closed. Copying an older task still creates a new
+  draft without automatically starting a run.
+- Same-database restart fixtures, independent-connection retry races, and
+  controlled browser history/retry responses are tested separately. Neither
+  substitutes for native desktop restart or actual-provider acceptance. The
+  focused checks are `node scripts/run-history-acceptance.mjs` and
+  `node scripts/run-retry-acceptance.mjs` from `web/ui`.
 - A **verified CombinedCandidate** is integrated through an explicit,
   controlled decision path with **rollback**.
 - M3 acceptance remains open: close the app mid-task, safely continue the task,

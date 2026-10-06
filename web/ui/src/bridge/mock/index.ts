@@ -695,6 +695,9 @@ export class MockBridge implements Bridge {
       }
       case "run.start": {
         const startParams = params as Api["run.start"]["params"];
+        if ("retryOfRunId" in startParams) {
+          throw new BridgeError("retry_unavailable", "MOCK: kalıcı geçmişten yeniden çalıştırma desteklenmiyor.");
+        }
         if ("providerId" in startParams) {
           if (startParams.collabApprovalHandle) throw new BridgeError("invalid_params", "MOCK: tek ajan akışında ortak bağlam desteklenmiyor.");
           if (this.activeAgentRuns() >= 2) throw new BridgeError("run_capacity", "MOCK: en fazla iki ajan koşusu aynı anda etkin olabilir.");

@@ -60,7 +60,7 @@ from agents import DEFAULT_ROUTING
 from run_runtime.events import RunEventType
 from run_runtime.legacy import LegacyRunCoordinator
 from run_runtime.pipeline import CanonicalPipelineRecorder
-from run_runtime.models import RunStatus
+from run_runtime.models import RunStatus, new_run_id
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_execution_runtime import (
     AgentExecutionRequest, AgentExecutionStatus, AgentRunCoordinator, build_agent_ports, execute_task,
@@ -69,8 +69,9 @@ from context_runtime import load_project_rules
 from webhost import state
 from webhost.api.activity import ActivityStreamer, start_activity_streamer
 from webhost.bridge import handler, BridgeError
+from run_runtime.errors import RunStoreError
 from webhost.run_registry import RunSlot, registry as _run_registry
-from webhost.run_history import get_history, list_history
+from webhost.run_history import get_history, list_history, retry_source, retry_availability
 
 try:
     from pipeline_runtime import PipelineRunner, PipelineStatus
@@ -990,7 +991,8 @@ def _list_runs(params, ctx):
                       "errorCode": slot.error_code})
     live_ids = {item["runId"] for item in items}
     try:
-        history = list_history(state.get_run_runtime(), root)
+        runtime = state.get_run_runtime()
+        history = list_history(runtime, root)
         history_unavailable = False
     except Exception:
         history = []
@@ -1199,14 +1201,21 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=
 
 @handler("run.start")
 def _start(params, ctx):
+    if not isinstance(params, dict):
+        raise BridgeError("invalid_params", "Koşu isteğinin alanları geçersiz.")
     proj = _require_project()
-    agent_mode = "providerId" in params
+    agent_mode = "providerId" in params or "retryOfRunId" in params
     collab_requested = "collabApprovalHandle" in params
     collab_handle = params.get("collabApprovalHandle") if collab_requested else None
     if collab_requested and (type(collab_handle) is not str or not collab_handle):
         raise BridgeError("collab_invalid", "Yerel işbirliği onayı geçersiz.")
     task = (params.get("task") or "").strip()
-    if not task:
+    retry_run_id = params.get("retryOfRunId")
+    if "retryOfRunId" in params:
+        if (type(retry_run_id) is not str or not retry_run_id
+                or set(params) != {"retryOfRunId"}):
+            raise BridgeError("invalid_retry", "Yeniden deneme isteği yalnızca kaynak koşu kimliği içerebilir.")
+    if not task and retry_run_id is None:
         raise BridgeError("empty_task", "Görev boş.")
     _drain_collaboration_resources()
     if any(item[1] is not None and
@@ -1231,11 +1240,25 @@ def _start(params, ctx):
             raise BridgeError("workspace_cleanup_failed", "Tek ajan çalışma alanı güvenle kapatılamadı.")
 
     # Explicit provider mode bypasses all legacy routing and three-role setup.
-    if "providerId" in params:
-        provider_id = params.get("providerId")
+    if "providerId" in params or retry_run_id is not None:
+        retry = None
+        if retry_run_id is not None:
+            project_root = str(Path(proj.root).resolve())
+            retry = retry_source(
+                state.get_run_runtime(), project_root, retry_run_id,
+            )
+            if retry is None:
+                raise BridgeError("retry_unavailable", "Bu geçmiş koşu güvenle yeniden başlatılamıyor.")
+            task = retry["task"]
+            provider_id = retry["providerId"]
+            owned_source = _run_registry.get(retry_run_id)
+            if owned_source is not None:
+                raise BridgeError("retry_unavailable", "Koşu bu süreçte sahiplenilmiş; yeniden deneme güvenli değil.")
+        else:
+            provider_id = params.get("providerId")
         if type(provider_id) is not str or not provider_id or len(provider_id) > 128:
             raise BridgeError("invalid_provider", "Sağlayıcı geçersiz.")
-        if "routing" in params or any(k in params for k in ("planner", "coder", "reviewer")):
+        if retry is None and ("routing" in params or any(k in params for k in ("planner", "coder", "reviewer"))):
             raise BridgeError("conflicting_routing", "Sağlayıcı modu diğer yönlendirmelerle kullanılamaz.")
         if collab_requested:
             raise BridgeError("collab_unsupported", "Tek ajan koşuları yerel işbirliğini desteklemiyor.")
@@ -1246,27 +1269,55 @@ def _start(params, ctx):
             raise BridgeError("agent_requires_git", "Tek ajan koşusu için Git deposu gerekir.")
         if len(task) > 20_000:
             raise BridgeError("task_too_long", "Görev çok uzun.")
-        mentions, invalid_mentions = _validate_mentions(proj, params.get("mentions") or [])
+        mentions, invalid_mentions = _validate_mentions(
+            proj, [] if retry is not None else (params.get("mentions") or [])
+        )
         project_root = str(Path(proj.root).resolve())
         if not _run_registry.reserve(project_root):
             raise BridgeError("run_capacity", "Bu proje için en fazla iki ajan koşusu tutulabilir.")
         coordinator = None
-        try:
-            runtime = state.get_run_runtime()
-            coordinator = AgentRunCoordinator.start(
-                runtime, project_root=proj.root, task=task, provider_id=provider_id,
-            )
-        except Exception:
-            _run_registry.release(project_root)
-            raise
-        run_id = coordinator.run_id
         workspace = None
         try:
-            workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
+            runtime = state.get_run_runtime()
+            planned_run_id = new_run_id() if retry is not None else None
+            if retry is not None:
+                workspace = engine_factory.create_pipeline_workspace(proj.root, planned_run_id)
+            coordinator = AgentRunCoordinator.start(
+                runtime, project_root=project_root, task=task, provider_id=provider_id,
+                **({"retry_of_run_id": retry_run_id, "run_id": planned_run_id} if retry is not None else {}),
+            )
+        except Exception as exc:
+            _run_registry.release(project_root)
+            if workspace is not None:
+                try:
+                    workspace.dispose()
+                except Exception as cleanup_exc:
+                    if retry is not None:
+                        source_runtime = state.get_run_runtime()
+                        source_coordinator = LegacyRunCoordinator(
+                            source_runtime, task_id=retry["taskId"], run_id=retry_run_id,
+                            routing={"agent_provider": provider_id},
+                        )
+                        _run_registry.add(RunSlot(
+                            retry_run_id, retry["taskId"], project_root, provider_id,
+                            source_coordinator, workspace=workspace, task=task,
+                            phase="cleanup_failed", error_code="workspace_cleanup_failed",
+                        ))
+                        raise BridgeError("workspace_cleanup_failed", "Geçici worktree güvenle kapatılamadı.") from cleanup_exc
+                    raise BridgeError("workspace_cleanup_failed", "Geçici worktree güvenle kapatılamadı.") from cleanup_exc
+            if retry is not None:
+                if isinstance(exc, RunStoreError):
+                    raise BridgeError("retry_unavailable", "Geçmiş koşu artık güvenle yeniden başlatılamıyor.") from None
+                raise BridgeError("worker_start_failed", "Tek ajan çalışma alanı güvenle başlatılamadı.") from None
+            raise
+        run_id = coordinator.run_id
+        try:
+            if workspace is None:
+                workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
             ports = build_agent_ports(runtime, run_id, provider_id)
         except Exception:
-            _run_registry.release(project_root)
             if coordinator is not None:
+                _run_registry.release(project_root)
                 try:
                     coordinator.finish_failed("agent_worker_unavailable")
                 except Exception:
@@ -1281,6 +1332,11 @@ def _start(params, ctx):
                                            workspace=workspace, task=task, phase="cleanup_failed",
                                            error_code="workspace_cleanup_failed")
                         _run_registry.add(retained)
+            elif retry is not None and coordinator is not None:
+                record = coordinator.get_run()
+                retained = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
+                                   task=task, phase="failed", error_code="agent_worker_unavailable")
+                _run_registry.add(retained)
             raise BridgeError("worker_start_failed", "Tek ajan worker'ı başlatılamadı.") from None
         cancel_event = threading.Event()
         record = coordinator.get_run()

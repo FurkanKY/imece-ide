@@ -342,6 +342,85 @@ class RunStore:
             raise RunStoreError(f"Koşu oluşturulamadı: {exc}") from exc
         return record
 
+    def create_retry_run(
+        self, *, source_run_id: str, project_root: str, run_id: str | None = None,
+        expected_prompt: str | None = None, expected_provider_id: str | None = None,
+        created_at: datetime | None = None,
+    ) -> RunRecord:
+        """Atomically validate and append one retry to a terminal native-agent chain."""
+        if not isinstance(source_run_id, str) or not source_run_id:
+            raise RunStoreError("Retry kaynak koşu kimliği geçersiz.")
+        try:
+            with self._session() as conn, _transaction(conn, immediate=True):
+                source_rows = conn.execute(
+                    "SELECT r.*, t.project_root AS task_project_root, t.prompt AS task_prompt "
+                    "FROM runs r JOIN tasks t ON t.task_id=r.task_id WHERE r.run_id=?",
+                    (source_run_id,),
+                ).fetchall()
+                if len(source_rows) != 1:
+                    raise RunStoreError("Retry kaynağı bulunamadı.")
+                source = source_rows[0]
+                if not isinstance(source["task_prompt"], str):
+                    raise RunStoreError("Retry görev metni bozuk.")
+                if (expected_prompt is not None and source["task_prompt"] != expected_prompt):
+                    raise RunStoreError("Retry görev metni değişti.")
+                if source["task_project_root"] != project_root or len(source["task_prompt"]) > 20_000:
+                    raise RunStoreError("Retry görevi bu proje için geçersiz.")
+                rows = conn.execute(
+                    "SELECT r.*, t.project_root AS task_project_root, t.prompt AS task_prompt FROM runs r "
+                    "JOIN tasks t ON t.task_id=r.task_id WHERE r.task_id=? "
+                    "ORDER BY r.attempt LIMIT 129",
+                    (source["task_id"],),
+                ).fetchall()
+                if not rows or len(rows) >= 129 or len(rows) != source["attempt"]:
+                    raise RunStoreError("Retry geçmişi yok veya sınırı aşıyor.")
+                by_id = {row["run_id"]: row for row in rows}
+                source = by_id.get(source_run_id)
+                if source is None:
+                    raise RunStoreError("Retry kaynağı deneme zincirinde yok.")
+                ordered = sorted(rows, key=lambda row: row["attempt"])
+                if any(row["attempt"] != index + 1 for index, row in enumerate(ordered)):
+                    raise RunStoreError("Retry deneme zinciri geçersiz.")
+                providers = set()
+                for index, row in enumerate(ordered):
+                    try:
+                        routing = _decode_json_dict(row["routing_json"], field="routing_json")
+                    except _ROW_DECODE_ERRORS as exc:
+                        raise RunStoreError("Retry yönlendirmesi bozuk.") from exc
+                    provider = routing.get("agent_provider") if routing else None
+                    if type(provider) is not str or not 0 < len(provider) <= 128:
+                        raise RunStoreError("Retry sağlayıcısı geçersiz.")
+                    providers.add(provider)
+                    expected_parent = ordered[index - 1]["run_id"] if index else None
+                    if (row["retry_of_run_id"] != expected_parent or row["status"] not in
+                            {"failed", "cancelled"}):
+                        raise RunStoreError("Retry deneme zinciri etkin veya geçersiz.")
+                if (len(providers) != 1 or source["status"] not in {"failed", "cancelled"}
+                        or type(source["attempt"]) is not int or source["attempt"] < 1):
+                    raise RunStoreError("Retry kaynağı terminal değil veya sağlayıcı değişti.")
+                if expected_provider_id is not None and providers != {expected_provider_id}:
+                    raise RunStoreError("Retry sağlayıcısı değişti.")
+                if ordered[-1]["run_id"] != source_run_id:
+                    raise RunStoreError("Retry kaynağı artık son deneme değil.")
+                event_rows = conn.execute(
+                    "SELECT type FROM run_events WHERE run_id=? ORDER BY seq LIMIT 2001", (source_run_id,),
+                ).fetchall()
+                if (len(event_rows) > 2000 or not event_rows
+                        or event_rows[-1]["type"] not in {"run.failed", "run.cancelled"}
+                        or any(row["type"] in {"proposal.ready", "proposal.applied", "proposal.rejected",
+                                                "checkpoint.restored", "run.resumed", "run.waiting_user"}
+                               for row in event_rows)):
+                    raise RunStoreError("Retry kaynağı eski yetki veya geçersiz olay içeriyor.")
+                record = RunRecord.new(
+                    run_id=run_id or new_run_id(), task_id=source["task_id"],
+                    attempt=source["attempt"] + 1, retry_of_run_id=source_run_id,
+                    routing={"agent_provider": next(iter(providers))}, created_at=created_at,
+                )
+                _insert_run(conn, record)
+        except sqlite3.Error as exc:
+            raise RunStoreError(f"Retry koşusu oluşturulamadı: {exc}") from exc
+        return record
+
     def get_run(self, run_id: str) -> RunRecord:
         try:
             with self._session() as conn:

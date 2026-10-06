@@ -110,6 +110,8 @@ export interface RunSnapshot {
   historicalStatus?: string | null;
   historyTruncated?: boolean;
   taskTruncated?: boolean;
+  retryAvailable?: boolean;
+  authoritativeTask?: boolean;
 }
 
 /** F6 (@-mentions) — Composer'da @ ile pinlenen dosya/klasör; sadece bu
@@ -168,6 +170,7 @@ interface RunState {
   addMention: (path: string) => boolean;
   removeMention: (path: string) => void;
   start: () => Promise<void>;
+  retryHistory: (runId: string) => Promise<void>;
   cancel: () => Promise<void>;
   /** F2 (takip isteği): setFollowUpDraft ile yazılan metni run.followUp'a gönderir. */
   setFollowUpDraft: (text: string) => void;
@@ -332,7 +335,7 @@ export const useRun = create<RunState>((set, get) => ({
           engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [], diffs: [], proposals: [],
           agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "",
           error: item.errorCode, errorTitle: null, errorDescription: null, mentions: [], lastRestoredCheckpointId: null, uncertain: !item.readOnly, pending: false, readOnly: !!item.readOnly,
-          historicalStatus: item.readOnly ? item.status : null, historyTruncated: false, taskTruncated: !!item.taskTruncated };
+          historicalStatus: item.readOnly ? item.status : null, historyTruncated: false, taskTruncated: !!item.taskTruncated, retryAvailable: !!item.retryAvailable, authoritativeTask: item.taskTruncated ? false : undefined };
         set((s) => ({ runs: { ...s.runs, [item.runId]: placeholder } }));
       }
       const before = get().runs[item.runId];
@@ -346,13 +349,13 @@ export const useRun = create<RunState>((set, get) => ({
         const snapshot: RunSnapshot = { runId: item.runId, root: workspaceRoot, revision: 1,
           status: detail.readOnly ? "done" : detail.status === "running" || detail.status === "queued" ? "running" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" || detail.status === "waiting_user" ? "done" : "failed",
           runStage: detail.readOnly ? "history" : restored ? "restored" : detail.phase === "applied" ? "applied" : detail.phase === "rejected" ? "draft" : detail.status === "waiting_user" ? "ready" : detail.status === "running" || detail.status === "queued" ? "working" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" ? "noChanges" : "error",
-          task: before.task || detail.task, providerId: detail.providerId, engine: "agent", followUpDraft: before.followUpDraft, plan: before.plan,
+          task: detail.readOnly && detail.taskTruncated ? before.task : before.task || detail.task, providerId: detail.providerId, engine: "agent", followUpDraft: before.followUpDraft, plan: before.plan,
           stages: before.stages, flow: before.flow, diffs: detail.readOnly ? [] : detail.proposals.map((p) => ({ path: p.path, isNew: p.is_new, diff: p.diff, checked: before.diffs.find((d) => d.path === p.path)?.checked ?? true })),
           proposals: detail.readOnly ? [] : detail.proposals, agentEvidence: detail.readOnly ? evidence : restored || detail.phase === "rejected" ? null : evidence, checkpointId: detail.readOnly || restored ? null : detail.checkpointId, checkpointBusy: false,
           totals: detail.totals, verdict: before.verdict, verdictNote: before.verdictNote, error: detail.errorCode,
           errorTitle: before.errorTitle, errorDescription: before.errorDescription,
           mentions: before.mentions, lastRestoredCheckpointId: before.lastRestoredCheckpointId, uncertain: detail.readOnly ? false : detail.status === "unavailable", pending: false, readOnly: !!detail.readOnly,
-          historicalStatus: detail.readOnly ? detail.status : null, historyTruncated: !!detail.historyTruncated, taskTruncated: !!detail.taskTruncated };
+          historicalStatus: detail.readOnly ? detail.status : null, historyTruncated: !!detail.historyTruncated, taskTruncated: !!detail.taskTruncated, retryAvailable: !!detail.retryAvailable, authoritativeTask: detail.taskTruncated ? false : true };
         useRun.setState((s) => ({ runs: { ...s.runs, [item.runId]: { ...snapshot, revision: revision + 1 } }, ...(s.selectedRunId === item.runId ? projectSnapshot({ ...snapshot, revision: revision + 1 }) : {}) }));
       } catch { /* list remains usable if an individual detail lookup fails */ }
     }));
@@ -508,6 +511,49 @@ export const useRun = create<RunState>((set, get) => ({
       }
       startFlights = Math.max(0, startFlights - 1);
       pendingDraftStarts.delete(draftToken);
+      if (startFlights === 0) pendingAdmissionEvents.clear();
+    }
+  },
+
+  retryHistory: async (sourceRunId) => {
+    const record = get().runs[sourceRunId];
+    const capturedRoot = workspaceRoot;
+    const generation = workspaceGeneration;
+    if (!record?.readOnly || !record.retryAvailable || record.authoritativeTask === false || !capturedRoot || record.root !== capturedRoot || get().selectedRunId !== sourceRunId || startFlights > 0 || uncertainAdmissionRoots.has(capturedRoot)) return;
+    startFlights += 1;
+    let requestIssued = false;
+    const stale = () => workspaceRoot !== capturedRoot || workspaceGeneration !== generation;
+    try {
+      await trackWorkspace();
+      if (stale() || get().selectedRunId !== sourceRunId || get().runs[sourceRunId] !== record) return;
+      const [{ useDelivery }, { useCollaboration }, { useActivity }] = await Promise.all([
+        import("@/state/delivery"), import("@/state/collaboration"), import("@/state/activity"),
+      ]);
+      if (useDelivery.getState().busy || useCollaboration.getState().enabled || stale()
+          || get().selectedRunId !== sourceRunId || get().runs[sourceRunId] !== record) return;
+      requestIssued = true;
+      const { runId } = await bridge.call("run.start", { retryOfRunId: sourceRunId });
+      if (stale()) return;
+      const snapshot: RunSnapshot = { runId, root: capturedRoot, revision: 1, status: "running", runStage: "working", task: record.task, providerId: record.providerId, engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [{ id: flowId++, kind: "task", text: record.task }], diffs: [], proposals: [], agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "", error: null, errorTitle: null, errorDescription: null, mentions: [], lastRestoredCheckpointId: null, uncertain: false, pending: false, readOnly: false };
+      useRun.setState((s) => ({ runs: { ...s.runs, [runId]: snapshot }, ...(s.selectedRunId === sourceRunId && !stale() ? projectSnapshot(snapshot) : {}) }));
+      trimRunRecords();
+      const buffered = pendingAdmissionEvents.get(runId) ?? [];
+      pendingAdmissionEvents.delete(runId);
+      if (useRun.getState().selectedRunId === runId) useActivity.getState().reset(runId);
+      for (const message of buffered) {
+        if (stale()) return;
+        if (message.type === "event") routeRunEvent(runId, message.ev);
+        else if (message.type === "finished") routeRunFinished(message.payload);
+        else useActivity.getState().append(message.item);
+      }
+    } catch (error) {
+      if (requestIssued && !(error instanceof BridgeError)) {
+        uncertainAdmissionRoots.add(capturedRoot);
+        if (workspaceRoot === capturedRoot && workspaceGeneration === generation) set({ draftUncertain: true });
+      }
+      if (!stale()) toast.err(error instanceof Error ? error.message : "Görev yeniden başlatılamadı.");
+    } finally {
+      startFlights = Math.max(0, startFlights - 1);
       if (startFlights === 0) pendingAdmissionEvents.clear();
     }
   },

@@ -28,6 +28,7 @@ export function TaskWorkspace() {
   const setProviderId = useRun((s) => s.setProviderId);
   const selectRun = useRun((s) => s.selectRun);
   const refreshRuns = useRun((s) => s.refreshRuns);
+  const retryHistory = useRun((s) => s.retryHistory);
   const historyUnavailable = useRun((s) => s.historyUnavailable);
   const selectTask = (id: string) => {
     if (useRun.getState().selectedRunId !== id && useEditor.getState().diff) useEditor.getState().closeDiff();
@@ -103,7 +104,8 @@ export function TaskWorkspace() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {selectedRunId && runs[selectedRunId]?.readOnly && <div role="status" className="shrink-0 border-b border-warn/30 bg-warn/5 px-4 py-2 text-warn" style={{ fontSize: "var(--t-caption)" }}>
             Önceki oturumun kaydı; bu oturumda uygulanamaz/devam ettirilemez.
-            <Button className="ml-2" variant="secondary" size="sm" onClick={() => { const old = runs[selectedRunId]; if (!root || old.root !== root || useWorkspace.getState().root !== old.root || useRun.getState().selectedRunId !== old.runId) return; createDraft(); setTask(old.task); setProviderId(old.providerId); }}>Yeni görev taslağına taşı</Button>
+            {runs[selectedRunId]?.authoritativeTask !== false && <Button className="ml-2" variant="secondary" size="sm" onClick={() => { const old = runs[selectedRunId]; if (!root || old.root !== root || useWorkspace.getState().root !== old.root || useRun.getState().selectedRunId !== old.runId) return; createDraft(); setTask(old.task); setProviderId(old.providerId); }}>Yeni görev taslağına taşı</Button>}
+            {runs[selectedRunId]?.retryAvailable && <Button className="ml-2" variant="secondary" size="sm" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void retryHistory(selectedRunId); }} disabled={runs[selectedRunId]?.pending || runs[selectedRunId]?.uncertain}>Yeniden çalıştır</Button>}
           </div>}
           <div className="min-h-0 flex-1"><AiPanel embedded /></div>
         </div>

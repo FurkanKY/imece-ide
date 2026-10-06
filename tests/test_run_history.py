@@ -4,7 +4,7 @@ from run_runtime.events import RunEventType
 from run_runtime.events import RunEventSpec
 from run_runtime.service import RunRuntime
 from run_runtime.store import RunStore
-from webhost.run_history import get_history, list_history
+from webhost.run_history import get_history, list_history, retry_source
 
 import pytest
 
@@ -28,14 +28,103 @@ def test_history_survives_runtime_restart_and_excludes_other_run_kinds(tmp_path)
     assert len(rows) == 1
     assert rows[0]["taskId"] == task.task_id
     assert rows[0]["readOnly"] is True
+    assert rows[0]["retryAvailable"] is False
     assert detail["runId"] == run.run_id
     assert detail["task"] == "Inspect without changing files"
     assert detail["providerId"] == "provider-x"
     assert detail["evidence"]["execution_id"] == "exec-a"
     assert detail["proposals"] == []
     assert detail["checkpointId"] is None
+    assert detail["retryAvailable"] is False
     assert detail["totals"] == {"latency_s": None, "tokens": None, "cost_usd": None}
     assert get_history(reopened, str(tmp_path / "elsewhere"), run.run_id) is None
+
+
+def test_retry_source_is_bounded_terminal_same_provider_chain_and_keeps_full_prompt(tmp_path):
+    root = str(tmp_path.resolve())
+    runtime = RunRuntime(RunStore(tmp_path / "retry.sqlite3"))
+    prompt = "x" * 9_000
+    task = runtime.create_task(project_root=root, prompt=prompt)
+    first = runtime.create_run(task_id=task.task_id, routing={"agent_provider": "p"})
+    runtime.record(run_id=first.run_id, type=RunEventType.RUN_STARTED, payload={})
+    assert retry_source(runtime, root, first.run_id) is None
+    runtime.record(run_id=first.run_id, type=RunEventType.EXECUTION_STARTED,
+                   payload={"role": "worker"}, execution_id="exec-old")
+    runtime.record(run_id=first.run_id, type=RunEventType.PROPOSAL_READY,
+                   payload={"proposals": [{"path": "x", "new": "secret"}]})
+    runtime.record(run_id=first.run_id, type=RunEventType.RUN_FAILED, payload={"error_code": "failed"})
+    assert retry_source(runtime, root, first.run_id) is None  # old proposal authority
+
+    fresh = RunRuntime(RunStore(tmp_path / "retry-fresh.sqlite3"))
+    fresh_task = fresh.create_task(project_root=root, prompt=prompt)
+    failed = fresh.create_run(task_id=fresh_task.task_id, routing={"agent_provider": "p"})
+    fresh.record(run_id=failed.run_id, type=RunEventType.RUN_STARTED, payload={})
+    fresh.record(run_id=failed.run_id, type=RunEventType.EXECUTION_STARTED,
+                 payload={"role": "worker"}, execution_id="exec-failed")
+    fresh.record(run_id=failed.run_id, type=RunEventType.EXECUTION_FAILED,
+                 payload={}, execution_id="exec-failed")
+    fresh.record(run_id=failed.run_id, type=RunEventType.RUN_FAILED, payload={"error_code": "failed"})
+    assert retry_source(fresh, root, failed.run_id)["task"] == prompt
+    assert list_history(fresh, root)[0]["retryAvailable"] is True
+    assert get_history(fresh, root, failed.run_id)["retryAvailable"] is True
+
+    second = runtime.create_run(task_id=task.task_id, attempt=2, retry_of_run_id=first.run_id,
+                                routing={"agent_provider": "p"})
+    runtime.record(run_id=second.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record(run_id=second.run_id, type=RunEventType.EXECUTION_STARTED,
+                   payload={"role": "worker"}, execution_id="exec-2")
+    runtime.record(run_id=second.run_id, type=RunEventType.EXECUTION_FAILED,
+                   payload={}, execution_id="exec-2")
+    runtime.record(run_id=second.run_id, type=RunEventType.RUN_FAILED, payload={"error_code": "failed"})
+    assert retry_source(runtime, root, first.run_id) is None
+    assert retry_source(runtime, root, second.run_id)["attempt"] == 2
+    third = runtime.create_run(task_id=task.task_id, attempt=3, retry_of_run_id=second.run_id,
+                               routing={"agent_provider": "other"})
+    runtime.record(run_id=third.run_id, type=RunEventType.RUN_STARTED, payload={})
+    runtime.record(run_id=third.run_id, type=RunEventType.EXECUTION_STARTED,
+                   payload={"role": "worker"}, execution_id="exec-3")
+    runtime.record(run_id=third.run_id, type=RunEventType.EXECUTION_FAILED,
+                   payload={}, execution_id="exec-3")
+    runtime.record(run_id=third.run_id, type=RunEventType.RUN_FAILED, payload={"error_code": "failed"})
+    assert retry_source(runtime, root, third.run_id) is None
+    assert retry_source(runtime, str(tmp_path / "elsewhere"), second.run_id) is None
+
+
+def test_retry_source_rejects_interrupted_gapped_branched_and_overbound_history(tmp_path):
+    root = str(tmp_path.resolve())
+    interrupted = RunRuntime(RunStore(tmp_path / "interrupted.sqlite3"))
+    task = interrupted.create_task(project_root=root, prompt="task")
+    run = interrupted.create_run(task_id=task.task_id, routing={"agent_provider": "p"})
+    interrupted.record(run_id=run.run_id, type=RunEventType.RUN_INTERRUPTED, payload={})
+    assert retry_source(interrupted, root, run.run_id) is None
+
+    for name, attempts in (("gap", (1, 3)), ("duplicate", (1, 1)), ("branch", (1, 2, 2))):
+        runtime = RunRuntime(RunStore(tmp_path / f"{name}.sqlite3"))
+        task = runtime.create_task(project_root=root, prompt="task")
+        previous = None
+        created = []
+        for index, attempt in enumerate(attempts):
+            item = runtime.create_run(task_id=task.task_id, attempt=attempt,
+                retry_of_run_id=previous.run_id if attempt > 1 and index else None,
+                routing={"agent_provider": "p"})
+            runtime.record(run_id=item.run_id, type=RunEventType.RUN_STARTED, payload={})
+            runtime.record(run_id=item.run_id, type=RunEventType.EXECUTION_STARTED,
+                           payload={"role": "worker"}, execution_id=f"exec-{index}")
+            runtime.record(run_id=item.run_id, type=RunEventType.EXECUTION_FAILED,
+                           payload={}, execution_id=f"exec-{index}")
+            runtime.record(run_id=item.run_id, type=RunEventType.RUN_FAILED, payload={"error_code": "failed"})
+            created.append(item)
+            previous = item
+        assert retry_source(runtime, root, created[-1].run_id) is None
+
+    runtime = RunRuntime(RunStore(tmp_path / "bounded.sqlite3"))
+    task = runtime.create_task(project_root=root, prompt="task")
+    first = runtime.create_run(task_id=task.task_id, routing={"agent_provider": "p"})
+    runtime.record(run_id=first.run_id, type=RunEventType.RUN_FAILED, payload={"error_code": "failed"})
+    for attempt in range(2, 131):
+        runtime.create_run(task_id=task.task_id, attempt=attempt, retry_of_run_id=first.run_id,
+                           routing={"agent_provider": "p"})
+    assert retry_source(runtime, root, first.run_id) is None
 
 
 def test_history_suppresses_receipt_closed_by_rejection_or_resume(tmp_path):

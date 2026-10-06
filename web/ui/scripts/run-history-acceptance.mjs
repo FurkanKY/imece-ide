@@ -44,10 +44,10 @@ try {
         verification_id: "old-verification", plan_id: "old-plan", checks: [{ check_id: "old-check", status: "pass" }] },
     };
     const listed = [
-      { runId: "history-running", taskId: "task-old", task: "Original prior task", status: "running", phase: "executing", providerId: "agent-provider", engine: "agent", changedPathCount: null, errorCode: null, readOnly: true },
+      { runId: "history-running", taskId: "task-old", task: "Original prior task", status: "running", phase: "executing", providerId: "agent-provider", engine: "agent", changedPathCount: null, errorCode: null, readOnly: true, retryAvailable: false },
     ];
     const details = (runId) => ({ runId, taskId: "task-old", task: "Original prior task", providerId: "agent-provider",
-      status: "running", phase: "executing", engine: "agent", readOnly: true, evidence,
+      status: "running", phase: "executing", engine: "agent", readOnly: true, retryAvailable: false, evidence,
       proposals: [{ path: "must-not-appear.ts", new: "unsafe", diff: "unsafe", is_new: true }],
       totals: { latency_s: null, tokens: null, cost_usd: null }, errorCode: null, checkpointId: "unsafe-checkpoint" });
     const realCall = bridge.call.bind(bridge);
