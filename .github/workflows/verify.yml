@@ -25,6 +25,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - name: Verify isolated run state, mock concurrency, and task workspace
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+          M2_SCREENSHOT_DIR: ${{ runner.temp }}/imece-m2
+        run: |
+          node scripts/run-state-acceptance.mjs
+          node scripts/mock-runs-acceptance.mjs
+          node scripts/task-workspace-acceptance.mjs
 
   linux-python:
     runs-on: ubuntu-latest

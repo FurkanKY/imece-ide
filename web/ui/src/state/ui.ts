@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { bridge } from "@/bridge";
 
 export type SideView = "explorer" | "search" | "scm" | "debug";
+export type WorkspaceView = "tasks" | "tools";
 
 /** panel boyut sınırları (px) */
 export const PANEL_LIMITS = {
@@ -37,6 +38,8 @@ export interface LayoutState {
 }
 
 interface UiState extends LayoutState {
+  workspaceView: WorkspaceView;
+  setWorkspaceView: (view: WorkspaceView) => void;
   /** alt panel aktif görünümü: terminal sekmeleri mi F5 ÇIKTI'sı mı (P8.1) */
   bottomView: "terminal" | "output";
   setBottomView: (v: "terminal" | "output") => void;
@@ -79,8 +82,10 @@ interface UiState extends LayoutState {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export const useUi = create<UiState>((set) => ({
+  workspaceView: "tasks",
+  setWorkspaceView: (workspaceView) => set({ workspaceView }),
   sidebarVisible: true,
-  aiPanelVisible: true,
+  aiPanelVisible: false,
   bottomVisible: false,
   sideView: "explorer",
   sidebarWidth: PANEL_LIMITS.sidebar.def,
@@ -111,18 +116,23 @@ export const useUi = create<UiState>((set) => ({
     }),
   bottomView: "terminal",
   setBottomView: (v) => set({ bottomView: v }),
-  showBottom: (v) => set({ bottomView: v, bottomVisible: true }),
+  showBottom: (v) => set({ workspaceView: "tools", bottomView: v, bottomVisible: true }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   hideSidebar: () => set({ sidebarVisible: false }),
-  toggleAiPanel: () => set((s) => ({ aiPanelVisible: !s.aiPanelVisible })),
-  showAiPanel: () => set({ aiPanelVisible: true }),
+  toggleAiPanel: () => set((s) => ({ workspaceView: "tools", aiPanelVisible: !s.aiPanelVisible })),
+  showAiPanel: () => set({ workspaceView: "tools", aiPanelVisible: true }),
   hideAiPanel: () => set({ aiPanelVisible: false }),
   composerFocusNonce: 0,
-  focusComposer: () =>
-    set((s) => ({ aiPanelVisible: true, composerFocusNonce: s.composerFocusNonce + 1 })),
-  toggleBottom: () => set((s) => ({ bottomVisible: !s.bottomVisible })),
-  setSideView: (v) => set({ sideView: v }),
-  showSideView: (v) => set({ sideView: v, sidebarVisible: true }),
+  focusComposer: () => {
+    set((s) => ({ workspaceView: "tasks", aiPanelVisible: false, composerFocusNonce: s.composerFocusNonce + 1 }));
+    void import("@/state/run").then(({ useRun }) => {
+      const run = useRun.getState();
+      if (run.selectedRunId !== null && run.runStage !== "ready") run.newDraft();
+    });
+  },
+  toggleBottom: () => set((s) => ({ workspaceView: "tools", bottomVisible: s.workspaceView === "tasks" || !s.bottomVisible })),
+  setSideView: (v) => set({ sideView: v, workspaceView: "tools" }),
+  showSideView: (v) => set({ sideView: v, sidebarVisible: true, workspaceView: "tools" }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setSidebarWidth: (w) =>
     set({ sidebarWidth: clamp(w, PANEL_LIMITS.sidebar.min, PANEL_LIMITS.sidebar.max) }),

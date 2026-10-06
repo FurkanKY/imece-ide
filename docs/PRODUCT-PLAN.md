@@ -97,16 +97,17 @@ What the implemented default flow actually does:
   backend and historical record**. They are **not the default** and are not
   planned for v1.
 
-### M2 — Task-first main screen, real concurrency — **backend in development, UI pending**
+### M2 — Task-first main screen, real concurrency — **implemented on development branch; acceptance in progress**
 
 > **M1 is not closed, and its acceptance gate is not met — that has not
 > changed.** Real-provider and supported-platform validation was **deferred**,
 > because the provider/platform environments needed to run it were not
 > available. It stays a **tracked validation debt** and a **release gate before
 > M5**, and it is recorded as open, not waived. It **does not block M2**: M2 is
-> authorized now and is being worked on. The M2 **user-visible delivery is not
-> implemented yet**. Its backend registry is fixture-tested on the
-> `m2-run-manager` development branch; this is not a completed task-first UI.
+> authorized now and is being worked on. The `m2-run-manager` development
+> branch now has the task-first screen and run-indexed frontend, with local
+> fixture and browser-mock checks. It is **not merged into main** and is not
+> live-provider or native desktop-platform acceptance.
 
 - The main screen is a **task list**, not a role pipeline.
 - At least **two independent Executions run concurrently**, each in its own
@@ -117,8 +118,11 @@ What the implemented default flow actually does:
   ceiling of **two owned runs per project**, independent worktrees and
   cancellation, and explicit **cancel**, **continue**, **apply** and **reject**
   actions addressed by ID. Waiting proposals and retained cleanup resources
-  consume capacity too. The default frontend is **not yet connected to this
-  multi-run model**; backend fixtures are not M2 acceptance.
+  consume capacity too. The development-branch frontend addresses operations
+  by captured run ID and preserves background results across task selection.
+- On that branch, **Görevler** is the primary project surface. **Araçlar**
+  retains the editor, explorer, terminal, Git, LSP and debugger as secondary
+  tools. A task uses one provider, not a mandatory role chain.
 - Acceptance: two Tasks progress simultaneously with no shared worktree, no
   cross-talk and no lost results.
 
@@ -213,20 +217,17 @@ Already implemented and deliberately reused rather than replaced:
 
 ### What is still not done
 
-- The **application shell is still IDE-shaped** — project explorer, Monaco
-  editor, terminal, Git surface, LSP, debugger — and those stay as
-  **secondary** tools. The **task-first main screen and multi-run frontend (M2)
-  are not implemented yet**. The development branch backend can own two
-  independent runs, but the frontend still has a single-run state model. It
-  must be replaced without dropping background activity/results or
-  misattributing an in-flight decision.
+- The task-first shell and multi-run frontend are **development-branch
+  changes**, not a published main-branch delivery yet. Local mock acceptance
+  exercises the visible UI, but the complete two-run frontend/Qt-host flow on
+  supported desktop platforms and actual providers remains **unverified**.
 - **Restart durability (M3) is not done.** Tasks and results do not yet
   survive an app restart and get reopened/continued.
 - **M3, M4 and M5 are not started. M2 is in development, not
   finished.** M1's deferred acceptance gate remains open and stays a release
   gate before M5.
 
-### M2 backend checkpoint — development branch only
+### M2 engineering checkpoint — development branch only
 
 - Headless Qt/Git/SQLite fixtures exercise two live runs in distinct
   worktrees, targeted cancellation while the other run continues, independent
@@ -236,9 +237,33 @@ Already implemented and deliberately reused rather than replaced:
   explicitly. A later failed start must not hide an earlier run from control.
 - The registry is **process-local** with bounded terminal history. This does
   not implement M3's task/result reopening after restart.
-- Run-indexed frontend state, independent mock flows, the task-first main
-  screen, and a **two-run browser acceptance** remain unfinished. Incomplete
-  frontend changes were removed rather than represented as a working delivery.
+- The frontend keeps per-run proposals, evidence, follow-up drafts, activity
+  and checkpoints. Captured-ID operations and root/revision fences prevent
+  late replies from changing another task or conferring wrong-project authority.
+  Activity is bounded to 500 items per run; clean terminal history to 32,
+  without evicting running, review-ready, busy or uncertain records.
+- Three reproducible browser checks cover controlled admission/response races,
+  independent mock runs and source-conflict refusal, and the task-first UI.
+  The UI check creates two running tasks, refuses a third, cancels A while B
+  continues, follows up B, opens its diff, applies/restores its checkpoint,
+  rejects C, and reaches evidence and apply controls at 320px. **These are
+  mock/fixture checks, not live-provider, native worktree or Windows desktop
+  acceptance.** The backend fixtures separately exercise real Git worktrees.
+- Run the frontend checks from `web/ui` after typecheck/build:
+
+  ```sh
+  node scripts/run-state-acceptance.mjs
+  node scripts/mock-runs-acceptance.mjs
+  node scripts/task-workspace-acceptance.mjs
+  ```
+
+  They start owned, strict-port, literal-loopback Vite servers, block external
+  browser requests, and use `CHROME_BIN` (default `/usr/bin/google-chrome`).
+  The UI check saves screenshots under `M2_SCREENSHOT_DIR` (default the
+  system temporary directory's `opencode` folder). The Ubuntu UI CI job runs
+  the same checks. Browser CI does not substitute for native desktop acceptance.
+- Unknown admission acceptance stays fail-closed rather than allowing a blind
+  retry. This is process-local safety, not M3 durability or a recovery guarantee.
 - Reproduce the backend scope on this branch with `python -m pytest -q
   tests/test_run_registry.py tests/test_agent_application_e2e.py
   tests/test_agent_bridge_regressions.py` in the configured development

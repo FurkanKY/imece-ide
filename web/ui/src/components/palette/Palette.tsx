@@ -8,6 +8,7 @@ import { fuzzyFilter, FuzzyHit } from "@/lib/fuzzy";
 import { fileIcon } from "@/lib/fileIcons";
 import { useEditor } from "@/state/editor";
 import { EmptyState, Kbd } from "@/components/ui";
+import { useUi } from "@/state/ui";
 
 function Highlight({ text, hit }: { text: string; hit: FuzzyHit }) {
   const marks = new Set(hit.indices);
@@ -75,7 +76,7 @@ export function Palette() {
     const r = results[i];
     if (!r) return;
     close();
-    if (r.file) void openFile(r.file);
+    if (r.file) { useUi.getState().setWorkspaceView("tools"); void openFile(r.file); }
     else if (r.cmd) void r.cmd.run();
   };
 

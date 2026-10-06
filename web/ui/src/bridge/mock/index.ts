@@ -12,6 +12,16 @@ interface MockCheckpoint {
   runId?: string;
   files: string[];
   snapshots: { path: string; exists: boolean; content: string }[];
+  root?: string;
+  after?: { path: string; exists: boolean; content: string }[];
+}
+
+interface MockAgentRun {
+  runId: string; taskId: string; task: string; providerId: string; root: string;
+  status: "queued" | "running" | "waiting_user" | "succeeded" | "failed" | "cancelled";
+  phase: string; proposals: Proposal[]; baseline: Map<string, { exists: boolean; content: string }>;
+  evidence: Record<string, unknown> | null; attempts: number; generation: number;
+  checkpointId: string | null; errorCode: string | null;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -34,7 +44,6 @@ export class MockBridge implements Bridge {
   private listeners = new Map<string, Set<(payload: unknown) => void>>();
   private maximized = false;
   private runCancelled = false;
-  private agentProviderId: string | null = null;
   private mockProposals: Proposal[] = [];
   private checkpoints: MockCheckpoint[] = [];
   private receipts = new Map<string, Api["receipt.get"]["result"]["receipt"]>();
@@ -52,6 +61,9 @@ export class MockBridge implements Bridge {
   private productRevision = 1;
   private productHistory: Api["collab.owner.snapshot"]["result"][] = [];
   private mockRoot = "C:/Projeler/demo-api";
+  private agentRuns = new Map<string, MockAgentRun>();
+  private agentSequence = 0;
+  private agentCheckpoints = new Map<string, MockCheckpoint>();
 
   private rememberProduct(): void {
     const s = this.ownerStatus;
@@ -458,6 +470,13 @@ export class MockBridge implements Bridge {
           recommendedRouting: { planner: best, coder: best, reviewer: best },
         } as R;
       }
+      case "run.list":
+        return { runs: [...this.agentRuns.values()].filter((run) => run.root === this.mockRoot).map((run) => this.agentSummary(run)) } as R;
+      case "run.get": {
+        const run = this.requireAgentRun((params as Api["run.get"]["params"]).runId);
+        this.assertAgentRoot(run);
+        return this.agentDetails(run) as R;
+      }
       case "collab.preview": {
         const p = params as Api["collab.preview"]["params"];
         if (!p.endpoint.trim() || !p.memberId.trim() || !p.taskId.trim() || !p.credential) throw new Error("Uç nokta, erişim bilgisi, üye ve görev kimliği gerekli.");
@@ -677,17 +696,18 @@ export class MockBridge implements Bridge {
       case "run.start": {
         const startParams = params as Api["run.start"]["params"];
         if ("providerId" in startParams) {
-          if (startParams.collabApprovalHandle) throw new Error("Tek ajan akışında ortak bağlam henüz bağlı değil.");
-          this.agentProviderId = startParams.providerId;
-          this.runCancelled = false;
-          this.collabStatus = null;
-          const mentions = startParams.mentions ?? [];
-          for (const mention of mentions) if (!vfs.pathExists(mention)) this.emit("run.event", { runId: "mock-1", ev: { type: "info", text: `Bahsedilen dosya bulunamadı: ${mention}` } });
-          void this.streamAgentRun();
-          void this.streamActivity();
-          return { runId: "mock-1" } as R;
+          if (startParams.collabApprovalHandle) throw new BridgeError("invalid_params", "MOCK: tek ajan akışında ortak bağlam desteklenmiyor.");
+          if (this.activeAgentRuns() >= 2) throw new BridgeError("run_capacity", "MOCK: en fazla iki ajan koşusu aynı anda etkin olabilir.");
+          const runId = `mock-agent-${++this.agentSequence}`;
+          const run: MockAgentRun = { runId, taskId: `mock-task-${this.agentSequence}`, task: startParams.task, providerId: startParams.providerId, root: this.mockRoot, status: "running", phase: "running", proposals: [], baseline: new Map(), evidence: null, attempts: 0, generation: 0, checkpointId: null, errorCode: null };
+          const initialProposals = (RUN_FULL.find(([, ev]) => ev.type === "proposal")?.[1].proposals ?? []) as Proposal[];
+          for (const item of initialProposals) run.baseline.set(item.path, { exists: vfs.fileExists(item.path), content: vfs.readFile(item.path).content });
+          this.agentRuns.set(runId, run);
+          this.trimAgentHistory();
+          for (const mention of startParams.mentions ?? []) if (!vfs.pathExists(mention)) this.emit("run.event", { runId, ev: { type: "info", text: `Bahsedilen dosya bulunamadı: ${mention}` } });
+          void this.streamAgentRun(run);
+          return { runId } as R;
         }
-        this.agentProviderId = null;
         const collabHandle = startParams.collabApprovalHandle;
         const approvedCollab = collabHandle ? this.collabApprovals.get(collabHandle) : undefined;
         if (collabHandle && !approvedCollab) throw new Error("Ortak bağlam onayı geçersiz.");
@@ -711,21 +731,37 @@ export class MockBridge implements Bridge {
         void this.streamActivity(); // F1: run.activity mock akışı
         return { runId: "mock-1" } as R;
       }
-      case "run.cancel":
+      case "run.cancel": {
+        const id = (params as Api["run.cancel"]["params"]).runId;
+        if (id.startsWith("mock-agent-")) {
+          const run = this.requireAgentRun(id);
+          if (run.status !== "running" && run.status !== "queued") throw new BridgeError("run_invalid_state", "MOCK: koşu artık iptal edilebilir durumda değil.");
+          run.generation++;
+          run.status = "cancelled"; run.phase = "cancelled";
+          this.trimAgentHistory();
+          this.emit("run.finished", { runId: run.runId, status: "cancelled" });
+          return {} as R;
+        }
+        this.assertLegacyRunId(id);
         this.runCancelled = true;
         this.participantTickets.clear();
         if (this.collabStatus) this.collabStatus = { ...this.collabStatus, active: false, state: "inactive" };
         this.emit("run.finished", { runId: "mock-1", status: "cancelled" });
         return {} as R;
+      }
       case "run.followUp": {
         const followParams = params as Api["run.followUp"]["params"];
         const { feedback } = followParams;
-        if (this.agentProviderId) {
-          if ("collabApprovalHandle" in followParams && followParams.collabApprovalHandle) throw new Error("Tek ajan akışında ortak bağlam henüz bağlı değil.");
-          this.runCancelled = false;
-          void this.streamAgentRun(feedback);
-          return { runId: "mock-1" } as R;
+        if (followParams.runId.startsWith("mock-agent-")) {
+          if ("collabApprovalHandle" in followParams && followParams.collabApprovalHandle) throw new BridgeError("run_invalid_state", "MOCK: ajan akışında ortak bağlam desteklenmiyor.");
+          const run = this.requireAgentRun(followParams.runId);
+          this.assertAgentRoot(run);
+          if (run.status !== "waiting_user") throw new BridgeError("run_invalid_state", "MOCK: takip isteği yalnızca öneri bekleyen koşuya uygulanabilir.");
+          run.status = "running"; run.phase = "running"; run.generation++;
+          void this.streamAgentRun(run, feedback);
+          return { runId: run.runId } as R;
         }
+        this.assertLegacyRunId(followParams.runId);
         const collabHandle = "collabApprovalHandle" in params ? params.collabApprovalHandle : undefined;
         if (collabHandle && !this.collabApprovals.has(collabHandle)) throw new Error("Ortak bağlam onayı geçersiz.");
         if (collabHandle) this.collabApprovals.delete(collabHandle);
@@ -739,7 +775,10 @@ export class MockBridge implements Bridge {
         return { runId: "mock-1" } as R;
       }
       case "run.applyProposals": {
-        const wanted = new Set((params as { paths: string[] }).paths);
+        const applyParams = params as Api["run.applyProposals"]["params"];
+        if (applyParams.runId.startsWith("mock-agent-")) return this.applyAgentProposals(applyParams.runId, applyParams.paths) as R;
+        this.assertLegacyRunId(applyParams.runId);
+        const wanted = new Set(applyParams.paths);
         const selected = this.mockProposals.filter((proposal) => wanted.has(proposal.path));
         const snapshots = selected.map((proposal) => ({
           path: proposal.path,
@@ -767,22 +806,36 @@ export class MockBridge implements Bridge {
       }
       case "checkpoint.list":
         return {
-          checkpoints: this.checkpoints.map(({ snapshots: _snapshots, ...checkpoint }) => checkpoint),
+          checkpoints: [...this.checkpoints, ...this.agentCheckpoints.values()].map(({ snapshots: _snapshots, after: _after, ...checkpoint }) => checkpoint),
         } as R;
       case "checkpoint.restore": {
         const id = (params as { checkpointId: string }).checkpointId;
-        const checkpoint = this.checkpoints.find((item) => item.id === id);
+        const checkpoint = this.checkpoints.find((item) => item.id === id) ?? this.agentCheckpoints.get(id);
         if (!checkpoint) throw new Error("Checkpoint bulunamadı.");
+        if (checkpoint.root && checkpoint.root !== this.mockRoot) throw new BridgeError("checkpoint_wrong_project", "MOCK: checkpoint başka proje köküne ait.");
+        if (checkpoint.after?.some((snapshot) => vfs.fileExists(snapshot.path) !== snapshot.exists || (snapshot.exists && vfs.readFile(snapshot.path).content !== snapshot.content))) throw new BridgeError("checkpoint_stale", "MOCK: dosyalar checkpoint oluşturulduktan sonra değişti.");
         for (const snapshot of checkpoint.snapshots) {
           if (snapshot.exists) vfs.writeFile(snapshot.path, snapshot.content);
           else vfs.deleteNode(snapshot.path);
         }
         this.emit("fs.changed", { kind: "modified", paths: checkpoint.files });
+        const run = checkpoint.runId ? this.agentRuns.get(checkpoint.runId) : undefined;
+        if (run) { run.phase = "restored"; run.checkpointId = null; run.evidence = null; }
         return { restored: checkpoint.files } as R;
       }
-      case "run.rejectProposals":
+      case "run.rejectProposals": {
+        const id = (params as Api["run.rejectProposals"]["params"]).runId;
+        if (id.startsWith("mock-agent-")) {
+          const run = this.requireAgentRun(id); this.assertAgentRoot(run);
+          if (run.status !== "waiting_user") throw new BridgeError("run_invalid_state", "MOCK: bu koşuda reddedilebilir öneri yok.");
+          run.proposals = []; run.evidence = null; run.status = "succeeded"; run.phase = "rejected";
+          this.trimAgentHistory();
+          return {} as R;
+        }
+        this.assertLegacyRunId(id);
         this.mockProposals = [];
         return {} as R;
+      }
       case "history.list":
         return {
           items: [
@@ -886,29 +939,95 @@ export class MockBridge implements Bridge {
     }
   }
 
-  private async streamAgentRun(feedback?: string) {
+  private activeAgentRuns(): number { return [...this.agentRuns.values()].filter((run) => run.root === this.mockRoot && (run.status === "running" || run.status === "queued" || run.status === "waiting_user")).length; }
+
+  private assertLegacyRunId(id: string): void {
+    if (id !== "mock-1") throw new BridgeError("unknown_run", "MOCK: koşu bulunamadı.");
+  }
+
+  private trimAgentHistory(): void {
+    const terminal = [...this.agentRuns.values()].filter((run) => ["succeeded", "failed", "cancelled"].includes(run.status));
+    for (const run of terminal.slice(0, Math.max(0, terminal.length - 32))) this.agentRuns.delete(run.runId);
+  }
+
+  private requireAgentRun(id: string): MockAgentRun {
+    const run = this.agentRuns.get(id);
+    if (!run) throw new BridgeError("run_unknown", "MOCK: ajan koşusu bulunamadı veya geçmişten temizlendi.");
+    return run;
+  }
+
+  private assertAgentRoot(run: MockAgentRun): void {
+    if (run.root !== this.mockRoot) throw new BridgeError("run_wrong_project", "MOCK: ajan koşusu başka proje köküne ait.");
+  }
+
+  private agentSummary(run: MockAgentRun): Api["run.list"]["result"]["runs"][number] {
+    return { runId: run.runId, taskId: run.taskId, task: run.task, status: run.status, phase: run.phase, providerId: run.providerId, engine: "agent", changedPathCount: run.proposals.length, errorCode: run.errorCode };
+  }
+
+  private agentDetails(run: MockAgentRun): Api["run.get"]["result"] {
+    return { runId: run.runId, task: run.task, providerId: run.providerId, status: run.status, phase: run.phase, engine: "agent", evidence: run.evidence, proposals: run.proposals, totals: { latency_s: null, tokens: null, cost_usd: null }, errorCode: run.errorCode, checkpointId: run.checkpointId };
+  }
+
+  private applyAgentProposals(id: string, paths: string[]): Api["run.applyProposals"]["result"] {
+    const run = this.requireAgentRun(id); this.assertAgentRoot(run);
+    if (run.status !== "waiting_user") throw new BridgeError("run_invalid_state", "MOCK: bu koşuda uygulanabilir öneri yok.");
+    const wanted = new Set(paths);
+    const selected = run.proposals.filter((proposal) => wanted.has(proposal.path));
+    if (!selected.length || selected.length !== wanted.size) throw new BridgeError("run_invalid_proposals", "MOCK: istenen öneriler bulunamadı.");
+    const conflict = selected.find((proposal) => {
+      const before = run.baseline.get(proposal.path)!;
+      return vfs.fileExists(proposal.path) !== before.exists || (before.exists && vfs.readFile(proposal.path).content !== before.content);
+    });
+    if (conflict) return { applied: [], errors: [], conflicts: [{ path: conflict.path, reason: "source_changed" }], checkpointId: null };
+    const snapshots = selected.map((proposal) => ({ path: proposal.path, exists: vfs.fileExists(proposal.path), content: vfs.readFile(proposal.path).content }));
+    const after = selected.map((proposal) => ({ path: proposal.path, exists: true, content: proposal.new }));
+    for (const proposal of selected) vfs.writeFile(proposal.path, proposal.new);
+    const checkpointId = `mock-agent-checkpoint-${id}-${run.attempts}`;
+    const checkpoint: MockCheckpoint = { id: checkpointId, ts: Date.now() / 1000, runId: id, files: selected.map((proposal) => proposal.path), snapshots, root: run.root, after };
+    this.agentCheckpoints.set(checkpointId, checkpoint);
+    run.checkpointId = checkpointId; run.proposals = []; run.status = "succeeded"; run.phase = "applied";
+    this.trimAgentHistory();
+    this.emit("fs.changed", { kind: "modified", paths: checkpoint.files });
+    return { applied: checkpoint.files, errors: [], conflicts: [], checkpointId };
+  }
+
+  private async streamAgentRun(run: MockAgentRun, feedback?: string) {
+    const runId = run.runId, generation = ++run.generation;
+    run.attempts++;
+    run.evidence = null;
+    run.proposals = [];
     const proposalsEvent = RUN_FULL.find(([, ev]) => ev.type === "proposal")?.[1];
     const diffEvent = RUN_FULL.find(([, ev]) => ev.type === "diff")?.[1];
     if (!proposalsEvent || !diffEvent) return;
-    if (feedback) this.emit("run.event", { runId: "mock-1", ev: { type: "followUpStarted", feedback } });
-    this.emit("run.event", { runId: "mock-1", ev: { type: "stage", stage: "code", provider: this.agentProviderId } });
-    this.emit("run.event", { runId: "mock-1", ev: { type: "output", stage: "code", text: feedback ? `Takip isteği: ${feedback}` : "MOCK ajan çalışması başladı. Gerçek sağlayıcı çalıştırması değildir." } });
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    if (this.runCancelled) return;
-    this.emit("run.event", { runId: "mock-1", ev: { type: "stage", stage: "verifying", provider: "MOCK" } });
-    if (this.scenario === "running") return;
-    const proposal = proposalsEvent.proposals as Proposal[];
-    this.mockProposals = proposal;
-    this.emit("run.event", { runId: "mock-1", ev: { ...diffEvent, type: "diff" } });
-    const outcome = this.scenario === "agent-fail" ? "fail" : this.scenario === "agent-not-run" ? "not_run" : this.scenario === "agent-invalidated" ? "invalidated" : "pass";
-    this.emit("run.event", { runId: "mock-1", ev: {
-      type: "evidence", reason: "single_agent_proposal", execution_id: `mock-execution-${Date.now()}`,
-      agent_message: "MOCK: tek ajan önerisi; proje doğrulama komutu çalıştırılmadı.",
-      attempt_receipt: { model_turns: null, tool_calls: null }, changed_paths: proposal.map((item) => item.path), diff_sha256: "mock-diff-sha256",
-      verification: { outcome, fingerprint_complete: outcome === "pass", changed_content: false, verification_id: "mock-verification", plan_id: "mock-plan", checks: [{ check_id: "mock-simulated", status: outcome === "pass" ? "pass" : outcome }] },
-    } });
-    this.emit("run.event", { runId: "mock-1", ev: { ...proposalsEvent, totals: { latency_s: null, tokens: null, cost_usd: null }, verdict: undefined } });
-    this.emit("run.finished", { runId: "mock-1", status: "done", engine: "agent" });
+    const valid = () => this.agentRuns.get(runId) === run && run.generation === generation && run.status === "running";
+    if (feedback) this.emit("run.event", { runId, ev: { type: "followUpStarted", feedback } });
+    this.emit("run.event", { runId, ev: { type: "stage", stage: "code", provider: "MOCK" } });
+    this.emit("run.event", { runId, ev: { type: "output", stage: "code", text: feedback ? `MOCK takip isteği: ${feedback}` : "MOCK ajan simülasyonu başladı; gerçek sağlayıcı/Git/doğrulama değildir." } });
+    this.emit("run.activity", { id: `${runId}:${generation}:worker`, runId, seq: 1, ts: new Date().toISOString(), role: "worker", kind: "stage", status: "running", title: "MOCK worker simülasyonu" });
+    // Dedicated browser acceptance window: keep two task-first runs active
+    // long enough to exercise capacity and cancellation through the UI.
+    const runDelay = this.scenario === "m2-acceptance" ? 10000 : 450;
+    await new Promise((resolve) => setTimeout(resolve, runDelay));
+    if (!valid()) return;
+    run.phase = "verifying";
+    this.emit("run.event", { runId, ev: { type: "stage", stage: "verifying", provider: "MOCK" } });
+    this.emit("run.activity", { id: `${runId}:${generation}:verify`, runId, seq: 2, ts: new Date().toISOString(), role: "verification", kind: "note", status: "info", title: "MOCK: gerçek doğrulama çalıştırılmadı" });
+    if (this.scenario === "running") { run.phase = "running"; return; }
+    if (this.scenario === "error") { run.status = "failed"; run.phase = "failed"; run.errorCode = "mock_error"; this.trimAgentHistory(); this.emit("run.finished", { runId, status: "failed", error: "MOCK simüle hata; canlı sağlayıcı çağrısı yapılmadı." }); return; }
+    if (this.scenario === "nochanges") { run.status = "succeeded"; run.phase = "no_changes"; this.trimAgentHistory(); this.emit("run.event", { runId, ev: { type: "info", text: "MOCK: önerilecek değişiklik yok." } }); this.emit("run.finished", { runId, status: "done", engine: "agent" }); return; }
+    const proposal = (proposalsEvent.proposals as Proposal[]).map((item) => ({ ...item }));
+    for (const item of proposal) if (!run.baseline.has(item.path)) run.baseline.set(item.path, { exists: vfs.fileExists(item.path), content: vfs.readFile(item.path).content });
+    run.proposals = proposal;
+    this.emit("run.event", { runId, ev: { ...diffEvent, type: "diff" } });
+    const outcome = this.scenario === "agent-fail" ? "fail" : this.scenario === "agent-not-run" ? "not_run" : this.scenario === "agent-invalidated" ? "invalidated" : "not_run";
+    const evidence = { unknown: false, truncated: false, reason: "MOCK simulation only", execution_id: `${runId}-execution-${run.attempts}`, agent_message: "MOCK: simulated suggestion; no provider, Git, or project verification ran.", attempt_receipt: { model_turns: null, tool_calls: null }, changed_paths: proposal.map((item) => item.path), diff_sha256: null, verification: { outcome, fingerprint_complete: null, changed_content: null, verification_id: null, plan_id: null, checks: [{ check_id: "mock-not-run", status: outcome }] } };
+    if (!valid()) return;
+    run.evidence = evidence;
+    this.emit("run.event", { runId, ev: { type: "evidence", ...evidence } });
+    const { verdict: _fixtureVerdict, ...safeProposalsEvent } = proposalsEvent;
+    this.emit("run.event", { runId, ev: { ...safeProposalsEvent, proposals: proposal, totals: { latency_s: null, tokens: null, cost_usd: null } } });
+    run.status = "waiting_user"; run.phase = "waiting_user";
+    this.emit("run.finished", { runId, status: "done", engine: "agent" });
   }
 
   // ---- debug mock durumu (P8.2) ----

@@ -33,7 +33,7 @@ interface EditorState {
   closeDeleted: (rel: string) => void;
   /** merkez diff görünümü (Cursor deseni): öneri diff'i tam boy editörde */
   diff: { path: string; original: string; modified: string } | null;
-  openDiff: (path: string) => Promise<void>;
+  openDiff: (path: string, expectedRunId?: string) => Promise<void>;
   /** hazır içerik çiftiyle merkez diff aç (SCM vb. — öneri deposundan bağımsız) */
   showDiff: (path: string, original: string, modified: string) => void;
   closeDiff: () => void;
@@ -169,9 +169,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   diff: null,
 
-  openDiff: async (path) => {
+  openDiff: async (path, expectedRunId) => {
     const { useRun } = await import("@/state/run");
-    const prop = useRun.getState().proposals.find((p) => p.path === path);
+    const selection = useRun.getState();
+    if (selection.runRootStale || (expectedRunId && selection.runId !== expectedRunId)) return;
+    const prop = selection.proposals.find((p) => p.path === path);
     if (!prop) return;
     let original = "";
     if (!prop.is_new) {
@@ -182,6 +184,8 @@ export const useEditor = create<EditorState>((set, get) => ({
         // yeni dosya gibi davran
       }
     }
+    const current = useRun.getState();
+    if (current.runRootStale || current.runId !== selection.runId || current.draftToken !== selection.draftToken || !current.proposals.includes(prop)) return;
     set({ diff: { path, original, modified: prop.new } });
   },
 

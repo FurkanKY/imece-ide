@@ -207,6 +207,10 @@ export function Composer() {
   const followUp = useRun((s) => s.followUp);
   const collaborationEnabled = useCollaboration((s) => s.enabled);
   const runRootStale = useRun((s) => s.runRootStale);
+  const selectedRunId = useRun((s) => s.selectedRunId);
+  const selectedRecord = useRun((s) => selectedRunId ? s.runs[selectedRunId] : undefined);
+  const draftUncertain = useRun((s) => s.draftUncertain);
+  const newDraft = useRun((s) => s.newDraft);
   const enterToSend = useSettings((s) => s.prefs?.enterToSend ?? true);
   const focusNonce = useUi((s) => s.composerFocusNonce);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -218,7 +222,8 @@ export function Composer() {
   // "kilitli" davranış korunur.
   const followUpMode = reviewReady && (engine === "pipeline" || engine === "agent");
   const followUpUnsupported = reviewReady && engine !== "pipeline" && engine !== "agent";
-  const locked = running || followUpUnsupported;
+  const completedSelection = selectedRunId !== null && !running && !followUpMode;
+  const locked = running || followUpUnsupported || completedSelection || !!selectedRecord?.checkpointBusy || !!selectedRecord?.pending || !!selectedRecord?.uncertain || draftUncertain || runRootStale;
   // @-mention'lar ve textarea'nın kendisi normal modda `task`'ı, takip-isteği
   // modunda `followUpDraft`'ı okur/yazar -- aşağıdaki tüm mantık bu ikisi
   // arasında ayrım yapmadan tek bir "draft" üzerinden çalışır.
@@ -360,9 +365,9 @@ export function Composer() {
 
   return (
     <div className="material-panel border-t border-border-w p-2.5">
-      <div className={"mb-2 " + (running || reviewReady ? "pointer-events-none opacity-60" : "")}>
+      <div className={"mb-2 " + (running || reviewReady || selectedRunId !== null || draftUncertain ? "pointer-events-none opacity-60" : "")}>
         <label className="mb-1 block text-muted" style={{ fontSize: "var(--t-caption)" }}>Ajan / sağlayıcı</label>
-        <AgentProviderSelect disabled={running || reviewReady} />
+        <AgentProviderSelect disabled={running || reviewReady || selectedRunId !== null || draftUncertain} />
       </div>
       {helper && (
         <div className="mb-1.5 flex items-center gap-1.5 text-muted" style={{ fontSize: "var(--t-caption)" }}>
@@ -383,6 +388,8 @@ export function Composer() {
         </div>
       )}
       {!helper && collaborationEnabled && <div className="mb-1.5 text-warn" style={{ fontSize: "var(--t-caption)" }}>Ortak bağlam bu yeni tek ajan akışına henüz bağlı değil; çalıştırmak için ortak bağlamı kapatın.</div>}
+      {completedSelection && <div className="mb-1.5 flex items-center gap-2 text-muted" style={{ fontSize: "var(--t-caption)" }}>Bu görev tamamlandı. <button type="button" className="text-accent underline" onClick={newDraft}>Yeni görev yaz</button></div>}
+      {(selectedRecord?.pending || selectedRecord?.uncertain || draftUncertain || runRootStale) && <div role="status" className="mb-1.5 text-warn" style={{ fontSize: "var(--t-caption)" }}>Durum doğrulanana kadar bu görevde değişiklik yapılamaz. Görev listesinden yenileyin.</div>}
       <CollaborationControls />
       {mentions.length > 0 && (
         <div className="mb-1.5 flex flex-wrap gap-1.5">
@@ -471,7 +478,7 @@ export function Composer() {
             variant="primary"
             icon={Play}
             onClick={submit}
-            disabled={collaborationEnabled}
+            disabled={collaborationEnabled || !!selectedRecord?.checkpointBusy || !!selectedRecord?.pending || !!selectedRecord?.uncertain || runRootStale}
             title="Takip isteği gönder (Enter)"
             aria-label="Takip isteği gönder"
             className="w-9 shrink-0 px-0"
@@ -481,7 +488,7 @@ export function Composer() {
             variant="primary"
             icon={Play}
             onClick={submit}
-            disabled={collaborationBlocked || unsupported || missing.length > 0}
+            disabled={locked || collaborationBlocked || unsupported || missing.length > 0}
             title="Çalıştır (Enter)"
             aria-label="Çalıştır"
             className="w-9 shrink-0 px-0"

@@ -180,6 +180,18 @@ export interface ActivityItem {
   detail?: string;
 }
 
+export type BackendRunStatus = "queued" | "running" | "waiting_user" | "succeeded" | "failed" | "cancelled" | "interrupted" | "unavailable";
+export interface RunListItem {
+  runId: string; taskId: string; task: string; status: BackendRunStatus; phase: string;
+  providerId: string; engine: "agent"; changedPathCount: number; errorCode: string | null;
+}
+export interface RunDetails {
+  runId: string; task: string; providerId: string; status: BackendRunStatus; phase: string;
+  engine: "agent"; evidence: Record<string, unknown> | null; proposals: Proposal[];
+  totals: { latency_s: number | null; tokens: number | null; cost_usd: number | null };
+  errorCode: string | null; checkpointId: string | null;
+}
+
 // ---- İstek/yanıt yüzeyi ----
 export interface Api {
   // window
@@ -263,13 +275,15 @@ export interface Api {
       Project._safe ile bağımsızca doğrular — mevcut olmayan/proje dışına
       çıkan bir yol sessizce düşürülür ve bir "info" olayıyla bildirilir. */
   "run.start": { params: { task: string; providerId: string; mentions?: string[]; collabApprovalHandle?: never } | { task: string; routing: Routing; mentions?: string[]; collabApprovalHandle?: string }; result: { runId: string } };
-  "run.cancel": { params: { runId?: string }; result: {} };
+  "run.list": { params: {}; result: { runs: RunListItem[] } };
+  "run.get": { params: { runId: string }; result: RunDetails };
+  "run.cancel": { params: { runId: string }; result: {} };
   /** F2 (takip isteği / follow-up): sadece bekleyen bir öneri (WAITING_USER,
       canlı worktree'li bir pipeline koşusu) varken geçerlidir; klasik
       motorda veya aktif koşu yokken BridgeError. */
-  "run.followUp": { params: { feedback: string; mentions?: string[] } | { feedback: string; mentions?: string[]; collabApprovalHandle?: string }; result: { runId: string } };
+  "run.followUp": { params: { runId: string; feedback: string; mentions?: string[] } | { runId: string; feedback: string; mentions?: string[]; collabApprovalHandle?: string }; result: { runId: string } };
   "run.applyProposals": {
-    params: { paths: string[] };
+    params: { runId: string; paths: string[] };
     result: {
       applied: string[];
       errors: { path: string; message: string }[];
@@ -281,7 +295,7 @@ export interface Api {
   };
   "checkpoint.list": { params: {}; result: { checkpoints: Checkpoint[] } };
   "checkpoint.restore": { params: { checkpointId: string }; result: { restored: string[] } };
-  "run.rejectProposals": { params: {}; result: {} };
+  "run.rejectProposals": { params: { runId: string }; result: {} };
   "history.list": { params: {}; result: { items: HistoryItem[] } };
   "receipt.get": { params: { receiptId: string }; result: { receipt: Receipt } };
   "receipt.export": { params: { receiptId: string; directory: string }; result: { path: string } };

@@ -34,37 +34,35 @@ const STAGE_META = {
 } as const;
 
 const DECISION_META = {
-  planning: { title: "Plan hazırlanıyor", description: "Kapsam ve riskler çıkarılıyor.", Icon: ClipboardList, tone: "text-accent", line: "border-l-accent" },
-  working: { title: "Değişiklik hazırlanıyor", description: "Plan dosya değişikliklerine dönüştürülüyor.", Icon: ActivityIcon, tone: "text-accent", line: "border-l-accent" },
-  reviewing: { title: "İnceleme sürüyor", description: "Değişiklikler kontrol ediliyor.", Icon: FileDiff, tone: "text-warn", line: "border-l-warn" },
-  ready: { title: "İnceleme hazır", description: "Dosyaları uygula ya da vazgeç.", Icon: ShieldCheck, tone: "text-warn", line: "border-l-warn" },
-  applied: { title: "Uygulandı", description: "Geri almak için checkpoint hazır.", Icon: CheckCircle2, tone: "text-ok", line: "border-l-ok" },
-  restored: { title: "Geri alındı", description: "Dosyalar checkpoint durumuna döndü.", Icon: RotateCcw, tone: "text-muted", line: "border-l-border-w2" },
+  planning: { title: "Plan hazırlanıyor", description: "Kapsam ve riskler çıkarılıyor.", Icon: ClipboardList, tone: "text-accent" },
+  working: { title: "Değişiklik hazırlanıyor", description: "Plan dosya değişikliklerine dönüştürülüyor.", Icon: ActivityIcon, tone: "text-accent" },
+  reviewing: { title: "İnceleme sürüyor", description: "Değişiklikler kontrol ediliyor.", Icon: FileDiff, tone: "text-warn" },
+  ready: { title: "İnceleme hazır", description: "Dosyaları uygula ya da vazgeç.", Icon: ShieldCheck, tone: "text-warn" },
+  applied: { title: "Uygulandı", description: "Geri almak için checkpoint hazır.", Icon: CheckCircle2, tone: "text-ok" },
+  restored: { title: "Geri alındı", description: "Dosyalar checkpoint durumuna döndü.", Icon: RotateCcw, tone: "text-muted" },
   // A5 (hata UX): bu, YALNIZCA errorTitle/errorDescription yokken (ör. eski
   // bir run.finished) kullanılan genel bir düşüş (fallback) metnidir --
   // normalde aşağıdaki `decision` hesaplaması backend'in eşlediği başlık/
   // açıklamayı kullanır (bkz. webhost/api/run.py _ERROR_MESSAGES).
-  error: { title: "Koşu tamamlanmadı", description: "Beklenmeyen bir hata oluştu. Ayrıntılara bakıp tekrar deneyin.", Icon: CircleAlert, tone: "text-err", line: "border-l-err" },
-  draft: { title: "Başlamaya hazır", description: "Bir görev yaz.", Icon: Play, tone: "text-muted", line: "border-l-border-w2" },
+  error: { title: "Koşu tamamlanmadı", description: "Beklenmeyen bir hata oluştu. Ayrıntılara bakıp tekrar deneyin.", Icon: CircleAlert, tone: "text-err" },
+  draft: { title: "Başlamaya hazır", description: "Bir görev yaz.", Icon: Play, tone: "text-muted" },
   noChanges: {
     title: "Değişiklik önerisi çıkmadı",
-    description: "Ajan bir değişiklik yapmadı; akışta ne olduğunu görüp görevi düzenleyerek tekrar deneyebilirsin.",
+    description: "Akışta ne olduğunu inceleyebilir, Yeni görev ile başka bir çalışma başlatabilirsin.",
     Icon: Info,
     tone: "text-muted",
-    line: "border-l-border-w2",
   },
   // A4-A4: başarısızlık/değişiklik-yok kartlarından AYRI, kendi "İptal
   // edildi" terminal kartı.
   cancelled: {
     title: "İptal edildi",
-    description: "Koşu kullanıcı isteğiyle durduruldu; bekleyen bir öneri yok. Görevi düzenleyip tekrar başlatabilirsin.",
+    description: "Koşu kullanıcı isteğiyle durduruldu; bekleyen bir öneri yok. Yeni görev ile başka bir çalışma başlatabilirsin.",
     Icon: Ban,
     tone: "text-muted",
-    line: "border-l-border-w2",
   },
 } as const;
 
-export function AiPanel({ onClose }: { onClose: () => void }) {
+export function AiPanel({ onClose, embedded = false }: { onClose?: () => void; embedded?: boolean }) {
   const [tab, setTabRaw] = useState<Tab>("work");
   // Sekme/panel DOM kimlikleri useId'den turer: render'lar arasinda SABIT
   // kalir, boylece aria-controls / aria-labelledby hedefleri her render'da
@@ -105,11 +103,12 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
     { id: "owner", label: "Oturum", Icon: ShieldCheck, badge: 0 },
     { id: "product", label: "Ortak ürün", Icon: ClipboardList, badge: 0 },
   ] as const;
-  const meta = STAGE_META[runStage];
+  const rejected = runId !== null && status === "done" && runStage === "draft";
+  const meta = rejected ? { ...STAGE_META.draft, label: "Vazgeçildi" } : STAGE_META[runStage];
   const StageIcon = meta.Icon;
   const decisionBase = !legacyVisible && runStage === "working"
     ? { ...DECISION_META.working, description: "Seçilen ajan görevi izole çalışma alanında yürütüyor." }
-    : DECISION_META[runStage];
+    : rejected ? { ...DECISION_META.draft, title: "Öneriler reddedildi", description: "Bu çalışma kapatıldı. Yeni görev ile başka bir çalışma başlatabilirsiniz." } : DECISION_META[runStage];
   // A5 (hata UX): backend eşlemesi varsa (normal yol) onu kullan; yoksa
   // DECISION_META.error'ın genel metnine düş.
   const decision = runStage === "error" && errorTitle
@@ -145,9 +144,9 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
 
-  // yeni bir koşu başlayınca otomatik rehberliği YENİDEN aç.
+  // Yeni görev seçimi, özellikle Etkinlik'ten elle ayrılmama tercihini
+  // sıfırlamaz. Böylece task/workspace geçişi odağı veya panel seçimini çalmaz.
   useEffect(() => {
-    setAutoTab(true);
     setErrorDetailsOpen(false);
   }, [runId]);
 
@@ -162,7 +161,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
   }, [runStage, status, diffCount, autoTab]);
 
   return (
-    <aside className="relative flex h-full w-full flex-col bg-side">
+    <aside className="relative flex h-full w-full min-w-0 flex-col bg-side">
       {/* başlık */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-w px-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -177,14 +176,14 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-1.5">
           {totals && <span className="text-faint" title="Toplam maliyet" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--t-caption)" }}>{totals.cost_usd == null ? "—" : `$${totals.cost_usd.toFixed(4)}`}</span>}
         <IconButton icon={Clock} label="Geçmiş koşular" onClick={() => setHistoryOpen(true)} />
-        <IconButton icon={PanelRightClose} label="AI panelini kapat" onClick={onClose} />
+        {!embedded && onClose && <IconButton icon={PanelRightClose} label="AI panelini kapat" onClick={onClose} />}
         </div>
       </div>
 
       {legacyVisible && <div className="max-h-48 overflow-y-auto"><LegacyPipeline /></div>}
 
       <div className="shrink-0 border-b border-border-w px-3 py-3">
-        <div className={"flex items-start gap-2 border-l-2 py-0.5 pl-2.5 " + decision.line}>
+        <div className="flex items-start gap-2 rounded-[var(--r-sm)] border border-border-w px-2.5 py-2">
           <DecisionIcon size={14} className={"mt-0.5 shrink-0 " + decision.tone} strokeWidth={2} />
           <div className="min-w-0 flex-1">
             <p className={decision.tone} style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>{decision.title}</p>

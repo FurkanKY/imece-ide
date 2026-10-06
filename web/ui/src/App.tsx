@@ -25,6 +25,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useEditor } from "@/state/editor";
 import { useUi, PANEL_LIMITS, NARROW_BP } from "@/state/ui";
 import { useRun } from "@/state/run";
+import { TaskWorkspace } from "@/components/tasks/TaskWorkspace";
 
 const MonacoSmoke = lazy(() => import("@/dev/MonacoSmoke"));
 // Monaco ve xterm ilk ekran için gerekli değil. Bu yüzeyleri kullanıcı bir dosya
@@ -43,6 +44,8 @@ const devBoom = import.meta.env.DEV && new URLSearchParams(location.search).has(
 
 function Workspace() {
   const view = useUi((s) => s.sideView);
+  const workspaceView = useUi((s) => s.workspaceView);
+  const setWorkspaceView = useUi((s) => s.setWorkspaceView);
   const setView = useUi((s) => s.setSideView);
   const setSettingsOpen = useUi((s) => s.setSettingsOpen);
   const hasTabs = useEditor((s) => s.tabs.length > 0);
@@ -84,6 +87,8 @@ function Workspace() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  if (workspaceView === "tasks") return <TaskWorkspace />;
+
   return (
     <div className={"workspace-scene relative flex min-h-0 flex-1" + (hasDiff ? " workspace-review-scene" : "")}>
       <ActivityBar active={view} onSelect={setView} aiPanelVisible={aiPanelVisible} onAgent={toggleAiPanel} onSettings={() => setSettingsOpen(true)} />
@@ -123,6 +128,10 @@ function Workspace() {
       )}
       {/* orta kolon: editör ↕ terminal */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <nav className="flex h-10 shrink-0 items-center gap-1 border-b border-border-w px-3" aria-label="Çalışma alanı görünümü">
+          <button className="pressable rounded-[var(--r-sm)] px-2 py-1 text-muted hover:bg-card hover:text-text" onClick={() => setWorkspaceView("tasks")}>Görevler</button>
+          <span className="rounded-[var(--r-sm)] bg-card px-2 py-1 text-text" aria-current="page">Araçlar</span>
+        </nav>
         {hasTabs || hasDiff ? (
           <Suspense fallback={<div className="min-h-0 flex-1 bg-panel" aria-label="Editör yükleniyor" />}>
             <Editor />

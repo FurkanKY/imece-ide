@@ -4,7 +4,7 @@
    için tüketilir. desktop.py:on_event akışının store karşılığı. */
 
 import { create } from "zustand";
-import { bridge, BridgeError, Checkpoint, Proposal, ProviderInfo, Role, Routing, RunEvent, AgentEvidence } from "@/bridge";
+import { bridge, BridgeError, Checkpoint, Proposal, ProviderInfo, Role, Routing, RunEvent, AgentEvidence, ActivityItem } from "@/bridge";
 import { toast } from "@/components/toasts/toasts";
 
 export const STAGE_ROLE: Record<string, Role> = {
@@ -76,11 +76,46 @@ export type RunStage =
     Composer, takip isteği modunu yalnızca "pipeline" iken açar. */
 export type RunEngine = "agent" | "pipeline" | "legacy" | null;
 
+/** Bounded public run record for run-history UI consumers. */
+export interface RunSnapshot {
+  runId: string;
+  root: string | null;
+  revision: number;
+  status: RunStatus;
+  runStage: RunStage;
+  task: string;
+  providerId: string;
+  engine: RunEngine;
+  followUpDraft: string;
+  plan: PlanInfo | null;
+  stages: Record<Role, StageInfo>;
+  flow: FlowItem[];
+  diffs: DiffRow[];
+  proposals: Proposal[];
+  agentEvidence: AgentEvidence | null;
+  checkpointId: string | null;
+  checkpointBusy: boolean;
+  totals: RunState["totals"];
+  verdict: string | null;
+  verdictNote: string;
+  error: string | null;
+  errorTitle: string | null;
+  errorDescription: string | null;
+  mentions: string[];
+  lastRestoredCheckpointId: string | null;
+  uncertain: boolean;
+  pending: boolean;
+}
+
 /** F6 (@-mentions) — Composer'da @ ile pinlenen dosya/klasör; sadece bu
     oturum boyunca task taslağıyla birlikte tutulur (kalıcı depoya YAZILMAZ). */
 export const MAX_MENTIONS = 10;
 
 interface RunState {
+  runs: Record<string, RunSnapshot>;
+  selectedRunId: string | null;
+  draftToken: number;
+  draftUncertain: boolean;
   status: RunStatus;
   /** Kullanıcının gördüğü lifecycle; altyapıdaki RunStatus'tan daha ayrıntılıdır. */
   runStage: RunStage;
@@ -136,6 +171,9 @@ interface RunState {
   reject: () => Promise<void>;
   /** olay kanalı aboneliği — App mount'ta bir kez */
   install: () => void;
+  newDraft: () => void;
+  selectRun: (runId: string) => void;
+  refreshRuns: () => Promise<void>;
 }
 
 const IDLE_STAGES = (): Record<Role, StageInfo> => ({
@@ -146,13 +184,53 @@ const IDLE_STAGES = (): Record<Role, StageInfo> => ({
 
 let flowId = 1;
 let installed = false;
-let startFlight = false;
-let followUpFlight = false;
+let startFlights = 0;
+let draftGeneration = 0;
+const pendingDraftStarts = new Set<number>();
+const followUpFlights = new Set<string>();
+const mutationFlights = new Set<string>();
 let workspaceGeneration = 0;
 let workspaceRoot: string | null = null;
 let workspaceTracker: Promise<void> | null = null;
-let activeRunContext: { runId: string | null; root: string | null; generation: number; attempt: number } | null = null;
-let runAttempt = 0;
+const MAX_TERMINAL_RUNS = 32;
+type AdmissionMessage = { type: "event"; ev: RunEvent } | { type: "finished"; payload: import("@/bridge").Events["run.finished"] } | { type: "activity"; item: ActivityItem };
+const pendingAdmissionEvents = new Map<string, AdmissionMessage[]>();
+const uncertainAdmissionRoots = new Set<string>();
+
+function trimRunRecords() {
+  const state = useRun.getState();
+  const records = Object.values(state.runs);
+  const removable = records.filter((run) => !run.pending && !run.uncertain && run.status !== "running" && run.runStage !== "ready" && !run.proposals.length && !run.checkpointBusy && !followUpFlights.has(run.runId));
+  let runs = state.runs;
+  while (removable.length > MAX_TERMINAL_RUNS) {
+    const index = removable.findIndex((run) => run.runId !== state.selectedRunId);
+    if (index < 0) break;
+    const [evicted] = removable.splice(index, 1);
+    const { [evicted.runId]: _, ...rest } = runs;
+    runs = rest;
+    void import("@/state/activity").then(({ useActivity }) => useActivity.getState().remove(evicted.runId));
+  }
+  if (runs !== state.runs) useRun.setState({ runs });
+}
+
+function projectSnapshot(run: RunSnapshot) {
+  return { selectedRunId: run.runId, runId: run.runId, status: run.status, runStage: run.runStage,
+    task: run.task, mentions: run.mentions, providerId: run.providerId, engine: run.engine,
+    followUpDraft: run.followUpDraft, plan: run.plan, stages: run.stages, flow: run.flow,
+    diffs: run.diffs, proposals: run.proposals, agentEvidence: run.agentEvidence,
+    checkpointId: run.checkpointId, checkpointBusy: run.checkpointBusy, totals: run.totals,
+    verdict: run.verdict, verdictNote: run.verdictNote, error: run.error,
+    errorTitle: run.errorTitle, errorDescription: run.errorDescription,
+    lastRestoredCheckpointId: run.lastRestoredCheckpointId, runRootStale: run.root !== workspaceRoot };
+}
+
+function patchRun(runId: string, updater: (record: RunSnapshot) => RunSnapshot) {
+  const state = useRun.getState();
+  const record = state.runs[runId];
+  if (!record) return;
+  const next = updater(record);
+  useRun.setState({ runs: { ...state.runs, [runId]: next }, ...(state.selectedRunId === runId ? projectSnapshot(next) : {}) });
+}
 
 async function trackWorkspace() {
   if (!workspaceTracker) {
@@ -163,8 +241,7 @@ async function trackWorkspace() {
         workspaceRoot = state.root;
         workspaceGeneration += 1;
         const current = useRun.getState();
-        const stillRunning = current.status === "running" || startFlight || followUpFlight;
-        setRunOnRootChange(stillRunning);
+        current.newDraft();
       });
     });
   }
@@ -176,31 +253,11 @@ async function trackWorkspace() {
   }
 }
 
-function setRunOnRootChange(stillRunning: boolean) {
-  useRun.setState({
-    runRootStale: stillRunning,
-    task: "",
-    mentions: [],
-    agentEvidence: null,
-    diffs: [],
-    proposals: [],
-    verdict: null,
-    verdictNote: "",
-    totals: null,
-    ...(stillRunning ? {
-      status: "running" as const,
-      flow: [{ id: flowId++, kind: "info" as const, text: "Önceki projenin koşusu sürüyor. Bu proje için sonucu kullanılamaz; gerekirse eski koşuyu durdurun." }],
-    } : {
-      status: "idle" as const,
-      runStage: "draft" as const,
-      runId: null,
-      engine: null,
-      flow: [],
-    }),
-  });
-}
-
 export const useRun = create<RunState>((set, get) => ({
+  runs: {},
+  selectedRunId: null,
+  draftToken: 0,
+  draftUncertain: false,
   status: "idle",
   runStage: "draft",
   runId: null,
@@ -228,6 +285,65 @@ export const useRun = create<RunState>((set, get) => ({
   lastRestoredCheckpointId: null,
   checkpointBusy: false,
 
+  newDraft: () => {
+    draftGeneration += 1;
+    set({ status: "idle", runStage: "draft", runId: null, task: "", mentions: [], engine: null,
+      followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [], diffs: [], proposals: [],
+      agentEvidence: null, runRootStale: false, verdict: null, verdictNote: "", totals: null,
+      error: null, errorTitle: null, errorDescription: null, checkpointId: null,
+      lastRestoredCheckpointId: null, checkpointBusy: false, selectedRunId: null, draftToken: draftGeneration,
+      draftUncertain: workspaceRoot !== null && uncertainAdmissionRoots.has(workspaceRoot) });
+    void import("@/state/activity").then(({ useActivity }) => {
+      if (useRun.getState().selectedRunId === null) useActivity.getState().select(null);
+    });
+  },
+  selectRun: (runId) => {
+    const record = get().runs[runId];
+    if (!record) return;
+    set(projectSnapshot(record));
+    void import("@/state/activity").then(({ useActivity }) => {
+      if (useRun.getState().selectedRunId === runId) useActivity.getState().select(runId);
+    });
+  },
+  refreshRuns: async () => {
+    await trackWorkspace();
+    const root = workspaceRoot;
+    const generation = workspaceGeneration;
+    const { runs } = await bridge.call("run.list", {});
+    await Promise.all(runs.map(async (item) => {
+      if (workspaceRoot !== root || workspaceGeneration !== generation) return;
+      if (!get().runs[item.runId]) {
+        const status: RunStatus = item.status === "running" || item.status === "queued" || item.status === "waiting_user" ? "running" : item.status === "cancelled" ? "cancelled" : item.status === "succeeded" ? "done" : "failed";
+        const placeholder: RunSnapshot = { runId: item.runId, root, revision: 0, status,
+          runStage: item.status === "waiting_user" ? "ready" : "working", task: item.task, providerId: item.providerId,
+          engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [], diffs: [], proposals: [],
+          agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "",
+          error: null, errorTitle: null, errorDescription: null, mentions: [], lastRestoredCheckpointId: null, uncertain: true, pending: false };
+        set((s) => ({ runs: { ...s.runs, [item.runId]: placeholder } }));
+      }
+      const before = get().runs[item.runId];
+      const revision = before.revision;
+      if (before.checkpointBusy || mutationFlights.has(item.runId) || followUpFlights.has(item.runId)) return;
+      try {
+        const detail = await bridge.call("run.get", { runId: item.runId });
+        if (workspaceRoot !== root || workspaceGeneration !== generation || mutationFlights.has(item.runId) || followUpFlights.has(item.runId) || (get().runs[item.runId]?.revision ?? -1) !== revision) return;
+        const evidence = detail.evidence ? parseAgentEvidence({ type: "evidence", ...detail.evidence } as RunEvent) : null;
+        const restored = detail.phase === "restored" || (before.lastRestoredCheckpointId !== null && before.lastRestoredCheckpointId === detail.checkpointId);
+        const snapshot: RunSnapshot = { runId: item.runId, root: workspaceRoot, revision: 1,
+          status: detail.status === "running" || detail.status === "queued" ? "running" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" || detail.status === "waiting_user" ? "done" : "failed",
+          runStage: restored ? "restored" : detail.phase === "applied" ? "applied" : detail.phase === "rejected" ? "draft" : detail.status === "waiting_user" ? "ready" : detail.status === "running" || detail.status === "queued" ? "working" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" ? "noChanges" : "error",
+          task: before.task || detail.task, providerId: detail.providerId, engine: "agent", followUpDraft: before.followUpDraft, plan: before.plan,
+          stages: before.stages, flow: before.flow, diffs: detail.proposals.map((p) => ({ path: p.path, isNew: p.is_new, diff: p.diff, checked: before.diffs.find((d) => d.path === p.path)?.checked ?? true })),
+          proposals: detail.proposals, agentEvidence: restored || detail.phase === "rejected" ? null : evidence, checkpointId: restored ? null : detail.checkpointId, checkpointBusy: false,
+          totals: detail.totals, verdict: before.verdict, verdictNote: before.verdictNote, error: detail.errorCode,
+          errorTitle: before.errorTitle, errorDescription: before.errorDescription,
+          mentions: before.mentions, lastRestoredCheckpointId: before.lastRestoredCheckpointId, uncertain: detail.status === "unavailable", pending: false };
+        useRun.setState((s) => ({ runs: { ...s.runs, [item.runId]: { ...snapshot, revision: revision + 1 } }, ...(s.selectedRunId === item.runId ? projectSnapshot({ ...snapshot, revision: revision + 1 }) : {}) }));
+      } catch { /* list remains usable if an individual detail lookup fails */ }
+    }));
+    trimRunRecords();
+  },
+
   loadProviders: async () => {
     try {
       const [{ providers, recommendedRouting }, prefs] = await Promise.all([
@@ -239,7 +355,7 @@ export const useRun = create<RunState>((set, get) => ({
       // Kaydedilmiş sağlayıcı artık kullanılamıyor olsa da DEĞİŞTİRİLMEZ —
       // Composer'daki mevcut eksik-anahtar/CLI uyarısı zaten bunu gösterir.
       const routing = prefs.routing ?? recommendedRouting;
-      set({ providers, routing, providerId: recommendedRouting.coder });
+      set({ providers, routing, ...(get().selectedRunId === null ? { providerId: recommendedRouting.coder } : {}) });
     } catch {
       // varsayılanlar kalır
     }
@@ -251,30 +367,53 @@ export const useRun = create<RunState>((set, get) => ({
     void import("@/state/settings").then(({ useSettings }) => useSettings.getState().update({ routing }));
   },
 
-  setProviderId: (providerId) => set({ providerId }),
+  setProviderId: (providerId) => {
+    const id = get().selectedRunId;
+    if (id) patchRun(id, (r) => ({ ...r, revision: r.revision + 1, providerId }));
+    else set({ providerId });
+  },
 
-  setTask: (task) => set({ task }),
+  setTask: (task) => {
+    const id = get().selectedRunId;
+    if (id) patchRun(id, (r) => ({ ...r, revision: r.revision + 1, task }));
+    else set({ task });
+  },
 
   addMention: (path) => {
     const { mentions } = get();
     if (mentions.includes(path)) return true;
     if (mentions.length >= MAX_MENTIONS) return false;
-    set({ mentions: [...mentions, path] });
+    const next = [...mentions, path];
+    const id = get().selectedRunId;
+    if (id) patchRun(id, (r) => ({ ...r, revision: r.revision + 1, mentions: next }));
+    else set({ mentions: next });
     return true;
   },
 
-  removeMention: (path) => set((s) => ({ mentions: s.mentions.filter((m) => m !== path) })),
+  removeMention: (path) => {
+    const mentions = get().mentions.filter((m) => m !== path);
+    const id = get().selectedRunId;
+    if (id) patchRun(id, (r) => ({ ...r, revision: r.revision + 1, mentions }));
+    else set({ mentions });
+  },
 
   start: async () => {
-    if (startFlight || followUpFlight || get().status === "running") return;
-    startFlight = true;
-    const attempt = ++runAttempt;
+    if (get().status === "running" || get().draftUncertain) return;
+    if (get().selectedRunId !== null) { toast.info("Yeni çalışma için Yeni görev düğmesini kullanın."); return; }
+    const draftToken = draftGeneration;
+    if (pendingDraftStarts.has(draftToken)) return;
+    pendingDraftStarts.add(draftToken);
+    startFlights += 1;
+    const draftTokenAtStart = get().draftToken;
     const draft = get();
+    const capturedRoot = workspaceRoot;
+    const capturedGeneration = workspaceGeneration;
     let requestIssued = false;
     try {
     await trackWorkspace();
-    const root = workspaceRoot;
-    const generation = workspaceGeneration;
+    const root = capturedRoot ?? workspaceRoot;
+    const generation = capturedRoot === null ? workspaceGeneration : capturedGeneration;
+    if (root && uncertainAdmissionRoots.has(root)) { set({ draftUncertain: true }); return; }
     const { task, providerId, providers, mentions, runStage } = draft;
     if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken yeni koşu başlatılamaz."); return; }
     if (get().status === "running") return;
@@ -297,8 +436,7 @@ export const useRun = create<RunState>((set, get) => ({
       toast.info(selected?.engineReason || "Seçili sağlayıcı bu tek ajan akışında desteklenmiyor.");
       return;
     }
-    if (get().status === "running" || workspaceGeneration !== generation || workspaceRoot !== root) return;
-    activeRunContext = { runId: null, root, generation, attempt };
+    if (workspaceGeneration !== generation || workspaceRoot !== root || get().draftToken !== draft.draftToken) return;
     set({
       status: "running",
       runStage: "working",
@@ -320,59 +458,76 @@ export const useRun = create<RunState>((set, get) => ({
     });
     try {
       requestIssued = true;
+      if (workspaceGeneration !== generation || workspaceRoot !== root) return;
       const { runId } = await bridge.call("run.start", { task: task.trim(), providerId, mentions });
-      if (activeRunContext?.attempt === attempt) activeRunContext.runId = runId;
-      else if (runAttempt !== attempt || workspaceGeneration !== generation || workspaceRoot !== root) return;
-      set({ runId });
+      const snapshot: RunSnapshot = { runId, root, revision: 1, status: "running", runStage: "working", task: task.trim(), providerId, engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [{ id: flowId++, kind: "task", text: task.trim() }], diffs: [], proposals: [], agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "", error: null, errorTitle: null, errorDescription: null, mentions: [...mentions], lastRestoredCheckpointId: null, uncertain: false, pending: false };
+      useRun.setState((s) => ({ runs: { ...s.runs, [runId]: snapshot }, ...(s.draftToken === draftTokenAtStart && s.selectedRunId === null && workspaceGeneration === generation && workspaceRoot === root ? projectSnapshot(snapshot) : {}) }));
+      trimRunRecords();
+      const buffered = pendingAdmissionEvents.get(runId) ?? [];
+      pendingAdmissionEvents.delete(runId);
+      for (const message of buffered) {
+        if (message.type === "event") routeRunEvent(runId, message.ev);
+        else if (message.type === "finished") routeRunFinished(message.payload);
+        else void import("@/state/activity").then(({ useActivity }) => useActivity.getState().append(message.item));
+      }
       useCollaboration.getState().attachRun(null);
       // F1 (canlı ajan etkinliği): Etkinlik sekmesi bir önceki koşudan kalan
       // öğeleri göstermesin diye döngüsel importu geciktir (diğer state
       // dosyalarındaki desenle aynı).
-      void import("@/state/activity").then(({ useActivity }) => useActivity.getState().reset(runId));
+      void import("@/state/activity").then(({ useActivity }) => {
+        if (useRun.getState().selectedRunId === runId) useActivity.getState().reset(runId);
+      });
     } catch (e) {
-      if (activeRunContext?.attempt === attempt) {
+      {
+        if (!(e instanceof BridgeError) && root) uncertainAdmissionRoots.add(root);
         const staleRoot = workspaceGeneration !== generation || workspaceRoot !== root;
-        if (!staleRoot || e instanceof BridgeError) {
-          activeRunContext = null;
-          set({ status: "failed", runStage: "error", runId: null, error: staleRoot ? "Proje değişirken koşu isteği reddedildi; eski projede etkin koşu yok." : e instanceof Error ? e.message : "Koşu başlatılamadı." });
+        if (get().draftToken === draftTokenAtStart && get().selectedRunId === null && (!staleRoot || e instanceof BridgeError)) {
+          set({ status: "failed", runStage: "error", runId: null, draftUncertain: !(e instanceof BridgeError), error: staleRoot ? "Proje değişirken koşu isteği reddedildi; eski projede etkin koşu yok." : e instanceof Error ? e.message : "Koşu başlatılamadı." });
           toast.err(e instanceof Error ? e.message : "Koşu başlatılamadı.");
         }
       }
     }
     } finally {
       if (!requestIssued && get().runRootStale && get().status === "running") {
-        activeRunContext = null;
-        set({ status: "failed", runStage: "error", runId: null, error: "Proje değişmeden önce koşu isteği gönderilmedi." });
+        if (get().draftToken === draftTokenAtStart && get().selectedRunId === null) set({ status: "failed", runStage: "error", runId: null, error: "Proje değişmeden önce koşu isteği gönderilmedi." });
       }
-      startFlight = false;
+      startFlights = Math.max(0, startFlights - 1);
+      pendingDraftStarts.delete(draftToken);
+      if (startFlights === 0) pendingAdmissionEvents.clear();
     }
   },
 
   cancel: async () => {
     const { runId, status } = get();
     if (status !== "running") return;
-    await bridge.call("run.cancel", { runId: runId ?? undefined });
+    if (!runId) return;
+    await bridge.call("run.cancel", { runId });
   },
 
-  setFollowUpDraft: (text) => set({ followUpDraft: text }),
+  setFollowUpDraft: (text) => {
+    const id = get().selectedRunId;
+    if (id) patchRun(id, (r) => ({ ...r, revision: r.revision + 1, followUpDraft: text }));
+    else set({ followUpDraft: text });
+  },
 
   followUp: async () => {
-    if (followUpFlight || startFlight) return;
-    followUpFlight = true;
     const invocation = get();
     const expectedRunId = invocation.runId;
+    const record = expectedRunId ? invocation.runs[expectedRunId] : undefined;
+    const root = record?.root ?? null;
+    const generation = workspaceGeneration;
+    if (!expectedRunId || followUpFlights.has(expectedRunId) || mutationFlights.has(expectedRunId)) return;
+    followUpFlights.add(expectedRunId);
     let requestIssued = false;
     try {
     await trackWorkspace();
-    const root = workspaceRoot;
-    const generation = workspaceGeneration;
-    if (activeRunContext && activeRunContext.runId && activeRunContext.runId !== expectedRunId) return;
+    if (!record || !root || workspaceRoot !== root || workspaceGeneration !== generation || record.uncertain) return;
     if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken takip koşusu başlatılamaz."); return; }
     if ((await import("@/state/collaboration")).useCollaboration.getState().enabled) {
       toast.info("Bu yeni akışta ortak bağlam henüz bağlı değil. Takip koşusu başlatılmadı.");
       return;
     }
-    const { followUpDraft, mentions, status, runStage, engine } = get();
+    const { followUpDraft, mentions, status, runStage, engine } = record;
     if (status === "running") return;
     if (runStage !== "ready") return;
     if (engine !== "pipeline" && engine !== "agent") {
@@ -384,100 +539,113 @@ export const useRun = create<RunState>((set, get) => ({
       toast.info("Takip isteği boş.");
       return;
     }
-    if (get().status === "running" || get().runId !== expectedRunId || workspaceGeneration !== generation || workspaceRoot !== root) return;
-    activeRunContext = { runId: expectedRunId, root, generation, attempt: ++runAttempt };
+    if (workspaceGeneration !== generation || workspaceRoot !== root) return;
     try {
-      requestIssued = true;
-      await bridge.call("run.followUp", { feedback, mentions });
+       requestIssued = true;
+       if (!expectedRunId || workspaceGeneration !== generation || workspaceRoot !== root) return;
+       patchRun(expectedRunId, (r) => ({ ...r, revision: r.revision + 1, pending: true }));
+       await bridge.call("run.followUp", { runId: expectedRunId, feedback, mentions });
       // Sunucu, continuation'ı başlatmadan ÖNCE bir "followUpStarted" run.event
       // yayınlar (bkz. webhost/api/run.py) -- diff/proposal sıfırlama ve
       // kullanıcı mesajının akışa (flow) eklenmesi ORADA yapılır (consume()),
       // burada değil; böylece tek bir doğruluk kaynağı olur.
     } catch (e) {
-      if (get().runId === expectedRunId && (workspaceGeneration !== generation || workspaceRoot !== root)) {
-        if (e instanceof BridgeError) {
-          activeRunContext = null;
-          set({ status: "failed", runStage: "error", runId: null, error: "Önceki projede takip isteği reddedildi; bekleyen eski sonuç artık etkin değil." });
-        }
-      } else if (get().runId === expectedRunId && workspaceGeneration === generation && workspaceRoot === root) {
-        const knownPreExecution = e instanceof BridgeError && ["busy", "no_active_run", "wrong_root", "stale_run"].includes(e.code);
-        if (!knownPreExecution) set({ status: "failed", runStage: "error", error: "Takip isteği kabulü doğrulanamadı. Sonuç yetkisi teyitsiz; tekrar veya yeni işlem yapmadan önce durumu kontrol edin." });
+      {
+        const knownPreExecution = e instanceof BridgeError && ["busy", "no_active_run", "wrong_root", "stale_run", "run_project_mismatch", "run_not_ready"].includes(e.code);
+         if (knownPreExecution) patchRun(expectedRunId, (r) => ({ ...r, revision: r.revision + 1, pending: false }));
+         else patchRun(expectedRunId, (r) => ({ ...r, revision: r.revision + 1, pending: false, status: "failed", runStage: "error", uncertain: true, proposals: [], diffs: [], agentEvidence: null, error: "Takip isteği kabulü doğrulanamadı. Sonuç yetkisi teyitsiz; tekrar veya yeni işlem yapmadan önce durumu kontrol edin." }));
         toast.err(e instanceof Error ? e.message : "Takip isteği başarısız.");
       }
     }
     } finally {
       if (!requestIssued && get().runRootStale && get().status === "running") {
-        activeRunContext = null;
-        set({ status: "failed", runStage: "error", runId: null, error: "Proje değişmeden önce takip isteği gönderilmedi." });
+        patchRun(expectedRunId, (r) => ({ ...r, revision: r.revision + 1, status: "failed", runStage: "error", uncertain: true, proposals: [], diffs: [], error: "Proje değişmeden önce takip isteği gönderilmedi." }));
       }
-      followUpFlight = false;
+      followUpFlights.delete(expectedRunId);
     }
   },
 
-  toggleDiff: (path) =>
-    set((s) => ({
-      diffs: s.diffs.map((d) => (d.path === path ? { ...d, checked: !d.checked } : d)),
-    })),
+  toggleDiff: (path) => {
+    const id = get().selectedRunId;
+    if (!id) return;
+    patchRun(id, (r) => ({ ...r, revision: r.revision + 1,
+      diffs: r.diffs.map((d) => d.path === path ? { ...d, checked: !d.checked } : d) }));
+  },
 
   apply: async () => {
-    if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken değişiklikler uygulanamaz."); return; }
-    const paths = get().diffs.filter((d) => d.checked).map((d) => d.path);
+    const origin = get();
+    const runId = origin.runId;
+    const record = runId ? origin.runs[runId] : undefined;
+    const root = record?.root ?? null;
+    const generation = workspaceGeneration;
+     if (!runId || !record || !root || root !== workspaceRoot || record.pending || record.uncertain || mutationFlights.has(runId) || followUpFlights.has(runId)) return;
+    mutationFlights.add(runId);
+    patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, checkpointBusy: true }));
+    const paths = record.diffs.filter((d) => d.checked).map((d) => d.path);
     if (paths.length === 0) {
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
       toast.info("Uygulanacak dosya seçilmedi.");
       return;
     }
-    if (get().checkpointBusy) return;
-    const { useEditor } = await import("@/state/editor");
-    const dirty = useEditor.getState().tabs.filter((t) => t.dirty && paths.includes(t.rel));
-    if (dirty.length) {
-      toast.err(`Önce kaydedilmemiş sekmeleri kaydedin: ${dirty.map((t) => t.name).join(", ")}`);
-      return;
-    }
-    set({ checkpointBusy: true });
     try {
-      const { applied, errors, conflicts, checkpointId } = await bridge.call("run.applyProposals", { paths });
+      if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken değişiklikler uygulanamaz."); return; }
+      const { useEditor } = await import("@/state/editor");
+      if (workspaceGeneration !== generation || workspaceRoot !== root) return;
+      const dirty = useEditor.getState().tabs.filter((t) => t.dirty && paths.includes(t.rel));
+      if (dirty.length) { toast.err(`Önce kaydedilmemiş sekmeleri kaydedin: ${dirty.map((t) => t.name).join(", ")}`); return; }
+      const { applied, errors, conflicts, checkpointId } = await bridge.call("run.applyProposals", { runId, paths });
       for (const c of conflicts ?? []) toast.err(c.reason);
       for (const e of errors) toast.err(`${e.path}: ${e.message}`);
       if (!applied.length) return;
       if (!checkpointId) throw new Error("Uygulama tamamlandı ancak checkpoint kimliği alınamadı.");
-      await refreshProjectFiles(applied);
-      set({
-        diffs: [],
-        proposals: [],
-        runStage: "applied",
-        task: "",
-        mentions: [],
-        checkpointId,
-        lastRestoredCheckpointId: null,
-      });
+      if (workspaceGeneration === generation && workspaceRoot === root && get().selectedRunId === runId) await refreshProjectFiles(applied, runId, root, generation);
+      patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, diffs: [], proposals: [], runStage: "applied", mentions: [], checkpointId, lastRestoredCheckpointId: null }));
       toast.ok(`${applied.length} dosya uygulandı · checkpoint hazır.`, {
         label: "Geri Al",
-        run: () => void get().restoreCheckpoint(checkpointId),
+        run: () => {
+          if (get().selectedRunId !== runId || workspaceRoot !== root) { toast.info("Koşuyu ve projeyi yeniden seçin; geri alma başlatılmadı."); return; }
+          void get().restoreCheckpoint(checkpointId);
+        },
       });
     } catch (e) {
+      const knownRefusal = e instanceof BridgeError && ["busy", "wrong_root", "stale_run", "no_proposals", "run_not_ready"].includes(e.code);
+      if (!knownRefusal) patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, status: "failed", runStage: "error", uncertain: true, proposals: [], diffs: [], agentEvidence: null, error: "Uygulama kabulü doğrulanamadı; eski öneri kanıtı kullanılamaz." }));
       toast.err(e instanceof Error ? e.message : "Uygulanamadı.");
     } finally {
-      set({ checkpointBusy: false });
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
     }
   },
 
   restoreCheckpoint: async (requestedId) => {
-    const checkpointId = requestedId ?? get().checkpointId;
-    if (!checkpointId) {
+    const origin = get();
+    const runId = origin.runId;
+    const record = runId ? origin.runs[runId] : undefined;
+    const checkpointId = requestedId ?? record?.checkpointId;
+    const root = record?.root ?? null;
+    const generation = workspaceGeneration;
+     if (!runId || !record || record.pending || record.uncertain || !checkpointId || checkpointId !== record.checkpointId || !root || root !== workspaceRoot || mutationFlights.has(runId) || followUpFlights.has(runId)) {
       toast.info("Geri alınacak checkpoint yok.");
       return;
     }
-    if (get().checkpointBusy) return;
+    mutationFlights.add(runId);
+    patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, checkpointBusy: true }));
+    try {
     let checkpoint: Checkpoint | undefined;
     try {
       const { checkpoints } = await bridge.call("checkpoint.list", {});
       checkpoint = checkpoints.find((item) => item.id === checkpointId);
     } catch {
       toast.err("Checkpoint bilgisi doğrulanamadı.");
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
       return;
     }
-    if (!checkpoint) {
+    if (!checkpoint || checkpoint.runId !== runId) {
       toast.err("Checkpoint bulunamadı veya artık geçerli değil.");
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
       return;
     }
     const { useEditor } = await import("@/state/editor");
@@ -486,6 +654,8 @@ export const useRun = create<RunState>((set, get) => ({
     );
     if (dirty.length) {
       toast.err(`Geri almadan önce kaydedilmemiş sekmeleri kaydedin: ${dirty.map((t) => t.name).join(", ")}`);
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
       return;
     }
     const { confirmDialog } = await import("@/components/dialogs/dialogs");
@@ -497,107 +667,122 @@ export const useRun = create<RunState>((set, get) => ({
       okLabel: "Geri Al",
       danger: true,
     });
-    if (!accepted) return;
-    set({ checkpointBusy: true });
+    if (!accepted) { mutationFlights.delete(runId); patchRun(runId, (r) => ({ ...r, checkpointBusy: false })); return; }
     try {
+      if (workspaceGeneration !== generation || workspaceRoot !== root) return;
       const { restored } = await bridge.call("checkpoint.restore", { checkpointId });
-      await refreshProjectFiles(restored);
-      set({
-        runStage: "restored",
-        checkpointId: null,
-        lastRestoredCheckpointId: checkpointId,
-        diffs: [],
-        proposals: [],
-        agentEvidence: null,
-      });
+      if (get().selectedRunId === runId && workspaceRoot === root && workspaceGeneration === generation) await refreshProjectFiles(restored, runId, root, generation);
+      patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, runStage: "restored", checkpointId: null,
+        lastRestoredCheckpointId: checkpointId, diffs: [], proposals: [], agentEvidence: null }));
       toast.ok(`${restored.length} dosya checkpoint'e geri alındı.`);
     } catch (e) {
+      const knownRefusal = e instanceof BridgeError && ["wrong_root", "stale_checkpoint", "checkpoint_not_found"].includes(e.code);
+      if (!knownRefusal) patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, uncertain: true, proposals: [], diffs: [], agentEvidence: null }));
       toast.err(e instanceof Error ? e.message : "Checkpoint geri alınamadı.");
     } finally {
-      set({ checkpointBusy: false });
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
+    }
+    } finally {
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
     }
   },
 
   reject: async () => {
-    if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken öneriler reddedilemez."); return; }
-    await bridge.call("run.rejectProposals", {});
-    set({ diffs: [], proposals: [], runStage: "draft", task: "", mentions: [],
-      agentEvidence: null, totals: null, verdict: null, verdictNote: "", followUpDraft: "" });
-    (await import("@/state/editor")).useEditor.getState().closeDiff();
-    toast.info("Değişiklikler reddedildi.");
+    const origin = get();
+    const runId = origin.runId;
+    const record = runId ? origin.runs[runId] : undefined;
+    const root = record?.root ?? null;
+    const generation = workspaceGeneration;
+     if (!runId || !record || !root || root !== workspaceRoot || record.pending || record.uncertain || mutationFlights.has(runId) || followUpFlights.has(runId)) return;
+    mutationFlights.add(runId);
+    patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, checkpointBusy: true }));
+    try {
+      if ((await import("@/state/delivery")).useDelivery.getState().busy) { toast.info("Ortak teslim işlemi sürerken öneriler reddedilemez."); return; }
+      if (workspaceGeneration !== generation || workspaceRoot !== root) return;
+      await bridge.call("run.rejectProposals", { runId });
+      patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, diffs: [], proposals: [], runStage: "draft", mentions: [], agentEvidence: null, totals: null, verdict: null, verdictNote: "", followUpDraft: "", checkpointBusy: false }));
+      const { useEditor } = await import("@/state/editor");
+      if (get().selectedRunId === runId && workspaceRoot === root && workspaceGeneration === generation) useEditor.getState().closeDiff();
+      toast.info("Değişiklikler reddedildi.");
+    } catch (e) {
+      const knownRefusal = e instanceof BridgeError && ["busy", "wrong_root", "stale_run", "no_proposals", "run_not_ready"].includes(e.code);
+      if (!knownRefusal) patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, status: "failed", runStage: "error", uncertain: true, proposals: [], diffs: [], agentEvidence: null, error: "Reddetme kabulü doğrulanamadı; eski öneri kanıtı kullanılamaz." }));
+      toast.err(e instanceof Error ? e.message : "Değişiklikler reddedilemedi.");
+    } finally {
+      mutationFlights.delete(runId);
+      patchRun(runId, (r) => ({ ...r, checkpointBusy: false }));
+    }
   },
 
   install: () => {
     if (installed) return;
     installed = true;
 
-    void import("@/state/workspace").then(({ useWorkspace }) => {
-      let previousRoot = useWorkspace.getState().root;
-      useWorkspace.subscribe((workspace) => {
-        if (workspace.root !== previousRoot) {
-          previousRoot = workspace.root;
-          set({ agentEvidence: null });
-        }
-      });
-    });
+    void trackWorkspace();
 
     bridge.on("run.event", ({ runId, ev }) => {
-      const context = activeRunContext;
-      if (!context || (context.runId && context.runId !== runId) || context.generation !== workspaceGeneration || context.root !== workspaceRoot || get().runRootStale) return;
-      consume(ev, set, get);
+      if (!get().runs[runId]) { bufferAdmission(runId, { type: "event", ev }); return; }
+      routeRunEvent(runId, ev);
     });
-    bridge.on("run.finished", ({ runId, status, error, errorTitle, errorDescription, engine }) => {
-      const context = activeRunContext;
-      if (!context || (context.runId && context.runId !== runId)) return;
-      if (get().runRootStale || context.generation !== workspaceGeneration || context.root !== workspaceRoot) {
-        activeRunContext = null;
-        set({ status: "failed", runStage: "error", runId: null, agentEvidence: null, diffs: [], proposals: [], verdict: null, totals: null, error: "Önceki projenin koşusu tamamlandı; sonucu bu projede kullanılamaz.", flow: [{ id: flowId++, kind: "info", text: "Önceki projenin koşusu tamamlandı. Sonuç bu projeye ait değil." }] });
-        return;
-      }
-      // F2: `engine`, bu koşunun GERÇEKTE hangi motorla yürütüldüğünü
-      // taşır -- bilinmiyorsa (eski/eksik bir olay) önceki değer korunur.
-      if (status === "failed") {
-        set((s) => ({
-          status: "failed",
-          runStage: "error",
-          error: error ?? null,
-          // A5 (hata UX): backend'in TEK Türkçe eşleme noktasından gelen
-          // kısa başlık/açıklama -- AiPanel'in terminal hata kartı bunu
-          // gösterir; yoksa AiPanel kendi genel metnine düşer.
-          errorTitle: errorTitle ?? null,
-          errorDescription: errorDescription ?? null,
-          stages: failRunning(s.stages),
-          flow: [...s.flow, { id: flowId++, kind: "error", text: `Hata: ${error ?? "bilinmiyor"}` }],
-          engine: engine ?? s.engine,
-        }));
-      } else if (status === "cancelled") {
-        set((s) => ({
-          status: "cancelled",
-          // A4-A4: "draft" (hiç başlamamış) DEĞİL, ayrı bir terminal durum --
-          // kendi kartı için bkz. AiPanel STAGE_META/DECISION_META.cancelled.
-          runStage: "cancelled",
-          stages: failRunning(s.stages),
-          flow: [...s.flow, { id: flowId++, kind: "info", text: "Koşu durduruldu." }],
-          engine: engine ?? s.engine,
-        }));
-      } else {
-        set((s) => ({
-          status: "done",
-          runStage: s.runStage === "ready" ? "ready" : "noChanges",
-          engine: engine ?? s.engine,
-        }));
-      }
-      activeRunContext = null;
+    bridge.on("run.finished", (payload) => {
+      if (!get().runs[payload.runId]) { bufferAdmission(payload.runId, { type: "finished", payload }); return; }
+      routeRunFinished(payload);
     });
   },
 }));
 
+function bufferAdmission(runId: string, message: AdmissionMessage) {
+  if (!startFlights) return;
+  const count = [...pendingAdmissionEvents.values()].reduce((n, batch) => n + batch.length, 0);
+  if (count >= 500 || (!pendingAdmissionEvents.has(runId) && pendingAdmissionEvents.size >= 32)) return;
+  pendingAdmissionEvents.set(runId, [...(pendingAdmissionEvents.get(runId) ?? []), message]);
+}
+
+export function acceptRunActivity(item: ActivityItem): boolean {
+  if (useRun.getState().runs[item.runId]) return true;
+  bufferAdmission(item.runId, { type: "activity", item });
+  return false;
+}
+
+function routeRunFinished(payload: import("@/bridge").Events["run.finished"]) {
+  const { runId, status, error, errorTitle, errorDescription, engine } = payload;
+  patchRun(runId, (record) => ({ ...record, revision: record.revision + 1,
+    status: status === "cancelled" ? "cancelled" : status === "failed" ? "failed" : "done",
+    runStage: status === "cancelled" ? "cancelled" : status === "failed" ? "error" : record.runStage === "ready" ? "ready" : "noChanges",
+    engine: engine ?? record.engine,
+    stages: status === "failed" ? failRunning(record.stages) : record.stages,
+    flow: status === "failed" ? [...record.flow, { id: flowId++, kind: "error" as const, text: `Hata: ${error ?? "bilinmiyor"}` }].slice(-500) : record.flow,
+    error: status === "failed" ? error ?? null : record.error,
+    errorTitle: status === "failed" ? errorTitle ?? null : record.errorTitle,
+    errorDescription: status === "failed" ? errorDescription ?? null : record.errorDescription }));
+  trimRunRecords();
+}
+
+function routeRunEvent(runId: string, ev: RunEvent) {
+  const snapshot = useRun.getState().runs[runId];
+  if (!snapshot) return;
+  let projected = { ...useRun.getState(), ...projectSnapshot(snapshot) } as ReturnType<typeof useRun.getState>;
+  const update = (fn: (s: ReturnType<typeof useRun.getState>) => Partial<ReturnType<typeof useRun.getState>>) => {
+    projected = { ...projected, ...fn(projected) };
+  };
+  consume(ev, update, () => projected);
+  const next: RunSnapshot = { ...snapshot, revision: snapshot.revision + 1, status: projected.status,
+    ...(ev.type === "followUpStarted" ? { pending: false, uncertain: false } : {}),
+    runStage: projected.runStage, task: projected.task, providerId: projected.providerId, engine: projected.engine,
+    followUpDraft: projected.followUpDraft, plan: projected.plan, stages: projected.stages,
+    flow: projected.flow.slice(-500), diffs: projected.diffs, proposals: projected.proposals,
+    agentEvidence: projected.agentEvidence, checkpointId: projected.checkpointId, checkpointBusy: projected.checkpointBusy,
+    totals: projected.totals, verdict: projected.verdict, verdictNote: projected.verdictNote,
+    error: projected.error, errorTitle: projected.errorTitle, errorDescription: projected.errorDescription,
+    mentions: projected.mentions, lastRestoredCheckpointId: projected.lastRestoredCheckpointId };
+  useRun.setState((s) => ({ runs: { ...s.runs, [runId]: next }, ...(s.selectedRunId === runId ? projectSnapshot(next) : {}) }));
+  trimRunRecords();
+}
+
 function failRunning(stages: Record<Role, StageInfo>): Record<Role, StageInfo> {
-  const out = { ...stages };
-  for (const r of Object.keys(out) as Role[]) {
-    if (out[r].state === "running") out[r] = { ...out[r], state: "error" };
-  }
-  return out;
+  return Object.fromEntries(Object.entries(stages).map(([role, stage]) => [role, stage.state === "running" ? { ...stage, state: "error" } : stage])) as Record<Role, StageInfo>;
 }
 
 function consume(
@@ -726,12 +911,6 @@ function consume(
           : { id: flowId++, kind: "info", text: "Değişiklik önerisi çıkmadı." },
       ],
     }));
-    // ilk diff'i merkezde aç (Cursor deseni) — döngüsel importu geciktir
-    if (proposals.length) {
-      void import("@/state/editor").then(({ useEditor }) =>
-        useEditor.getState().openDiff(proposals[0].path),
-      );
-    }
   } else if (type === "evidence") {
     set(() => ({ agentEvidence: parseAgentEvidence(ev) }));
   }
@@ -810,7 +989,7 @@ function markPrevDone(stages: Record<Role, StageInfo>): Record<Role, StageInfo> 
   return out;
 }
 
-async function refreshProjectFiles(paths: string[]) {
+async function refreshProjectFiles(paths: string[], runId: string, root: string, generation: number) {
   const [{ useEditor }, { useWorkspace }, { useScm }] = await Promise.all([
     import("@/state/editor"),
     import("@/state/workspace"),
@@ -818,9 +997,11 @@ async function refreshProjectFiles(paths: string[]) {
   ]);
   const editor = useEditor.getState();
   for (const rel of paths) {
+    if (workspaceRoot !== root || workspaceGeneration !== generation || useRun.getState().selectedRunId !== runId) return;
     if (!editor.tabs.some((tab) => tab.rel === rel)) continue;
     try {
       const { content } = await bridge.call("fs.readFile", { rel });
+      if (workspaceRoot !== root || workspaceGeneration !== generation || useRun.getState().selectedRunId !== runId) return;
       useEditor.setState((state) => ({
         tabs: state.tabs.map((tab) =>
           tab.rel === rel ? { ...tab, content, draft: content, dirty: false } : tab,
@@ -830,8 +1011,9 @@ async function refreshProjectFiles(paths: string[]) {
       useEditor.getState().closeDeleted(rel);
     }
   }
+  if (workspaceRoot !== root || workspaceGeneration !== generation || useRun.getState().selectedRunId !== runId) return;
   const workspace = useWorkspace.getState();
   await Promise.all(Object.keys(workspace.children).map((rel) => workspace.loadDir(rel)));
   await useScm.getState().refresh();
-  useEditor.getState().closeDiff();
+  if (workspaceRoot === root && workspaceGeneration === generation && useRun.getState().selectedRunId === runId) useEditor.getState().closeDiff();
 }

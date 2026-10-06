@@ -7,6 +7,7 @@ import { useEditor } from "@/state/editor";
 import { fileIcon } from "@/lib/fileIcons";
 import { Button, EmptyState } from "@/components/ui";
 import { bridge } from "@/bridge";
+import { useUi } from "@/state/ui";
 
 export function Changes() {
   const diffs = useRun((s) => s.diffs);
@@ -24,6 +25,14 @@ export function Changes() {
   const restoreCheckpoint = useRun((s) => s.restoreCheckpoint);
   const openDiff = useEditor((s) => s.openDiff);
   const activeDiff = useEditor((s) => s.diff?.path ?? null);
+  const selectedRunId = useRun((s) => s.selectedRunId);
+  const selectedRecord = useRun((s) => selectedRunId ? s.runs[selectedRunId] : undefined);
+  const runRootStale = useRun((s) => s.runRootStale);
+  const unsafe = !!selectedRecord?.pending || !!selectedRecord?.uncertain || runRootStale;
+  const openSelectedDiff = (path: string) => {
+    useUi.getState().setWorkspaceView("tools");
+    if (selectedRunId) void openDiff(path, selectedRunId);
+  };
 
   if (diffs.length === 0) {
     const ok = runStage === "applied" || runStage === "restored";
@@ -61,6 +70,7 @@ export function Changes() {
               icon={RotateCcw}
               loading={checkpointBusy}
               aria-busy={checkpointBusy}
+              disabled={checkpointBusy || unsafe}
               onClick={() => void restoreCheckpoint()}
             >
               Geri al
@@ -105,13 +115,13 @@ export function Changes() {
               key={d.path}
               role="button"
               tabIndex={0}
-              onClick={() => void openDiff(d.path)}
+              onClick={() => openSelectedDiff(d.path)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void openDiff(d.path); }
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSelectedDiff(d.path); }
               }}
               className={
-                "flex cursor-pointer items-center gap-2 border-l-2 px-2 py-2 " +
-                (active ? "border-accent bg-accentdim/60" : "border-transparent hover:bg-card/45")
+                "flex cursor-pointer items-center gap-2 rounded-[var(--r-sm)] border px-2 py-2 " +
+                (active ? "border-border-w2 bg-card/60" : "border-transparent hover:bg-card/45")
               }
             >
               <input
@@ -143,7 +153,7 @@ export function Changes() {
             icon={Check}
             block
             onClick={() => void apply()}
-            disabled={!canApply}
+            disabled={!canApply || unsafe}
             loading={checkpointBusy}
             aria-busy={checkpointBusy}
           >
@@ -154,7 +164,7 @@ export function Changes() {
             size="sm"
             icon={X}
             onClick={() => void reject()}
-            disabled={checkpointBusy}
+            disabled={checkpointBusy || unsafe}
           >
             Vazgeç
           </Button>

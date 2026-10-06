@@ -116,6 +116,31 @@ button svg {
   cursor: auto;
 }
 
+/* M2 task-first workspace: mobile keeps task selection and the active task
+   visible in a vertical flow rather than hiding them behind a drawer. */
+.task-workspace { overflow: hidden; }
+.task-list { flex: 0 0 auto; max-height: none; }
+@media (min-width: 768px) {
+  .task-list { max-height: none; flex: 0 0 auto; }
+}
+@media (max-width: 767px) {
+  .task-workspace > div:last-child {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .task-list {
+    max-height: min(28vh, 180px);
+    overflow: hidden;
+    border-right: 0;
+  }
+  .task-list > div:last-child { overflow-y: auto; }
+  .task-workspace > div:last-child > div:last-child {
+    min-height: 560px;
+    flex: none;
+  }
+}
+
 /* Welcome geniş ekranda sahne gibi merkezde kalır. Minimum pencere yüksekliğinde
    bilgi kartlarını kırpmak yerine içeride kaydırılabilir, üstten başlayan akışa geçer. */
 @media (max-height: 600px) {

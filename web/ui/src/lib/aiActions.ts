@@ -1,8 +1,5 @@
-/* aiActions.ts — R4 Command Center: Ctrl+K ve output akışını AI-native çalışma
-   turuna bağlayan eylemler. Hepsi mevcut run lifecycle'ına (setTask → start → plan
-   → öneri → inceleme → apply → checkpoint) düşer; ayrı bir sohbet kanalı açılmaz.
-   Bağlam görev metnine gömülür (run.start yalnız {task, routing} alır — backend
-   sözleşmesi değişmez). */
+/* Komut merkezi: kod ve çıktı bağlamını yeni, tek sağlayıcılı bir göreve taşır.
+   Seçili çalışmanın kimliği, önerileri ve karar yetkisi değiştirilmez. */
 
 import { useRun } from "@/state/run";
 import { useUi } from "@/state/ui";
@@ -46,11 +43,11 @@ export async function hasActiveSelection(): Promise<boolean> {
   return (await selectionContext(true)) !== null;
 }
 
-/** Ortak: görevi kur, AI panelini aç, çalıştır. run.start() running/ready korumasını
-    ve boş görev toast'ını kendisi yapar. */
+/** Açık bir kod/çıktı komutu yeni bir görev oluşturur; seçili çalışmayı değiştirmez. */
 async function startTeamRun(task: string) {
   const run = useRun.getState();
-  useUi.getState().showAiPanel();
+  run.newDraft();
+  useUi.getState().setWorkspaceView("tasks");
   run.setTask(task);
   await run.start();
 }
@@ -71,7 +68,7 @@ export async function inlineEditSelection() {
   const instruction = await promptDialog({
     title: "Seçili kodu düzenle",
     message: `${ctx.rel} · ${ctx.startLine}-${ctx.endLine}. satır`,
-    okLabel: "Ekibe gönder",
+    okLabel: "Ajana gönder",
     placeholder: "ör. bu döngüyü list comprehension yap",
   });
   if (!instruction?.trim()) return;
@@ -135,7 +132,7 @@ export function reviewChanges() {
   }
   useUi.getState().showAiPanel();
   const first = run.diffs[0]?.path ?? run.proposals[0]?.path;
-  if (first) void import("@/state/editor").then(({ useEditor }) => useEditor.getState().openDiff(first));
+  if (first && run.runId) void useEditor.getState().openDiff(first, run.runId);
 }
 
 /** "Checkpoint'e dön" — son apply checkpoint'ini onaylı restore et */

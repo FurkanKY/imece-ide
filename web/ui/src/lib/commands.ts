@@ -47,7 +47,7 @@ function buildAiCommands(): Command[] {
   const ex = useExec.getState();
   const cmds: Command[] = [
     {
-      id: "ai-task", label: "AI: Ekibe görev ver", hint: "composer",
+      id: "ai-task", label: "AI: Ajana görev ver", hint: "composer",
       Icon: Sparkles, run: () => giveTask(),
     },
   ];
@@ -65,7 +65,7 @@ function buildAiCommands(): Command[] {
   }
   if (ex.raw.trim()) {
     cmds.push({
-      id: "ai-error-to-team", label: "AI: Çıktı hatasını ekibe gönder", hint: "ÇIKTI → ekip",
+      id: "ai-error-to-team", label: "AI: Çıktı hatasını ajana gönder", hint: "ÇIKTI → ajan",
       Icon: Send, run: () => sendOutputErrorToTeam(),
     });
   }
