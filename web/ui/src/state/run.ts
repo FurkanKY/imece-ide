@@ -70,7 +70,8 @@ export type RunStage =
   /** A4-A4: kullanıcı koşuyu durdurdu (run.cancel / F7 gerçek iptal) --
       "draft" (hiç başlamamış) ve "error" (başarısızlık) ile
       KARIŞTIRILMAMASI için ayrı bir terminal durum. */
-  | "cancelled";
+  | "cancelled"
+  | "history";
 /** F2 (takip isteği): bir koşunun GERÇEKTE hangi motorla yürütüldüğü —
     run.finished'ın `engine` alanından gelir; henüz bilinmiyorsa null.
     Composer, takip isteği modunu yalnızca "pipeline" iken açar. */
@@ -105,6 +106,10 @@ export interface RunSnapshot {
   lastRestoredCheckpointId: string | null;
   uncertain: boolean;
   pending: boolean;
+  readOnly?: boolean;
+  historicalStatus?: string | null;
+  historyTruncated?: boolean;
+  taskTruncated?: boolean;
 }
 
 /** F6 (@-mentions) — Composer'da @ ile pinlenen dosya/klasör; sadece bu
@@ -152,6 +157,8 @@ interface RunState {
   checkpointId: string | null;
   lastRestoredCheckpointId: string | null;
   checkpointBusy: boolean;
+  readOnly: boolean;
+  historyUnavailable: boolean;
 
   loadProviders: () => Promise<void>;
   setRouting: (role: Role, provider: string) => void;
@@ -221,7 +228,8 @@ function projectSnapshot(run: RunSnapshot) {
     checkpointId: run.checkpointId, checkpointBusy: run.checkpointBusy, totals: run.totals,
     verdict: run.verdict, verdictNote: run.verdictNote, error: run.error,
     errorTitle: run.errorTitle, errorDescription: run.errorDescription,
-    lastRestoredCheckpointId: run.lastRestoredCheckpointId, runRootStale: run.root !== workspaceRoot };
+    lastRestoredCheckpointId: run.lastRestoredCheckpointId, runRootStale: run.root !== workspaceRoot,
+    readOnly: !!run.readOnly };
 }
 
 function patchRun(runId: string, updater: (record: RunSnapshot) => RunSnapshot) {
@@ -241,6 +249,7 @@ async function trackWorkspace() {
         workspaceRoot = state.root;
         workspaceGeneration += 1;
         const current = useRun.getState();
+        useRun.setState({ historyUnavailable: false });
         current.newDraft();
       });
     });
@@ -284,6 +293,8 @@ export const useRun = create<RunState>((set, get) => ({
   checkpointId: null,
   lastRestoredCheckpointId: null,
   checkpointBusy: false,
+  readOnly: false,
+  historyUnavailable: false,
 
   newDraft: () => {
     draftGeneration += 1;
@@ -291,7 +302,7 @@ export const useRun = create<RunState>((set, get) => ({
       followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [], diffs: [], proposals: [],
       agentEvidence: null, runRootStale: false, verdict: null, verdictNote: "", totals: null,
       error: null, errorTitle: null, errorDescription: null, checkpointId: null,
-      lastRestoredCheckpointId: null, checkpointBusy: false, selectedRunId: null, draftToken: draftGeneration,
+      lastRestoredCheckpointId: null, checkpointBusy: false, readOnly: false, selectedRunId: null, draftToken: draftGeneration,
       draftUncertain: workspaceRoot !== null && uncertainAdmissionRoots.has(workspaceRoot) });
     void import("@/state/activity").then(({ useActivity }) => {
       if (useRun.getState().selectedRunId === null) useActivity.getState().select(null);
@@ -309,16 +320,19 @@ export const useRun = create<RunState>((set, get) => ({
     await trackWorkspace();
     const root = workspaceRoot;
     const generation = workspaceGeneration;
-    const { runs } = await bridge.call("run.list", {});
+    const { runs, historyUnavailable } = await bridge.call("run.list", {});
+    if (workspaceRoot !== root || workspaceGeneration !== generation) return;
+    set({ historyUnavailable: !!historyUnavailable });
     await Promise.all(runs.map(async (item) => {
       if (workspaceRoot !== root || workspaceGeneration !== generation) return;
       if (!get().runs[item.runId]) {
-        const status: RunStatus = item.status === "running" || item.status === "queued" || item.status === "waiting_user" ? "running" : item.status === "cancelled" ? "cancelled" : item.status === "succeeded" ? "done" : "failed";
+        const status: RunStatus = item.readOnly ? "done" : item.status === "running" || item.status === "queued" || item.status === "waiting_user" ? "running" : item.status === "cancelled" ? "cancelled" : item.status === "succeeded" ? "done" : "failed";
         const placeholder: RunSnapshot = { runId: item.runId, root, revision: 0, status,
-          runStage: item.status === "waiting_user" ? "ready" : "working", task: item.task, providerId: item.providerId,
+          runStage: item.readOnly ? "history" : item.status === "waiting_user" ? "ready" : "working", task: item.task, providerId: item.providerId,
           engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [], diffs: [], proposals: [],
           agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "",
-          error: null, errorTitle: null, errorDescription: null, mentions: [], lastRestoredCheckpointId: null, uncertain: true, pending: false };
+          error: item.errorCode, errorTitle: null, errorDescription: null, mentions: [], lastRestoredCheckpointId: null, uncertain: !item.readOnly, pending: false, readOnly: !!item.readOnly,
+          historicalStatus: item.readOnly ? item.status : null, historyTruncated: false, taskTruncated: !!item.taskTruncated };
         set((s) => ({ runs: { ...s.runs, [item.runId]: placeholder } }));
       }
       const before = get().runs[item.runId];
@@ -330,14 +344,15 @@ export const useRun = create<RunState>((set, get) => ({
         const evidence = detail.evidence ? parseAgentEvidence({ type: "evidence", ...detail.evidence } as RunEvent) : null;
         const restored = detail.phase === "restored" || (before.lastRestoredCheckpointId !== null && before.lastRestoredCheckpointId === detail.checkpointId);
         const snapshot: RunSnapshot = { runId: item.runId, root: workspaceRoot, revision: 1,
-          status: detail.status === "running" || detail.status === "queued" ? "running" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" || detail.status === "waiting_user" ? "done" : "failed",
-          runStage: restored ? "restored" : detail.phase === "applied" ? "applied" : detail.phase === "rejected" ? "draft" : detail.status === "waiting_user" ? "ready" : detail.status === "running" || detail.status === "queued" ? "working" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" ? "noChanges" : "error",
+          status: detail.readOnly ? "done" : detail.status === "running" || detail.status === "queued" ? "running" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" || detail.status === "waiting_user" ? "done" : "failed",
+          runStage: detail.readOnly ? "history" : restored ? "restored" : detail.phase === "applied" ? "applied" : detail.phase === "rejected" ? "draft" : detail.status === "waiting_user" ? "ready" : detail.status === "running" || detail.status === "queued" ? "working" : detail.status === "cancelled" ? "cancelled" : detail.status === "succeeded" ? "noChanges" : "error",
           task: before.task || detail.task, providerId: detail.providerId, engine: "agent", followUpDraft: before.followUpDraft, plan: before.plan,
-          stages: before.stages, flow: before.flow, diffs: detail.proposals.map((p) => ({ path: p.path, isNew: p.is_new, diff: p.diff, checked: before.diffs.find((d) => d.path === p.path)?.checked ?? true })),
-          proposals: detail.proposals, agentEvidence: restored || detail.phase === "rejected" ? null : evidence, checkpointId: restored ? null : detail.checkpointId, checkpointBusy: false,
+          stages: before.stages, flow: before.flow, diffs: detail.readOnly ? [] : detail.proposals.map((p) => ({ path: p.path, isNew: p.is_new, diff: p.diff, checked: before.diffs.find((d) => d.path === p.path)?.checked ?? true })),
+          proposals: detail.readOnly ? [] : detail.proposals, agentEvidence: detail.readOnly ? evidence : restored || detail.phase === "rejected" ? null : evidence, checkpointId: detail.readOnly || restored ? null : detail.checkpointId, checkpointBusy: false,
           totals: detail.totals, verdict: before.verdict, verdictNote: before.verdictNote, error: detail.errorCode,
           errorTitle: before.errorTitle, errorDescription: before.errorDescription,
-          mentions: before.mentions, lastRestoredCheckpointId: before.lastRestoredCheckpointId, uncertain: detail.status === "unavailable", pending: false };
+          mentions: before.mentions, lastRestoredCheckpointId: before.lastRestoredCheckpointId, uncertain: detail.readOnly ? false : detail.status === "unavailable", pending: false, readOnly: !!detail.readOnly,
+          historicalStatus: detail.readOnly ? detail.status : null, historyTruncated: !!detail.historyTruncated, taskTruncated: !!detail.taskTruncated };
         useRun.setState((s) => ({ runs: { ...s.runs, [item.runId]: { ...snapshot, revision: revision + 1 } }, ...(s.selectedRunId === item.runId ? projectSnapshot({ ...snapshot, revision: revision + 1 }) : {}) }));
       } catch { /* list remains usable if an individual detail lookup fails */ }
     }));
@@ -460,7 +475,7 @@ export const useRun = create<RunState>((set, get) => ({
       requestIssued = true;
       if (workspaceGeneration !== generation || workspaceRoot !== root) return;
       const { runId } = await bridge.call("run.start", { task: task.trim(), providerId, mentions });
-      const snapshot: RunSnapshot = { runId, root, revision: 1, status: "running", runStage: "working", task: task.trim(), providerId, engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [{ id: flowId++, kind: "task", text: task.trim() }], diffs: [], proposals: [], agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "", error: null, errorTitle: null, errorDescription: null, mentions: [...mentions], lastRestoredCheckpointId: null, uncertain: false, pending: false };
+      const snapshot: RunSnapshot = { runId, root, revision: 1, status: "running", runStage: "working", task: task.trim(), providerId, engine: "agent", followUpDraft: "", plan: null, stages: IDLE_STAGES(), flow: [{ id: flowId++, kind: "task", text: task.trim() }], diffs: [], proposals: [], agentEvidence: null, checkpointId: null, checkpointBusy: false, totals: null, verdict: null, verdictNote: "", error: null, errorTitle: null, errorDescription: null, mentions: [...mentions], lastRestoredCheckpointId: null, uncertain: false, pending: false, readOnly: false, historicalStatus: null, historyTruncated: false, taskTruncated: false };
       useRun.setState((s) => ({ runs: { ...s.runs, [runId]: snapshot }, ...(s.draftToken === draftTokenAtStart && s.selectedRunId === null && workspaceGeneration === generation && workspaceRoot === root ? projectSnapshot(snapshot) : {}) }));
       trimRunRecords();
       const buffered = pendingAdmissionEvents.get(runId) ?? [];
@@ -499,6 +514,7 @@ export const useRun = create<RunState>((set, get) => ({
 
   cancel: async () => {
     const { runId, status } = get();
+    if (runId && get().runs[runId]?.readOnly) return;
     if (status !== "running") return;
     if (!runId) return;
     await bridge.call("run.cancel", { runId });
@@ -516,7 +532,7 @@ export const useRun = create<RunState>((set, get) => ({
     const record = expectedRunId ? invocation.runs[expectedRunId] : undefined;
     const root = record?.root ?? null;
     const generation = workspaceGeneration;
-    if (!expectedRunId || followUpFlights.has(expectedRunId) || mutationFlights.has(expectedRunId)) return;
+    if (!expectedRunId || record?.readOnly || followUpFlights.has(expectedRunId) || mutationFlights.has(expectedRunId)) return;
     followUpFlights.add(expectedRunId);
     let requestIssued = false;
     try {
@@ -578,7 +594,7 @@ export const useRun = create<RunState>((set, get) => ({
     const record = runId ? origin.runs[runId] : undefined;
     const root = record?.root ?? null;
     const generation = workspaceGeneration;
-     if (!runId || !record || !root || root !== workspaceRoot || record.pending || record.uncertain || mutationFlights.has(runId) || followUpFlights.has(runId)) return;
+     if (!runId || !record || record.readOnly || !root || root !== workspaceRoot || record.pending || record.uncertain || mutationFlights.has(runId) || followUpFlights.has(runId)) return;
     mutationFlights.add(runId);
     patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, checkpointBusy: true }));
     const paths = record.diffs.filter((d) => d.checked).map((d) => d.path);
@@ -625,7 +641,7 @@ export const useRun = create<RunState>((set, get) => ({
     const checkpointId = requestedId ?? record?.checkpointId;
     const root = record?.root ?? null;
     const generation = workspaceGeneration;
-     if (!runId || !record || record.pending || record.uncertain || !checkpointId || checkpointId !== record.checkpointId || !root || root !== workspaceRoot || mutationFlights.has(runId) || followUpFlights.has(runId)) {
+     if (!runId || !record || record.readOnly || record.pending || record.uncertain || !checkpointId || checkpointId !== record.checkpointId || !root || root !== workspaceRoot || mutationFlights.has(runId) || followUpFlights.has(runId)) {
       toast.info("Geri alınacak checkpoint yok.");
       return;
     }
@@ -695,7 +711,7 @@ export const useRun = create<RunState>((set, get) => ({
     const record = runId ? origin.runs[runId] : undefined;
     const root = record?.root ?? null;
     const generation = workspaceGeneration;
-     if (!runId || !record || !root || root !== workspaceRoot || record.pending || record.uncertain || mutationFlights.has(runId) || followUpFlights.has(runId)) return;
+     if (!runId || !record || record.readOnly || !root || root !== workspaceRoot || record.pending || record.uncertain || mutationFlights.has(runId) || followUpFlights.has(runId)) return;
     mutationFlights.add(runId);
     patchRun(runId, (r) => ({ ...r, revision: r.revision + 1, checkpointBusy: true }));
     try {

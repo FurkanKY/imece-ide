@@ -31,6 +31,7 @@ const STAGE_META = {
   // A4-A4: iptal edilen bir koşu artık "draft"a (hiç başlamamış) değil,
   // kendi ayrı terminal durumuna düşer (bkz. state/run.ts install()).
   cancelled: { label: "İptal edildi", Icon: Ban, tone: "text-muted" },
+  history: { label: "Önceki oturum", Icon: Info, tone: "text-muted" },
 } as const;
 
 const DECISION_META = {
@@ -60,6 +61,7 @@ const DECISION_META = {
     Icon: Ban,
     tone: "text-muted",
   },
+  history: { title: "Önceki oturum kaydı", description: "Bu kayıt yalnızca okunabilir; eski kanıt bu oturumda uygulanamaz veya devam ettirilemez.", Icon: Info, tone: "text-muted" },
 } as const;
 
 export function AiPanel({ onClose, embedded = false }: { onClose?: () => void; embedded?: boolean }) {

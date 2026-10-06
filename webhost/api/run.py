@@ -70,6 +70,7 @@ from webhost import state
 from webhost.api.activity import ActivityStreamer, start_activity_streamer
 from webhost.bridge import handler, BridgeError
 from webhost.run_registry import RunSlot, registry as _run_registry
+from webhost.run_history import get_history, list_history
 
 try:
     from pipeline_runtime import PipelineRunner, PipelineStatus
@@ -987,7 +988,15 @@ def _list_runs(params, ctx):
                       "status": status, "phase": slot.phase, "providerId": slot.provider_id,
                       "engine": "agent", "changedPathCount": len(slot.proposals),
                       "errorCode": slot.error_code})
-    return {"runs": items}
+    live_ids = {item["runId"] for item in items}
+    try:
+        history = list_history(state.get_run_runtime(), root)
+        history_unavailable = False
+    except Exception:
+        history = []
+        history_unavailable = True
+    items.extend(item for item in history if item["runId"] not in live_ids)
+    return {"runs": items[:128], "historyUnavailable": history_unavailable}
 
 
 @handler("run.get")
@@ -997,6 +1006,12 @@ def _get_run(params, ctx):
     run_id = params.get("runId")
     slot = _run_registry.get(run_id) if isinstance(run_id, str) else None
     if slot is None:
+        try:
+            historical = get_history(state.get_run_runtime(), str(Path(project.root).resolve()), run_id)
+        except Exception:
+            historical = None
+        if historical is not None:
+            return historical
         raise BridgeError("unknown_run", "Koşu bulunamadı.")
     if str(Path(project.root).resolve()) != slot.project_root:
         raise BridgeError("run_project_mismatch", "Koşu başka bir projeye ait.")

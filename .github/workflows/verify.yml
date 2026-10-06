@@ -33,6 +33,7 @@ jobs:
           node scripts/run-state-acceptance.mjs
           node scripts/mock-runs-acceptance.mjs
           node scripts/task-workspace-acceptance.mjs
+          node scripts/run-history-acceptance.mjs
 
   linux-python:
     runs-on: ubuntu-latest

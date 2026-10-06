@@ -126,14 +126,25 @@ What the implemented default flow actually does:
 - Acceptance: two Tasks progress simultaneously with no shared worktree, no
   cross-talk and no lost results.
 
-### M3 — Durable tasks and results, controlled integration — **not started**
+### M3 — Durable tasks and results, controlled integration — **in progress (2026-10-06)**
 
-- Tasks, Executions and Results **survive a restart** and can be reopened,
-  continued or re-run.
+- The current bounded slice is **read-only historical reopening** of persisted
+  native-agent task/result records after restart. This is in development; it
+  does not restore an owned worker or authorize historical proposals.
+- Safe continuation, durable pending-worktree adoption, and re-run while
+  preserving task identity are **unfinished**.
+- The `m3-task-history` development branch reopens bounded native-agent history
+  from the existing SQLite store. It does not adopt a worker or worktree, retry
+  an execution, or make a historical proposal/checkpoint actionable. Copying a
+  prior task creates a new draft only; it does not automatically start a run.
+- Reopening the same database in fixtures and controlled browser history
+  responses are tested separately. Neither substitutes for native desktop
+  restart or actual-provider acceptance. The focused browser check is
+  `node scripts/run-history-acceptance.mjs` from `web/ui`.
 - A **verified CombinedCandidate** is integrated through an explicit,
   controlled decision path with **rollback**.
-- Acceptance: close the app mid-task, reopen, continue the task, integrate a
-  verified candidate, roll it back cleanly.
+- M3 acceptance remains open: close the app mid-task, safely continue the task,
+  integrate a verified candidate, and roll it back cleanly.
 
 ### M4 — Two people: secure LAN pairing and control — **not started**
 
@@ -156,7 +167,8 @@ What the implemented default flow actually does:
 
 **Value ladder:** M1–M3 are useful **solo**. M4 makes it **team-complete**.
 M5 is the **release** gate. M1's acceptance gate is still open (deferred,
-tracked); **M2 is the active implementation target** right now.
+tracked); M2 remains in development and M3's read-only history slice is in
+progress.
 
 ## 4. What is explicitly not v1 scope
 
@@ -221,11 +233,11 @@ Already implemented and deliberately reused rather than replaced:
   changes**, not a published main-branch delivery yet. Local mock acceptance
   exercises the visible UI, but the complete two-run frontend/Qt-host flow on
   supported desktop platforms and actual providers remains **unverified**.
-- **Restart durability (M3) is not done.** Tasks and results do not yet
-  survive an app restart and get reopened/continued.
-- **M3, M4 and M5 are not started. M2 is in development, not
-  finished.** M1's deferred acceptance gate remains open and stays a release
-  gate before M5.
+- **M3 is not done.** Read-only native-agent history reopening is in progress;
+  safe continuation, durable pending-worktree adoption, task-preserving re-run
+  and CombinedCandidate integration/rollback acceptance remain unfinished.
+- **M4 and M5 are not started. M2 is in development, not finished.** M1's
+  deferred acceptance gate remains open and stays a release gate before M5.
 
 ### M2 engineering checkpoint — development branch only
 
@@ -395,4 +407,5 @@ What that scope actually exercises:
 3. **No new collaboration features** while M2 is in progress; only **blocking
    bug fixes** in existing features. The existing collaboration foundation is
    frozen as-is until M4 owns it.
-4. Then M3, M4, M5 in order — all currently **not started**.
+4. M3 read-only history is **in progress**, not complete; then its remaining
+   safe continuation/integration acceptance, followed by M4 and M5.

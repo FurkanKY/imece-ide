@@ -223,7 +223,7 @@ export function Composer() {
   const followUpMode = reviewReady && (engine === "pipeline" || engine === "agent");
   const followUpUnsupported = reviewReady && engine !== "pipeline" && engine !== "agent";
   const completedSelection = selectedRunId !== null && !running && !followUpMode;
-  const locked = running || followUpUnsupported || completedSelection || !!selectedRecord?.checkpointBusy || !!selectedRecord?.pending || !!selectedRecord?.uncertain || draftUncertain || runRootStale;
+  const locked = running || followUpUnsupported || completedSelection || !!selectedRecord?.readOnly || !!selectedRecord?.checkpointBusy || !!selectedRecord?.pending || !!selectedRecord?.uncertain || draftUncertain || runRootStale;
   // @-mention'lar ve textarea'nın kendisi normal modda `task`'ı, takip-isteği
   // modunda `followUpDraft`'ı okur/yazar -- aşağıdaki tüm mantık bu ikisi
   // arasında ayrım yapmadan tek bir "draft" üzerinden çalışır.

@@ -28,11 +28,28 @@ export function Changes() {
   const selectedRunId = useRun((s) => s.selectedRunId);
   const selectedRecord = useRun((s) => selectedRunId ? s.runs[selectedRunId] : undefined);
   const runRootStale = useRun((s) => s.runRootStale);
-  const unsafe = !!selectedRecord?.pending || !!selectedRecord?.uncertain || runRootStale;
+  const unsafe = !!selectedRecord?.readOnly || !!selectedRecord?.pending || !!selectedRecord?.uncertain || runRootStale;
   const openSelectedDiff = (path: string) => {
     useUi.getState().setWorkspaceView("tools");
     if (selectedRunId) void openDiff(path, selectedRunId);
   };
+
+  if (selectedRecord?.readOnly) {
+    return <div className="h-full overflow-y-auto p-4 text-text2" data-testid="historical-result">
+      <h2 className="text-muted" style={{ fontSize: "var(--t-label)", fontWeight: "var(--w-label)" }}>Önceki oturumun sonucu · yalnızca kayıt</h2>
+      <p className="mt-1 text-muted" style={{ fontSize: "var(--t-caption)" }}>
+        Bu kanıt geçmişe aittir; güncel çalışma alanının doğrulaması veya uygulama onayı değildir.
+      </p>
+      {selectedRecord.taskTruncated && <p role="status" className="mt-2 text-warn" style={{ fontSize: "var(--t-caption)" }}>Özgün görev metni görüntüleme sınırında kısaltıldı.</p>}
+      {selectedRecord.historyTruncated && <p role="status" className="mt-2 text-warn" style={{ fontSize: "var(--t-caption)" }}>Geçmiş sınırı nedeniyle kayıt kısmi; kanıtın güncelliği doğrulanamadı.</p>}
+      {evidence ? <div className="mt-3 grid gap-1 text-muted" style={{ fontSize: "var(--t-caption)" }}>
+        <p>Kaydedilmiş doğrulama sonucu: {evidence.verification.outcome} · güncel doğrulama değildir.</p>
+        {evidence.agent_message && <p className="break-words whitespace-pre-wrap">Ajan mesajı: {evidence.agent_message}</p>}
+        <p className="break-words">Kayıtta belirtilen yollar: {evidence.changed_paths.length ? evidence.changed_paths.join(", ") : "—"}</p>
+        {evidence.verification.checks.map((check, i) => <p key={`${check.check_id}-${i}`} className="break-words">Geçmiş kontrol · {check.check_id}: {check.status}</p>)}
+      </div> : <p role="status" className="mt-3 text-muted" style={{ fontSize: "var(--t-caption)" }}>Bu geçmiş kayıtta kullanılabilir kanıt yok.</p>}
+    </div>;
+  }
 
   if (diffs.length === 0) {
     const ok = runStage === "applied" || runStage === "restored";
