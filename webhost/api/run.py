@@ -67,7 +67,7 @@ from agent_execution_runtime import (
 )
 from context_runtime import load_project_rules
 from webhost import state
-from webhost.api.activity import ActivityStreamer
+from webhost.api.activity import ActivityStreamer, start_activity_streamer
 from webhost.bridge import handler, BridgeError
 from webhost.run_registry import RunSlot, registry as _run_registry
 
@@ -1806,7 +1806,6 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
         if slot is None:
             _stop_activity_streamer()
         streamer = ActivityStreamer(runtime, run_id, after_seq=activity_after_seq)
-        streamer.activity.connect(lambda item: bridge.emit_event("run.activity", {**item, "runId": run_id}))
         if slot is not None:
             slot.activity_streamer = streamer
             def release_streamer_reference():
@@ -1821,7 +1820,7 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
             streamer.finished.connect(release_streamer_reference)
         else:
             _active["activity_streamer"] = streamer
-        streamer.start()
+        start_activity_streamer(streamer, lambda item: bridge.emit_event("run.activity", {**item, "runId": run_id}))
         if worker.isFinished():
             streamer.request_stop()
             streamer.wait(2000)
@@ -2088,9 +2087,8 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     def on_activity(item: dict) -> None:
         bridge.emit_event("run.activity", item)
 
-    streamer.activity.connect(on_activity)
+    start_activity_streamer(streamer, on_activity)
     _active["activity_streamer"] = streamer
-    streamer.start()
 
     return worker
 
