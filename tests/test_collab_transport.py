@@ -896,8 +896,12 @@ def test_bad_bearer_is_401_before_any_body_read_parse_or_git(
     seen = _forbid_after_construction(monkeypatch)
     with caplog.at_level(logging.DEBUG):
         for method in ("POST", "GET"):
-            reply = _call(server, route, _route_body(route, wired.head),
-                          method=method, auth=auth)
+            # Send one complete wire frame: HTTPConnection.endheaders(body)
+            # writes the request head and body separately, so the listener's
+            # intentional auth-first close can race the second client write.
+            reply = _raw(server, route, _route_body(route, wired.head),
+                         method=method, auth=auth,
+                         extra=(("Content-Type", "application/json"),))
             _error(reply, code="access_denied", status=401)
             assert reply.headers.get("WWW-Authenticate") == "Bearer"
             _no_leak(reply, leaks)
