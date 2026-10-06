@@ -219,7 +219,8 @@ def test_apply_and_reject_busy_guard_precedes_proposal_or_canonical_mutation(
     calls = []
     monkeypatch.setattr(run_api, "_stale_apply_conflicts", lambda *_a: calls.append("filesystem"))
     with pytest.raises(Exception) as caught:
-        getattr(run_api, handler_name)({"paths": ["file.txt"]}, object())
+        params = {"paths": ["file.txt"]} if handler_name == "_apply" else {}
+        getattr(run_api, handler_name)(params, object())
     assert getattr(caught.value, "code", None) == "busy"
     assert run_api._active["proposals"] == proposals
     assert calls == []

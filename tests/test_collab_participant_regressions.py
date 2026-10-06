@@ -505,7 +505,8 @@ def test_delivery_lease_blocks_apply_reject_follow_up_and_start(accepted, env, m
         assert borrowed["session"] is session
         for handler in (run_api._apply, run_api._reject):
             with pytest.raises(BridgeError) as caught:
-                handler({"paths": ["a.txt"]}, ctx)
+                params = {"paths": ["a.txt"]} if handler is run_api._apply else {}
+                handler(params, ctx)
             assert caught.value.code == "busy"
         assert hits == [], "a refused apply must not touch the filesystem"
         assert run_api._active["proposals"] == [{"path": "a.txt"}]
