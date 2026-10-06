@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 import time
+import weakref
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -25,7 +26,7 @@ from PySide6.QtCore import QCoreApplication
 
 from run_runtime import RunEventType, RunRuntime, RunStore
 from run_runtime.agent_activity import record_agent_activity
-from webhost.api.activity import ActivityStreamer
+from webhost.api.activity import ActivityStreamer, start_activity_streamer
 
 
 @pytest.fixture(scope="module")
@@ -129,3 +130,27 @@ def test_request_stop_drains_buffered_items_before_exit(qapp, tmp_path):
             break
         time.sleep(0.01)
     assert any(item["title"] == "Son deneme" for item in seen)
+
+
+def test_sender_is_retained_until_queued_final_activity_is_delivered(qapp, tmp_path):
+    runtime, run_id = _running_runtime(tmp_path)
+    record_agent_activity(runtime, run_id, role="reviewer", kind="stage", title="İnceleme tamamlandı", status="ok")
+    seen = []
+    streamer = ActivityStreamer(runtime, run_id, max_items_per_second=1)
+    streamer_ref = weakref.ref(streamer)
+    start_activity_streamer(streamer, seen.append)
+
+    streamer.request_stop()
+    assert streamer.wait(2000)
+    del streamer
+
+    # Final signals are already emitted but still queued for the main thread.
+    # Dropping _active's reference must not destroy the sender/lose the item.
+    assert streamer_ref() is not None
+    assert _pump_until(
+        qapp,
+        lambda: any(item["title"] == "İnceleme tamamlandı" for item in seen)
+        and streamer_ref() is None,
+    )
+    item = next(item for item in seen if item["title"] == "İnceleme tamamlandı")
+    assert item["role"] == "reviewer" and item["status"] == "ok"
