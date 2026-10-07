@@ -44,7 +44,10 @@
     },
     {
       "file": "tests/test_packaging_audit.py",
-      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "historyCommits": [
+        "9db5239fa9c06a6ac159fc19c02ac3f4a806381e"
+      ],
+      "reason": "Manually reviewed synthetic non-key PEM marker in audit regression tests; not usable credentials. History review is bound to the exact introduction commit and full committed file hash.",
       "rules": [
         "private-key"
       ],

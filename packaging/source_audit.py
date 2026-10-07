@@ -7,10 +7,30 @@ Requires an explicitly installed Gitleaks binary; never downloads/installs it.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+
+
+def reviewed_history_fixture(root: Path, pin: dict, commit: str, filename: Path) -> bool:
+    """Accept only an explicitly reviewed commit and its exact immutable blob.
+
+    Current-file pins alone never exempt history. Replacement Git objects are
+    disabled so a local replace-ref cannot manufacture the reviewed evidence.
+    """
+    if (not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', commit)
+            or commit not in pin.get('historyCommits', [])
+            or filename.is_absolute() or '..' in filename.parts):
+        return False
+    args = ['git', '--no-replace-objects', '-C', str(root), 'cat-file']
+    obj = commit + ':' + filename.as_posix()
+    size = subprocess.run([*args, '-s', obj], capture_output=True, timeout=30)
+    if size.returncode or not size.stdout.strip().isdigit() or int(size.stdout) > 1024 * 1024:
+        return False
+    blob = subprocess.run([*args, 'blob', obj], capture_output=True, timeout=30)
+    return blob.returncode == 0 and hashlib.sha256(blob.stdout).hexdigest() == pin['sha256']
 
 
 def scan(root: Path, executable: str, output: Path):
@@ -54,8 +74,14 @@ def scan(root: Path, executable: str, output: Path):
                 item={'scope':scope,'file':filename.as_posix(),'rule':finding['RuleID'],'line':finding['StartLine']}
                 pin=next((p for p in pins if p['file']==item['file'] and item['rule'] in p['rules']),None)
                 accepted=(scope=='current' and pin is not None and hashlib.sha256((snapshot/filename).read_bytes()).hexdigest()==pin['sha256'])
+                reason='Reviewed synthetic redaction/security-test fixture; exact full-file hash'
+                if scope=='history' and pin is not None:
+                    accepted=reviewed_history_fixture(root, pin, finding.get('Commit'), filename)
+                    reason='Reviewed synthetic fixture; explicitly pinned commit and exact committed file hash'
+                    if accepted:
+                        item['commit']=finding['Commit']
                 if accepted:
-                    reviewed.append({**item,'reason':'Reviewed synthetic redaction/security-test fixture; exact full-file hash'})
+                    reviewed.append({**item,'reason':reason})
                 else:
                     blocked.append(item)
     result={'status':'blocked' if blocked else 'passed','findings':blocked,'reviewedIndicators':reviewed,'sourceFileCount':count,'scope':'all available Git commits plus current Git-visible sources; ignored local/PI data excluded; not a general secret-free certificate'}

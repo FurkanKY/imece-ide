@@ -1,5 +1,12 @@
 # Preserve upstream license bytes and POSIX scripts on Windows checkouts.
 /packaging/licenses/*.txt text eol=lf
 /packaging/*.sh text eol=lf
+# Exact-hash reviewed security fixtures must retain identical bytes on Windows.
+/tests/test_agent_security_regressions.py text eol=lf
+/tests/test_bridge.py text eol=lf
+/tests/test_collab_coordination_regressions.py text eol=lf
+/tests/test_collab_product_changes.py text eol=lf
+/tests/test_decision_remote_state.py text eol=lf
+/tests/test_packaging_audit.py text eol=lf
 # This reviewed upstream text intentionally contains space-before-tab indentation.
 /packaging/licenses/node-v24.19.0-LICENSE.txt whitespace=-space-before-tab

@@ -90,6 +90,11 @@ snapshot'unda 10 gösterge elle incelendi; hepsi mevcut redaction/security
 regression testlerinin sentetik token/oluşturulmuş geçersiz PEM fixture'ları.
 Tam dosya SHA pin'leri `packaging/source-audit-fixtures.json` içinde; yeni veya
 değişmiş gerçek secret'ı otomatik kabul eden path/regex muafiyeti değildir.
+Checkpoint commit'inden sonra history'de de görünen tek geçersiz PEM test
+fixture'ı ayrıca tam introduction commit ID + committed blob SHA ile pin'lendi.
+Current dosya pin'i tek başına history muafiyeti vermez; yeni commit, değişen
+blob, farklı kural veya Git replace-ref ile üretilen içerik kabul edilmez.
+Bu sınırlar `tests/test_source_audit_history.py` içinde test edilir.
 
 Kurulu Gitleaks ile tekrar:
 
@@ -99,7 +104,8 @@ Kurulu Gitleaks ile tekrar:
 ```
 
 `.pi/`, `PI_HANDOFF.md`, ignore edilmiş yerel veri/bağımlılıklar okunmaz veya
-kopyalanmaz. Son source/geçmiş sonucu: 0 bloklayan, 10 incelenmiş fixture.
+kopyalanmaz. Checkpoint öncesi: 0 bloklayan, 10 current fixture. Checkpoint
+sonrası: 0 bloklayan, aynı 10 current + 1 exact-commit history fixture.
 Seçili imza taraması, keyfi encoding/şifreli içerik veya her olası secret için
 "secret-free" sertifika değildir. Gerçek kabul, son legal/redistribution review,
 imzalama ve ayrı yayın izni hâlâ gereklidir; hiçbir commit/push/tag/dispatch veya
