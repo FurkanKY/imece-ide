@@ -42,7 +42,7 @@ from acp_runtime.events import (
 )
 from acp_runtime.models import AcpClientLimits, AcpLaunchSpec, AcpPromptRequest, AcpRunResult
 from acp_runtime.permission_policy import AcpPermissionDecision, AcpPermissionPolicy, DenyAllAcpPermissionPolicy
-from acp_runtime.stdio import close_acp_agent_connection, spawn_acp_agent_connection
+from acp_runtime.stdio import close_acp_agent_connection, finish_acp_supervisor, spawn_acp_agent_connection, SupervisedAcpProcess
 
 _AUTH_REQUIRED_CODE = -32000
 
@@ -290,6 +290,7 @@ class AcpClientRuntime:
         event_sink: AcpEventSink | None = None,
         cancel_token=None,
         permission_policy: AcpPermissionPolicy | None = None,
+        supervision_lease_fd: int | None = None,
     ) -> AcpRunResult:
         """`cancel_token` is duck-typed (only `.cancelled`/`.wait(timeout)`
         are used) so acp_runtime never needs to import agent_runtime -- pass
@@ -340,7 +341,11 @@ class AcpClientRuntime:
         # in that case; only a genuine pre-process-creation OSError is
         # mapped here, since no process exists yet to roll back.
         try:
-            conn, process = await self._connect(client, launch.argv, launch.env, request.cwd)
+            if supervision_lease_fd is not None and self._connect is spawn_acp_agent_connection:
+                conn, process = await self._connect(client, launch.argv, launch.env, request.cwd,
+                                                    supervision_lease_fd=supervision_lease_fd)
+            else:
+                conn, process = await self._connect(client, launch.argv, launch.env, request.cwd)
         except OSError as exc:
             raise AcpSpawnError(f"Could not spawn ACP agent process: {exc}") from exc
 
@@ -355,6 +360,7 @@ class AcpClientRuntime:
         cleanup_error: Exception | None = None
         result: AcpRunResult | None = None
         cleanup_cancelled = False
+        producer_quiescent = False
         try:
             init_response = await self._call_agent(conn.initialize, what="initialize", protocol_version=acp.PROTOCOL_VERSION, client_capabilities=None)
             session_capabilities = init_response.agent_capabilities.session_capabilities
@@ -377,12 +383,13 @@ class AcpClientRuntime:
                 permission_request_count=client.permission_request_count,
                 session_close_supported=session_close_supported,
                 session_close_succeeded=None,
+                producer_quiescent=False,
             )
         except AcpRuntimeError as exc:
             primary_exc = exc
         finally:
             async def _cleanup() -> None:
-                nonlocal cleanup_error, primary_exc, result
+                nonlocal cleanup_error, primary_exc, result, producer_quiescent
 
                 # Snapshot BEFORE any graceful operation that might cause the
                 # agent root to exit and orphan/reparent descendants.
@@ -418,8 +425,13 @@ class AcpClientRuntime:
                         primary_exc.__cause__ = exc
 
                 try:
-                    await asyncio.to_thread(self._terminate_process_tree, process.pid, snapshot=snapshot)
-                except ProcessCleanupError as exc:
+                    if isinstance(process, SupervisedAcpProcess):
+                        producer_quiescent = await finish_acp_supervisor(process, limits.session_close_timeout_ms / 1000)
+                        if result is not None:
+                            result = dataclasses.replace(result, producer_quiescent=producer_quiescent)
+                    else:
+                        await asyncio.to_thread(self._terminate_process_tree, process.pid, snapshot=snapshot)
+                except (ProcessCleanupError, AcpCleanupError) as exc:
                     if cleanup_error is None:
                         cleanup_error = exc
 
@@ -452,6 +464,8 @@ class AcpClientRuntime:
             raise asyncio.CancelledError
 
         if primary_exc is not None:
+            with contextlib.suppress(Exception):
+                primary_exc.producer_quiescent = producer_quiescent
             raise primary_exc
         assert result is not None
         return result

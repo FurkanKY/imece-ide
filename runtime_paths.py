@@ -1,7 +1,7 @@
 """Kaynak ve PyInstaller paketli çalışma için merkezi yol çözümleme.
 
 Paket içeriği salt-okunur kabul edilir; kullanıcı tarafından değişen her şey
-LOCALAPPDATA/ImeceIDE altında tutulur. Kaynak modunda mevcut geliştirme
+Windows’ta LOCALAPPDATA/ImeceIDE, Linux’ta XDG_DATA_HOME/ImeceIDE altında tutulur. Kaynak modunda mevcut geliştirme
 yolları korunur, böylece yerel kurulumlar sessizce taşınmaz.
 """
 
@@ -35,6 +35,11 @@ def app_data_dir() -> Path:
     """Paketli modun yazılabilir kullanıcı-veri dizini."""
     if not is_frozen():
         return Path.home() / ".multi_agent_ide"
+    if sys.platform.startswith("linux"):
+        xdg = os.getenv("XDG_DATA_HOME")
+        if xdg and Path(xdg).is_absolute():
+            return Path(xdg) / APP_DIR_NAME
+        return Path.home() / ".local" / "share" / APP_DIR_NAME
     base = os.getenv("LOCALAPPDATA")
     if base:
         return Path(base) / APP_DIR_NAME

@@ -1,2 +1,4 @@
 -r requirements.txt
 PyInstaller>=6.14,<7
+# Packaging includes the reviewed version-specific upstream Node license.
+nodejs-wheel-binaries==24.19.0

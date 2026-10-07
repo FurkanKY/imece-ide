@@ -12,11 +12,13 @@ yalnız son dört haneli maske gösterilir.
 """
 
 import os
+import sys
+import tempfile
 from pathlib import Path
 
 import decision_credentials
 import providers
-from runtime_paths import env_path
+from runtime_paths import env_path, is_frozen
 from webhost.bridge import handler, BridgeError
 from secret_store import SecretStoreError, packaged_store
 
@@ -39,11 +41,39 @@ def _mask(v: str) -> str:
     return ("•••• " + v[-4:]) if len(v) >= 8 else "••••"
 
 
+def _private_linux_env() -> bool:
+    return is_frozen() and sys.platform.startswith("linux")
+
+
+def _persist_env(path: Path, text: str) -> None:
+    if not _private_linux_env():
+        path.write_text(text, encoding="utf-8")
+        return
+    # Linux has no DPAPI. Keep plaintext owner-only and atomically replace it;
+    # never follow an existing credential-file symlink during update.
+    if path.is_symlink():
+        raise OSError("Credential files cannot be symlinks")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".env-", dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            os.chmod(temporary, 0o600)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def write_env(path: Path, updates: dict[str, str]) -> None:
     """Var olan .env'i satır satır koruyarak günceller; eksik anahtarları ekler.
 
     Yorumlar ve bilinmeyen satırlar aynen kalır (kullanıcının elle yazdıkları).
     """
+    if _private_linux_env() and path.is_symlink():
+        raise OSError("Credential files cannot be symlinks")
     lines: list[str] = []
     if path.exists():
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -58,18 +88,20 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
             out.append(line)
     for key, val in remaining.items():
         out.append(f"{key}={val}")
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    _persist_env(path, "\n".join(out) + "\n")
 
 
 def clear_env_keys(path: Path, keys: set[str]) -> None:
     """Başarılı paket geçişinden sonra yalnız gizli değerleri boşaltır."""
+    if _private_linux_env() and path.is_symlink():
+        raise OSError("Credential files cannot be symlinks")
     if not path.exists():
         return
     out: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         key = line.strip().split("=", 1)[0].strip() if "=" in line else ""
         out.append(f"{key}=" if key in keys and not line.lstrip().startswith("#") else line)
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    _persist_env(path, "\n".join(out) + "\n")
 
 
 def _secure_values() -> dict[str, str]:
@@ -144,7 +176,7 @@ def _set(params, ctx):
             store.save(updates)
             clear_env_keys(ENV_PATH, set(updates))
         else:
-            ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+            ENV_PATH.parent.mkdir(mode=0o700 if _private_linux_env() else 0o777, parents=True, exist_ok=True)
             write_env(ENV_PATH, updates)
     except (OSError, SecretStoreError) as e:
         raise BridgeError("write_failed", f"Anahtar güvenle kaydedilemedi: {e}")

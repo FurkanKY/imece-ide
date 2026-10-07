@@ -171,7 +171,7 @@ class NativeWorkerAttemptAdapter:
         if prepared is None:
             registry = _worker_registry(self._context_engine)
             policy = _worker_policy()
-            context = ToolExecutionContext(workspace)
+            context = ToolExecutionContext(workspace, cancel_token=cancel_token)
             try:
                 sink = CanonicalAgentEventSink(self._runtime, self._run_id, execution_id=execution_id)
             except ValueError as exc:
@@ -183,7 +183,7 @@ class NativeWorkerAttemptAdapter:
                     cancel_token.raise_if_cancelled()
                 registry = _worker_registry(self._context_engine)
                 policy = _worker_policy()
-                context = ToolExecutionContext(workspace)
+                context = ToolExecutionContext(workspace, cancel_token=cancel_token)
                 sink = CanonicalAgentEventSink(self._runtime, self._run_id, execution_id=execution_id)
                 if cancel_token is not None:
                     cancel_token.raise_if_cancelled()

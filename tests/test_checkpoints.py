@@ -9,6 +9,24 @@ from checkpoints import CheckpointStore
 from project import Project
 
 
+def test_checkpoint_restores_executable_and_permission_modes(tmp_path):
+    import os
+    import stat
+    if os.name != "posix":
+        pytest.skip("POSIX permission modes")
+    proj = Project(str(tmp_path))
+    path = tmp_path / "script.py"
+    path.write_text("original\n")
+    path.chmod(0o750)
+    store = CheckpointStore(str(tmp_path))
+    checkpoint = store.create(proj, ["script.py"], "run-mode")
+    path.write_text("changed\n")
+    path.chmod(0o644)
+    store.restore(proj, checkpoint["id"])
+    assert path.read_text() == "original\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o750
+
+
 def test_restore_returns_existing_and_new_file_to_original_state(tmp_path):
     (tmp_path / "a.py").write_text("before\n", encoding="utf-8")
     proj = Project(str(tmp_path))

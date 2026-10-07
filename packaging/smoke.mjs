@@ -3,31 +3,66 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:net";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { checkFrozenSupervisor } from "./supervisor-smoke.mjs";
+import { boundedText, linuxSmokeEnvironment } from "./smoke-runtime.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const exe = path.join(ROOT, "dist", "ImeceIDE", "ImeceIDE.exe");
-const port = 9333;
-const windowsPath = [
-  process.env.SystemRoot,
-  path.join(process.env.SystemRoot, "System32"),
-  path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0"),
-].join(";");
-const app = spawn(exe, [], {
-  cwd: path.dirname(exe),
-  windowsHide: true,
-  // Son kullanıcı senaryosu: Python/npm PATH'te yok; yalnız Windows sistem araçları var.
-  env: { ...process.env, PATH: windowsPath, QTWEBENGINE_REMOTE_DEBUGGING: String(port) },
-  stdio: "ignore",
-});
+if (!["win32", "linux"].includes(process.platform)) throw new Error("Unsupported smoke platform");
+const windows = process.platform === "win32";
+const bundle = path.resolve(process.env.IMECE_PACKAGE_BUNDLE || path.join(ROOT, "dist", "ImeceIDE"));
+const exe = path.join(bundle, windows ? "ImeceIDE.exe" : "ImeceIDE");
+const sha256 = async (file) => createHash("sha256").update(await readFile(file)).digest("hex");
+const bundleDigests = { manifestSha256: await sha256(path.join(bundle, "package-manifest.json")), executableSha256: await sha256(exe) };
+const reservation = createServer();
+await new Promise((resolve, reject) => reservation.once("error", reject).listen(0, "127.0.0.1", resolve));
+const { port } = reservation.address();
+await new Promise((resolve) => reservation.close(resolve));
+const scratch = await mkdtemp(path.join(tmpdir(), "imece-package-smoke-"));
+for (const name of ["home", "local", "roaming", "temp", "runtime", "path"]) await mkdir(path.join(scratch, name), { mode: 0o700 });
+// No inherited provider credentials, development executables or real user stores.
+const environment = windows ? {
+  SystemRoot: process.env.SystemRoot, WINDIR: process.env.SystemRoot,
+  COMSPEC: path.join(process.env.SystemRoot, "System32", "cmd.exe"),
+  PATH: [process.env.SystemRoot, path.join(process.env.SystemRoot, "System32"), path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0")].join(";"),
+  USERPROFILE: path.join(scratch, "home"), HOME: path.join(scratch, "home"),
+  LOCALAPPDATA: path.join(scratch, "local"), APPDATA: path.join(scratch, "roaming"),
+  TEMP: path.join(scratch, "temp"), TMP: path.join(scratch, "temp"),
+} : linuxSmokeEnvironment(scratch);
+let app, launchError, appClose, stderr = "";
+if (process.platform === "linux") environment.QT_QPA_PLATFORM = environment.QT_QPA_PLATFORM || "offscreen";
+const platform = windows ? "windows" : environment.QT_QPA_PLATFORM;
+const nativeDisplay = windows || platform !== "offscreen";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const until = async (promise, ms, fallback) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); })]);
+  } finally { clearTimeout(timer); }
+};
 let socket;
 try {
+  const supervisor = await checkFrozenSupervisor(exe, environment, scratch);
+  app = spawn(exe, [], {
+    cwd: path.dirname(exe), windowsHide: true, stdio: ["ignore", "ignore", "pipe"],
+    env: { ...environment, QTWEBENGINE_REMOTE_DEBUGGING: `127.0.0.1:${port}` },
+  });
+  app.stderr.on("data", (chunk) => { stderr = boundedText(stderr, chunk); });
+  appClose = new Promise((resolve) => app.once("close", (code, signal) => resolve({ code, signal })));
+  app.once("error", (error) => { launchError = error; });
   let target;
   let lastError;
   for (let i = 0; i < 30; i += 1) {
+    if (launchError) throw launchError;
+    if (app.exitCode !== null || app.signalCode !== null) throw new Error(`Package exited before UI was ready (exit=${app.exitCode}, signal=${app.signalCode})`);
     try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json());
+      const targets = await fetch(`http://127.0.0.1:${port}/json`, {
+        signal: AbortSignal.timeout(2000), headers: { Connection: "close" },
+      }).then((r) => r.json());
       target = targets.find((item) => item.type === "page");
       if (!target) throw new Error("CDP page hedefi yok");
       break;
@@ -60,7 +95,8 @@ try {
   });
   const command = (method, params = {}) => new Promise((resolve, reject) => {
     const id = ++nextId;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP command timed out: ${method}`)); }, 15000);
+    pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
     socket.send(JSON.stringify({ id, method, params }));
   });
   const evaluate = async (expression) => {
@@ -84,6 +120,7 @@ try {
   const bridgeCall = (method, params) => evaluate(`new Promise((resolve) => {
       new window.QWebChannel(window.qt.webChannelTransport, (channel) => {
         const host = channel.objects.host;
+        window.__imeceSmokeHost = host;
         const id = ${++rpcId};
         host.reply.connect((raw) => {
           const message = JSON.parse(raw);
@@ -114,7 +151,7 @@ try {
           } catch {}
         });
         host.call(JSON.stringify({id: 990001, method: "terminal.write",
-          params: {termId: ${JSON.stringify(termId)}, data: "Write-Output SMOKE_PTY_OK\\r"}}));
+          params: {termId: ${JSON.stringify(termId)}, data: ${JSON.stringify(windows ? "Write-Output SMOKE_PTY_OK\r" : "printf 'SMOKE_PTY_OK\\n'\r")}}}));
         setTimeout(() => finish(false), 12000);
       });
     })`);
@@ -123,6 +160,12 @@ try {
   const welcomeVisible = await evaluate("document.body.innerText.includes('Klasör Aç')");
 
   const result = {
+    ...bundleDigests,
+    supervisor,
+    platform,
+    nativeDisplay,
+    rendering: windows ? "platform-default" : "frozen-linux-software-default",
+    diagnostics: stderr,
     title: await evaluate("document.title"),
     url: target.url,
     bridgePresent,
@@ -135,12 +178,52 @@ try {
     terminalWriteOk,
     consoleErrors: errors,
   };
+  const isolated = (value) => typeof value === "string" && path.resolve(value).startsWith(path.resolve(windows ? environment.LOCALAPPDATA : environment.XDG_DATA_HOME) + path.sep);
+  result.isolatedDataPaths = isolated(result.envPath) && isolated(result.logPath);
+  result.ok = Boolean(bridgePresent && welcomeVisible && settings.ok && keys.ok
+    && terminal.ok && terminalWriteOk && result.isolatedDataPaths && !errors.length);
+  // Exercise the real closeEvent/shutdown path, not a SIGTERM success surrogate.
+  // Send without awaiting the CDP reply: quitting Qt can close its socket first.
+  socket.send(JSON.stringify({ id: ++nextId, method: "Runtime.evaluate", params: {
+    expression: "window.__imeceSmokeHost.call(JSON.stringify({id: 999999, method: 'window.confirmClose', params: {}})); true",
+  }}));
+  const closed = await until(appClose, 5000, null);
+  result.normalCloseOk = closed?.code === 0 && !closed?.signal;
+  result.ok = result.ok && result.normalCloseOk;
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (!bridgePresent || !welcomeVisible || !settings.ok || !keys.ok
-      || !terminal.ok || !terminalWriteOk || errors.length) {
+  if (process.env.IMECE_PACKAGE_SMOKE_REPORT) await writeFile(process.env.IMECE_PACKAGE_SMOKE_REPORT, JSON.stringify(result, null, 2) + "\n");
+  if (!result.ok) {
     process.exitCode = 1;
   }
+} catch (error) {
+  if (process.env.IMECE_PACKAGE_SMOKE_REPORT) {
+    await writeFile(process.env.IMECE_PACKAGE_SMOKE_REPORT, JSON.stringify({
+      ...bundleDigests,
+      ok: false, platform, nativeDisplay,
+      error: error instanceof Error ? error.message : "Package smoke failed",
+      diagnostics: stderr,
+      process: app ? { exitCode: app.exitCode, signalCode: app.signalCode } : null,
+    }, null, 2) + "\n");
+  }
+  throw error;
 } finally {
   if (socket) socket.close();
-  app.kill();
+  let childClosed = !app;
+  if (app) {
+    if (app.exitCode === null && app.signalCode === null) app.kill("SIGTERM");
+    if (appClose) {
+      childClosed = await until(appClose.then(() => true), 3000, false);
+      if (!childClosed) {
+        app.kill("SIGKILL");
+        childClosed = await until(appClose.then(() => true), 2000, false);
+      }
+    }
+  }
+  if (childClosed) {
+    await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined);
+  } else {
+    process.exitCode = 1;
+    if (process.env.IMECE_PACKAGE_SMOKE_REPORT) await writeFile(process.env.IMECE_PACKAGE_SMOKE_REPORT,
+      JSON.stringify({ ok: false, platform, nativeDisplay, error: "Smoke child did not close; isolated scratch retained", diagnostics: stderr }, null, 2) + "\n");
+  }
 }

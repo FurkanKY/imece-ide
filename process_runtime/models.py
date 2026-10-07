@@ -121,6 +121,7 @@ class ProcessResult:
     stderr_truncated: bool
     stdout_bytes: int
     stderr_bytes: int
+    producer_quiescent: bool = False
 
     def __post_init__(self) -> None:
         argv = _validated_argv(self.argv, field="ProcessResult.argv")
@@ -136,7 +137,7 @@ class ProcessResult:
         for name in ("stdout", "stderr"):
             if not isinstance(getattr(self, name), str):
                 raise ProcessInputError(f"ProcessResult.{name} must be string")
-        for name in ("stdout_truncated", "stderr_truncated"):
+        for name in ("stdout_truncated", "stderr_truncated", "producer_quiescent"):
             if type(getattr(self, name)) is not bool:
                 raise ProcessInputError(f"ProcessResult.{name} must be bool")
         for name in ("stdout_bytes", "stderr_bytes"):

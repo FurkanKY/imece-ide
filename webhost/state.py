@@ -26,6 +26,7 @@ _collaboration_lock = threading.RLock()
 _collaboration_status_cache = None
 _delivery_service = None
 _owner_manager = None
+_peer_manager = None
 
 
 def set_project(root: str) -> Project:
@@ -34,6 +35,14 @@ def set_project(root: str) -> Project:
     _active = Project(root)
     _project_generation += 1
     _collaboration_status_cache = None
+    peer = peek_peer_manager()
+    if peer is not None:
+        try:
+            # Invalidate/detach synchronously before another project can admit a peer;
+            # the manager performs best-effort leave on the detached exact record.
+            peer.forget_project(None)
+        except Exception:
+            pass
     if previous is not None and previous.root != _active.root and _collaboration_host is not None:
         try:
             _collaboration_host.clear(previous.root)
@@ -94,6 +103,27 @@ def peek_owner_manager():
     """Return an existing manager without constructing one (shutdown path)."""
     with _collaboration_lock:
         return _owner_manager
+
+
+def get_peer_manager():
+    """Lazily create the RAM-only participant capability manager."""
+    global _peer_manager
+    with _collaboration_lock:
+        if _peer_manager is None:
+            from collab_runtime.peer import PeerSessionManager
+            _peer_manager = PeerSessionManager()
+        return _peer_manager
+
+
+def peek_peer_manager():
+    with _collaboration_lock:
+        return _peer_manager
+
+
+def set_peer_manager(manager) -> None:
+    global _peer_manager
+    with _collaboration_lock:
+        _peer_manager = manager
 
 
 def set_owner_manager(manager) -> None:

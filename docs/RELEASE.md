@@ -5,9 +5,12 @@
 **v0.4.0-beta.1** — the current public **source-only** release. There are no
 published binaries: installation is described in the
 [README](../README.md). The Windows `onedir` packaging pipeline
-(`packaging/build.ps1` + the **Build Windows beta release** workflow) exists and
-is CI-verified, but publishing prebuilt binaries is **postponed until the beta
-stabilizes**.
+(`packaging/build.ps1`, `packaging/build.sh` and the **M5 Windows and Linux
+package smoke** workflow) exists.
+M5 packaging engineering is now authorized with earlier acceptance gates kept
+open; the current changes have **not** been exercised as a Windows package here.
+Publishing prebuilt binaries is still postponed until real acceptance passes.
+See [M5-PACKAGING.md](M5-PACKAGING.md).
 
 Nothing in this guide announces a new release, a tag, or a binary. There is no
 v0.5 and no date. The role-free single-task default flow described in the
@@ -27,14 +30,17 @@ gate** — it must be met before any packaged release (milestone M5).
 5. Type a task in the team panel; review the proposal as a diff and confirm
    with **Apply**. Every run has a change receipt available from history.
 
-Python and Node are not required to use the packaged app. Keys, preferences
+For a future accepted package, Python and Node runtimes are bundled. Git must
+be separately installed and on PATH for native tasks/worktrees/SCM; project
+verification commands may need their own toolchains. Keys, preferences
 and logs live under `%LOCALAPPDATA%/ImeceIDE`.
 
 ## Release checklist
 
 - [ ] Rebuild the package on Windows with `packaging/build.ps1`.
 - [ ] Run `node packaging/smoke.mjs`; verify QWebChannel, settings/keys and
-      the PTY write→read result are clean.
+      the frozen supervisor authenticated receipt, isolated user-data paths and
+      the PTY write→read result are clean. Retain the smoke report and manifest.
 - [ ] Short visible tour with the packaged EXE: open a folder, edit/save a
       file, type into the terminal, check key status in Settings, close and
       reopen.
@@ -45,10 +51,16 @@ and logs live under `%LOCALAPPDATA%/ImeceIDE`.
 - [ ] Produce `SHA256SUMS.txt` and verify the ZIP hash.
 - [ ] Secret scan on git history and a dependency/license review are clean.
 - [ ] When everything passes, create the git tag and run the manual
-      **Build Windows beta release** GitHub Actions workflow, which builds,
-      smokes, zips, checksums and publishes the release.
+      **M5 Windows and Linux package smoke** GitHub Actions workflow. It builds,
+      smokes, zips and checksums; publication defaults off and additionally
+      requires explicit acceptance confirmation. Build-only artifacts do not
+      close any deferred gate.
 
-## Known limits
+## Known limits of the published source-only release
+
+The points below describe the public release, not the unreleased M3/M4/M5
+engineering on this branch; consult [PRODUCT-PLAN.md](PRODUCT-PLAN.md) for that
+status. No new binary release or acceptance is announced here.
 
 - This beta is **Windows-first** and usable from source on Linux; there is no
   auto-update.
@@ -88,9 +100,21 @@ cd ../..
 python -m pytest -q
 ```
 
-Packaging runs only in Windows PowerShell:
+Packaging engineering commands (not a claim of accepted binaries):
 
 ```powershell
+# Windows, PowerShell
 packaging/build.ps1
 node packaging/smoke.mjs
 ```
+
+```sh
+# Linux; existing build dependencies and Xvfb required
+bash packaging/build.sh
+xvfb-run -a node packaging/smoke.mjs
+```
+
+A local Linux manual-test artifact was built and passed Wayland frozen smoke
+using the explicitly authorized PyInstaller environment. It is not a public
+release. Windows frozen build and clean-machine/provider/LAN acceptance remain
+open. See [MANUAL-ACCEPTANCE.md](MANUAL-ACCEPTANCE.md).

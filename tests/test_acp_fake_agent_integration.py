@@ -88,8 +88,7 @@ def test_hang_mode_times_out_and_root_process_is_gone(tmp_path):
     runtime = AcpClientRuntime()
     limits = AcpClientLimits(prompt_timeout_ms=1500, cancel_grace_ms=500)
 
-    pids_before = {p.pid for p in psutil.process_iter()}
-    with pytest.raises(AcpTimeoutError):
+    with pytest.raises(AcpTimeoutError) as failure:
         asyncio.run(
             runtime.run(
                 _launch("hang"),
@@ -97,14 +96,32 @@ def test_hang_mode_times_out_and_root_process_is_gone(tmp_path):
                 limits=limits,
             )
         )
-    # No new fake_agent.py process should remain alive.
+    assert failure.value.producer_quiescent is True
+    # Other independent test shards can run the same fixture simultaneously.
+    # Check this admitted workspace identity, never unrelated fake-agent roots.
     time.sleep(0.2)
-    for proc in psutil.process_iter(["pid", "cmdline"]):
+    for proc in psutil.process_iter(["pid", "cmdline", "cwd"]):
         try:
             cmdline = proc.info["cmdline"] or []
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-        assert not any("acp_fake_agent.py" in part for part in cmdline), f"leaked process: {proc.info}"
+        is_ours = proc.info.get('cwd') == str(tmp_path) and any('acp_fake_agent.py' in part for part in cmdline)
+        assert not is_ours, f"leaked process: {proc.info}"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows ACP Job Object containment")
+def test_windows_acp_job_reaps_detached_child_before_quiescence_receipt(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    result = asyncio.run(AcpClientRuntime().run(
+        _launch("child_process", env={"ACP_FAKE_AGENT_CHILD_PID_FILE": str(pid_file),
+                                      "ACP_FAKE_AGENT_CHILD_SLEEP": "120"}),
+        AcpPromptRequest(cwd=str(tmp_path), prompt="spawn a detached child"),
+        limits=AcpClientLimits(prompt_timeout_ms=10_000, session_close_timeout_ms=200),
+    ))
+    assert result.stop_reason == "end_turn"
+    assert result.producer_quiescent is True
+    child_pid = int(pid_file.read_text().strip())
+    assert not psutil.pid_exists(child_pid)
 
 
 def test_child_process_mode_descendant_cleanup(tmp_path):
@@ -280,32 +297,22 @@ def test_connection_construction_failure_rolls_back_real_process(tmp_path, monke
     assert _no_process_with_marker_alive(marker), "connect_to_agent failure leaked the real child process"
 
 
-def test_snapshot_before_close_catches_descendant_orphaned_by_root_exit(tmp_path, monkeypatch):
-    """Blocker 1: force the real ACP root process to fully exit (via the
-    real production close_acp_agent_connection, which sends stdin EOF) BEFORE
-    hard process-tree cleanup runs, using the child_process fake-agent mode.
-    A detached grandchild that existed before root exit must still be
-    reaped even though it is no longer discoverable from the (now dead)
-    root pid by the time cleanup runs."""
-    import acp_runtime.client as client_module
-    from acp_runtime.stdio import close_acp_agent_connection as real_close_acp_agent_connection
-
-    async def _close_and_wait_for_real_exit(conn, process):
-        await real_close_acp_agent_connection(conn, process)
-        await asyncio.wait_for(process.wait(), timeout=5)
-
-    monkeypatch.setattr(client_module, "close_acp_agent_connection", _close_and_wait_for_real_exit)
-
+@pytest.mark.parametrize("child_sleep,close_timeout_ms", [(0.15, 2_000), (120, 150)])
+def test_acp_supervisor_reaps_detached_descendant(tmp_path, child_sleep, close_timeout_ms):
+    """A detached child is reaped after graceful drain or forced supervisor
+    cancellation; neither case relies on finding it from a dead ACP root PID."""
     pid_file = tmp_path / "child.pid"
     runtime = AcpClientRuntime()
     result = asyncio.run(
         runtime.run(
-            _launch("child_process", env={"ACP_FAKE_AGENT_CHILD_PID_FILE": str(pid_file)}),
+            _launch("child_process", env={"ACP_FAKE_AGENT_CHILD_PID_FILE": str(pid_file),
+                                           "ACP_FAKE_AGENT_CHILD_SLEEP": str(child_sleep)}),
             AcpPromptRequest(cwd=str(tmp_path), prompt="spawn a child"),
-            limits=AcpClientLimits(prompt_timeout_ms=10_000, session_close_timeout_ms=8_000),
+            limits=AcpClientLimits(prompt_timeout_ms=10_000, session_close_timeout_ms=close_timeout_ms),
         )
     )
     assert result.stop_reason == "end_turn"
+    assert result.producer_quiescent is True
     assert pid_file.exists()
     child_pid = int(pid_file.read_text().strip())
 

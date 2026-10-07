@@ -188,6 +188,7 @@ def test_run_process_ask_approval_wrong_then_approve_executes_once_and_propagate
         "cwd": ".",
         "argv": [sys.executable],
         "execution_isolation": "host",
+        "producer_quiescent": False,
     }
     with pytest.raises(AgentLifecycleError):
         session.resume(
@@ -232,6 +233,53 @@ def test_run_process_infrastructure_failure_translates_at_dispatcher_and_agent_b
     assert backend.session.inputs[1][0].result.is_error is True
 
 
+def test_cancelled_process_tool_persists_only_authenticated_quiescence_metadata(tmp_path):
+    import threading
+    import time
+    from agent_runtime.cancellation import CancellationToken
+    from process_runtime.errors import ProcessCancelledError
+    runtime = RunRuntime(RunStore(tmp_path / "runs.sqlite3"))
+    task = runtime.create_task(project_root=str(tmp_path), prompt="run process")
+    run = runtime.create_run(task_id=task.task_id)
+    runtime.record(run_id=run.run_id, type=RunEventType.RUN_STARTED, payload={})
+    child_file = tmp_path / "child.pid"
+    command = (
+        "import pathlib,subprocess,sys,time; "
+        "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], "
+        "start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(30)"
+    )
+    token = CancellationToken()
+    registry = registry_with_process(ProcessRunner())
+    backend = ScriptedBackend([ModelTurn("", (ModelToolCall("cancelled-call", "run_process", {
+        "argv": [sys.executable, "-c", command, str(child_file)], "timeout_ms": 30000,
+    }),), ModelStopReason.TOOL_USE, ModelUsage())])
+    context = ToolExecutionContext(LocalWorkspace(tmp_path), run_id=run.run_id,
+                                   execution_id="exec-cancel", cancel_token=token)
+    session = AgentSession(backend=backend, registry=registry,
+        policy=PolicyEvaluator([PermissionRule("process.execute", "*", PermissionEffect.ALLOW)]),
+        context=context, event_sink=CanonicalAgentEventSink(runtime, run.run_id, execution_id="exec-cancel"),
+        execution_id="exec-cancel", cancel_token=token)
+    def cancel_when_started():
+        deadline = time.monotonic() + 10
+        while not child_file.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        token.cancel()
+    canceller = threading.Thread(target=cancel_when_started)
+    canceller.start()
+    try:
+        with pytest.raises(ProcessCancelledError) as cancelled:
+            session.start("run process")
+        assert cancelled.value.producer_quiescent is True
+    finally:
+        canceller.join(timeout=5)
+    events = runtime.events(run.run_id, limit=100).events
+    failed = next(event for event in events if event.type == RunEventType.TOOL_FAILED)
+    assert failed.execution_id == "exec-cancel"
+    assert failed.payload["call_id"] == "cancelled-call"
+    assert failed.payload["metadata"] == {"producer_quiescent": True}
+
+
 def test_process_tool_canonical_bridge_preserves_metadata(tmp_path):
     runtime = RunRuntime(RunStore(tmp_path / "runs.sqlite3"))
     task = runtime.create_task(project_root=str(tmp_path), prompt="run process")
@@ -261,6 +309,7 @@ def test_process_tool_canonical_bridge_preserves_metadata(tmp_path):
     assert completed.payload["metadata"]["exit_code"] == 0
     assert completed.payload["metadata"]["timed_out"] is False
     assert completed.payload["metadata"]["execution_isolation"] == "host"
+    assert completed.payload["metadata"]["producer_quiescent"] is True
     assert completed.item_id == next(event.item_id for event in events if event.type == RunEventType.TOOL_REQUESTED)
     continuation = backend.session.inputs[1][0].result
     assert continuation.is_error is False

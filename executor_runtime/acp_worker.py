@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import shutil
 from collections.abc import Mapping
@@ -154,6 +155,7 @@ class _AcpClientRunner(Protocol):
         event_sink=None,
         cancel_token=None,
         permission_policy=None,
+        supervision_lease_fd: int | None = None,
     ):
         ...
 
@@ -256,16 +258,14 @@ class AcpWorkerAttemptAdapter:
         sink.start(request.task)
         permission_policy = WorktreeEditAcpPermissionPolicy(cwd)
         try:
-            acp_result = asyncio.run(
-                self._acp_client.run(
-                    launch_spec,
-                    prompt_request,
-                    limits=self._limits,
-                    event_sink=sink,
-                    cancel_token=cancel_token,
-                    permission_policy=permission_policy,
-                )
-            )
+            run_kwargs = {
+                "limits": self._limits, "event_sink": sink,
+                "cancel_token": cancel_token, "permission_policy": permission_policy,
+            }
+            lease_fd = getattr(getattr(getattr(workspace, "ownership", None), "lease", None), "fd", None)
+            if lease_fd is not None and "supervision_lease_fd" in inspect.signature(self._acp_client.run).parameters:
+                run_kwargs["supervision_lease_fd"] = lease_fd
+            acp_result = asyncio.run(self._acp_client.run(launch_spec, prompt_request, **run_kwargs))
             sink.complete(acp_result)
         except OperationCancelledError as cancellation:
             if sink.persistence_error is not None:
@@ -278,6 +278,7 @@ class AcpWorkerAttemptAdapter:
                     cancellation,
                     error_type=type(cancellation).__name__,
                     message="ACP Worker execution was cancelled.",
+                    producer_quiescent=getattr(cancellation, "producer_quiescent", False),
                 )
             except Exception as terminal_failure:
                 raise ExecutorAdapterExecutionError(
@@ -306,6 +307,7 @@ class AcpWorkerAttemptAdapter:
                         prompt=prompt_request.prompt,
                         launch=launch_spec,
                     ),
+                    producer_quiescent=getattr(original_failure, "producer_quiescent", False),
                 )
             except Exception as terminal_failure:
                 raise ExecutorAdapterExecutionError(

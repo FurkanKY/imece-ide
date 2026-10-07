@@ -127,6 +127,7 @@ class Dispatcher:
             left.workspace is right.workspace
             and left.run_id == right.run_id
             and left.execution_id == right.execution_id
+            and left.cancel_token is right.cancel_token
         )
 
     def _record_for_locked(
@@ -185,6 +186,9 @@ class Dispatcher:
         try:
             observation = executor.execute(arguments, context)
         except Exception as exc:
+            from agent_runtime.cancellation import OperationCancelledError
+            if isinstance(exc, OperationCancelledError):
+                raise
             raise ToolExecutionError(
                 f"Tool yürütmesi başarısız ({prepared.tool_name}): {exc}"
             ) from exc

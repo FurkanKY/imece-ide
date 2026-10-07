@@ -108,12 +108,20 @@ export interface OwnerPreview {
   baseCommit: string; goal: string; ownerId: string; memberIds: string[];
   tasks: OwnerTask[]; mode: "create"; warnings: string[];
 }
+export interface PeerProposalPreview {
+  ticketId: string; proposalId: string; taskId: string; owner: string; sessionId: string;
+  contextRevision: string; contextHash: string; paths: string[]; outOfScopePaths: string[];
+  fileCount: number; artifactSha256: string; sourceRunId: string | null;
+  state: "preview" | "published" | "unknown";
+}
 export interface OwnerStatus {
   state: string; projectRoot: string | null; sessionId: string | null;
   targetVersion: string | null; baseCommit: string | null; revision: string | null;
   goal: string | null; ownerId: string | null; memberIds: string[]; tasks: OwnerTask[];
   storePath: string | null; hubPath: string | null; endpoint: string | null;
   epoch: number; exportedMembers: string[]; retryRequired: boolean; createdPaths: string[];
+  transportMode?: "loopback" | "lan"; controlEndpoint?: string | null; proposalEndpoint?: string | null;
+  certificateSha256?: string | null;
 }
 export interface ProductTask { id: string; owner: string; goal: string; scopes: string[]; status: "queued" | "running" | "waiting" | "done"; contextRevision: string }
 export interface ProductBoard {
@@ -139,6 +147,18 @@ export interface OwnerShare {
   endpoint: string; sessionId: string; baseCommit: string; targetVersion: string;
   memberId: string; credential: string; storePath: string; hubPath: string;
   taskIds: string[]; epoch: number; scope: "loopback-only";
+}
+export interface ParticipantInvite {
+  memberId: string; code: string; expiresInSeconds?: number;
+  controlEndpoint: string; proposalEndpoint: string; certificateSha256: string;
+  sessionId: string; epoch?: number;
+}
+export interface ParticipantSession {
+  peerHandle: string; projectRoot: string; sessionId: string; baseCommit?: string;
+  memberId: string; revision?: string; epoch: number; state: "active" | "unknown" | string;
+  context?: { goal: string; decisions: string[]; interfaces: Record<string, string> };
+  tasks?: ProductTask[]; controlEndpoint?: string; proposalEndpoint?: string;
+  certificateSha256?: string; error?: string | null;
 }
 
 export interface DeliveryPreview {
@@ -184,17 +204,31 @@ export type BackendRunStatus = "created" | "queued" | "running" | "waiting_user"
 export interface RunListItem {
   runId: string; taskId: string; task: string; status: BackendRunStatus; phase: string;
   providerId: string; engine: "agent"; changedPathCount: number | null; errorCode: string | null;
-  readOnly?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean; retryAvailable?: boolean;
+  readOnly?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean; retryAvailable?: boolean; continuationAvailable?: boolean;
 }
 export interface RunDetails {
   runId: string; task: string; providerId: string; status: BackendRunStatus; phase: string;
   engine: "agent"; evidence: Record<string, unknown> | null; proposals: Proposal[];
   totals: { latency_s: number | null; tokens: number | null; cost_usd: number | null };
   errorCode: string | null; checkpointId: string | null;
-  readOnly?: boolean; historyTruncated?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean; retryAvailable?: boolean;
+  readOnly?: boolean; historyTruncated?: boolean; createdAt?: string; lastEventSeq?: number; taskTruncated?: boolean; retryAvailable?: boolean; continuationAvailable?: boolean;
 }
 
 // ---- İstek/yanıt yüzeyi ----
+export interface CandidateReceipt {
+  candidateId: string;
+  projectRoot: string;
+  candidateDir: string;
+  baseCommit: string;
+  selected: { runId: string; taskId: string; lastEventSeq: number; diffSha256: string }[];
+  changedPaths: string[];
+  verification: { status: string; fingerprint_complete?: boolean; changed_content?: boolean };
+  sharedProvenance?: { sessionId: string; epoch: number; revision: string; contextHash: string; proposalIds: string[]; baseCommit?: string };
+  selectedProposals?: { proposalId: string; proposalRevision: string; taskId: string; owner?: string }[];
+  state: "prepared" | "applied" | "rolled_back";
+  checkpointId: string | null;
+}
+
 export interface Api {
   // window
   "window.minimize": { params: {}; result: {} };
@@ -255,6 +289,15 @@ export interface Api {
   "collab.delivery.list": { params: { runId: string; storePath: string; hubPath: string }; result: { proposals: DeliveryProposal[] } };
   "collab.delivery.candidate": { params: { runId: string; storePath: string; hubPath: string; proposalIds: string[]; outputPath: string; verify?: boolean }; result: { candidate: DeliveryCandidate | null; conflicts: string[] } };
   "collab.status": { params: { runId?: string }; result: { collaboration: CollaborationStatus | null } };
+  "collab.peer.join": { params: { bundle: ParticipantInvite; confirmPin: true; pin: string }; result: ParticipantSession };
+  "collab.peer.refresh": { params: { peerHandle: string }; result: ParticipantSession };
+  "collab.peer.status": { params: { peerHandle: string }; result: ParticipantSession };
+  "collab.peer.disconnect": { params: { peerHandle: string }; result: { disconnected: boolean; warning: string | null } };
+  "collab.peer.previewProposal": { params: { peerHandle: string; taskId: string; paths: string[]; sourceRunId?: string }; result: PeerProposalPreview };
+  "collab.peer.publishProposal": { params: { peerHandle: string; ticketId: string; confirm: true; allowOutOfScope: boolean }; result: PeerProposalPreview };
+  "collab.peer.reconcileProposal": { params: { peerHandle: string; ticketId: string }; result: PeerProposalPreview };
+  "collab.peer.discardProposal": { params: { peerHandle: string; ticketId: string }; result: {} };
+  "collab.peer.fetchProposal": { params: { peerHandle: string; proposalId: string }; result: { proposalId: string; taskId: string; owner: string; sessionId: string; contextRevision: string; contextHash: string; paths: string[]; fileCount: number; artifactSha256: string } };
   "collab.taskStatus.preview": { params: { runId: string; targetStatus: "queued" | "running" | "waiting" }; result: ParticipantTaskStatusPreview };
   "collab.taskStatus.confirm": { params: { runId: string; ticketId: string; confirm: true }; result: { revision: string; taskId: string; status: "queued" | "running" | "waiting" } };
   "collab.taskStatus.discard": { params: { runId: string; ticketId: string }; result: {} };
@@ -262,7 +305,11 @@ export interface Api {
   "collab.owner.create": { params: { previewId: string }; result: OwnerStatus };
   "collab.owner.select": { params: { storePath: string; hubPath: string; ownerId: string; memberIds: string[] }; result: OwnerStatus };
   "collab.owner.start": { params: { port?: number }; result: OwnerStatus };
-  "collab.owner.stop": { params: {}; result: OwnerStatus };
+  "collab.owner.startLAN": { params: { bindAddress: string; certificate: string; privateKey: string; controlPort?: number; proposalPort?: number }; result: OwnerStatus };
+  "collab.owner.issueInvite": { params: { memberId: string; expectedEpoch?: number }; result: { memberId: string; code: string; expiresInSeconds: number; controlEndpoint: string; proposalEndpoint: string; certificateSha256: string; sessionId: string; epoch: number } };
+  "collab.owner.revokeMember": { params: { memberId: string; expectedEpoch?: number }; result: OwnerStatus };
+  "collab.owner.cancelInvite": { params: { code: string; projectRoot: string; expectedEpoch: number }; result: {} };
+  "collab.owner.stop": { params: { expectedEpoch?: number; expectedProjectRoot?: string }; result: OwnerStatus };
   "collab.owner.status": { params: {}; result: OwnerStatus };
   "collab.owner.snapshot": { params: {}; result: ProductBoard };
   "collab.owner.updateContext": { params: { confirm: true; expectedRevision: string; expectedEpoch: number; expectedSessionId: string; context: ProductBoard["context"] }; result: { revision: string; sessionId: string; epoch: number; action: string } };
@@ -277,6 +324,12 @@ export interface Api {
       Project._safe ile bağımsızca doğrular — mevcut olmayan/proje dışına
       çıkan bir yol sessizce düşürülür ve bir "info" olayıyla bildirilir. */
   "run.start": { params: { task: string; providerId: string; mentions?: string[]; collabApprovalHandle?: never } | { task: string; routing: Routing; mentions?: string[]; collabApprovalHandle?: string } | { retryOfRunId: string }; result: { runId: string } };
+  "candidate.prepare": { params: { runIds: string[]; verify: boolean }; result: { candidate: CandidateReceipt } };
+  "candidate.prepareShared": { params: { projectRoot: string; expectedSessionId: string; expectedEpoch: number; expectedRevision: string; proposalIds: string[]; verify: true }; result: { candidate: CandidateReceipt } };
+  "candidate.list": { params: {}; result: { candidates: CandidateReceipt[] } };
+  "candidate.apply": { params: { candidateId: string }; result: { applied: string[]; checkpointId: string } };
+  "candidate.rollback": { params: { candidateId: string }; result: { restored: string[] } };
+  "run.restart": { params: { runId: string }; result: { runId: string } };
   "run.list": { params: {}; result: { runs: RunListItem[]; historyUnavailable?: boolean } };
   "run.get": { params: { runId: string }; result: RunDetails };
   "run.cancel": { params: { runId: string }; result: {} };

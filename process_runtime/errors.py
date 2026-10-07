@@ -21,6 +21,8 @@ from agent_runtime.cancellation import OperationCancelledError
 
 
 class ProcessCancelledError(ProcessRuntimeError, OperationCancelledError):
-    """A CancellationToken was observed as cancelled while waiting on the
-    process; the process tree has already been terminated by the time this
-    is raised."""
+    """Cancellation after termination; quiescence is true only after receipt validation."""
+
+    def __init__(self, message: str, *, producer_quiescent: bool = False) -> None:
+        super().__init__(message)
+        self.producer_quiescent = producer_quiescent

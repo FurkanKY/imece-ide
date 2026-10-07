@@ -4,14 +4,18 @@ This guide covers running Imece IDE from source, which is currently the only
 supported way to use it — prebuilt binaries are not published yet (see
 [RELEASE.md](RELEASE.md)).
 
+M5 packaging engineering is in progress; it does not announce an accepted binary
+release. See [M5-PACKAGING.md](M5-PACKAGING.md) for checks and open release gates.
+
 ## 1. Prerequisites
 
 | Component | Version / notes |
 |-----------|-----------------|
-| Windows | 10/11 — the desktop shell targets Windows first (ConPTY terminal, DPAPI key store); packaging (prebuilt binaries) is Windows-only |
-| Linux | also supported from source (real PTY terminal via `ptyprocess`, `.env`-based key storage — no DPAPI); no packaged build yet |
+| Windows | 10/11 — the desktop shell targets Windows first (ConPTY terminal, DPAPI key store); Windows onedir packaging engineering is available; no accepted binary is announced |
+| Linux | also supported from source (real PTY terminal via `ptyprocess`, `.env`-based key storage — no DPAPI); Linux onedir build/smoke engineering targets Ubuntu 24.04 x86_64; local Wayland frozen smoke passed; clean-machine/other-platform acceptance remains open |
 | Python | 3.14 (what CI and packaging use; PySide6 ≥ 6.11.1 requires a recent Python) |
 | Node.js | ≥ 20, for building the frontend |
+| Git | Installed and on PATH; required for native tasks, isolated worktrees and SCM (also in packaged mode) |
 | Claude Code CLI | optional — `claude --version` must work; a Pro/Max subscription is enough, no API key needed |
 | DeepSeek API key | optional — https://platform.deepseek.com → API Keys |
 | Gemini API key | optional — https://aistudio.google.com/apikey |
@@ -197,8 +201,8 @@ cd web/ui && npm ci && npm run build && cd ../..
 The integrated terminal uses `ptyprocess` (a real PTY) instead of ConPTY, and
 spawns `$SHELL` if it is set and executable, falling back to `/bin/bash` then
 `/bin/sh`. Key storage falls back to the plain `.env` file (no DPAPI
-equivalent is used outside a packaged Windows build); packaging itself
-(prebuilt binaries) remains Windows-only for now.
+equivalent is used outside a packaged Windows build); Linux packaging engineering now exists (`bash packaging/build.sh`), but no
+accepted Linux binary is published; see [M5-PACKAGING.md](M5-PACKAGING.md).
 
 ### Pre-set `PYTHONPATH` from another toolchain breaks pytest
 

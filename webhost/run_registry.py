@@ -23,6 +23,7 @@ class RunSlot:
     activity_streamer: object = None
     phase: str = "starting"
     error_code: str | None = None
+    retain_for_restart: bool = False
     totals: dict = field(default_factory=lambda: {"latency_s": None, "tokens": None, "cost_usd": None})
     lock: object = field(default_factory=threading.RLock, repr=False)
 
@@ -117,7 +118,7 @@ _TERMINAL_STATUSES = frozenset({
 
 def _owns_live_resource(slot):
     """A slot stays open while any worker, workspace, or streamer is owned."""
-    return any(resource is not None for resource in
+    return slot.phase == "uncertain" or any(resource is not None for resource in
                (slot.worker, slot.workspace, slot.activity_streamer))
 
 

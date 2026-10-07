@@ -85,6 +85,7 @@ from collab_runtime.models import (
     MAX_SCOPE_CHARS,
     SessionState,
     canonical_json_bytes,
+    parse_state_dict,
     safe_id,
     sha_hex,
 )
@@ -666,6 +667,66 @@ def _capture_entries(
 
 def _encode_b64(content: bytes) -> str:
     return base64.b64encode(content).decode("ascii")
+
+
+def capture_proposal_from_session_state(
+    project_root: Path | str,
+    proposal_id: str,
+    task_id: str,
+    paths: list[str] | tuple[str, ...],
+    *,
+    session_state: SessionState,
+    context_revision: str,
+) -> Proposal:
+    """Capture selected working-tree changes using already-validated live
+    session state, without requiring a peer-side GitStore or metadata clone.
+
+    The caller is responsible for obtaining ``session_state`` and its
+    ``context_revision`` from the authenticated live metadata channel. This
+    function validates their internal identity and performs only read-only
+    source-repository inspection; it never invents or verifies history in a
+    local collaboration store. The session base must be an ancestor of the
+    source HEAD, matching the cumulative capture semantics of
+    :func:`capture_proposal`.
+    """
+    if not isinstance(session_state, SessionState):
+        raise ValidationError("capture requires validated live session state.")
+    session_state = parse_state_dict(session_state.to_dict())
+    identifier = safe_id(proposal_id, "proposal_id")
+    selected_task = safe_id(task_id, "task_id")
+    revision = sha_hex(context_revision, "context_revision")
+    if selected_task not in session_state.tasks:
+        raise ValidationError("the selected task does not exist in the live session.")
+    if not session_state.tasks[selected_task].owner:
+        raise ValidationError("the selected task has no valid owner.")
+    if not session_state.context_hash:
+        raise ValidationError("the live shared context is invalid.")
+    if not isinstance(paths, (list, tuple)) or not paths:
+        raise ValidationError("at least one explicitly selected path is required.")
+    cleaned: list[str] = []
+    for raw in paths:
+        path = proposal_file_path(raw)
+        if path not in cleaned:
+            cleaned.append(path)
+    if len(cleaned) > MAX_FILES:
+        raise ValidationError(f"at most {MAX_FILES} changed files are allowed per proposal.")
+    root = _require_source_toplevel(project_root)
+    _source_head(root)
+    _require_base_ancestor(root, session_state.base_commit)
+    task = session_state.tasks[selected_task]
+    files, out_of_scope = _capture_entries(root, session_state.base_commit, task.scopes, cleaned)
+    if not files:
+        raise ValidationError(
+            "the proposal is empty: none of the selected paths changed relative to the session base."
+        )
+    proposal = Proposal(
+        proposal_id=identifier, task_id=selected_task, owner=task.owner,
+        session_id=session_state.session_id, base_commit=session_state.base_commit,
+        context_revision=revision, context_hash=session_state.context_hash,
+        files=tuple(files), out_of_scope_paths=tuple(out_of_scope),
+    )
+    parse_proposal_bytes(proposal_bytes(proposal))
+    return proposal
 
 
 def capture_proposal(

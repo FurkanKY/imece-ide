@@ -61,6 +61,7 @@ from run_runtime.events import RunEventType
 from run_runtime.legacy import LegacyRunCoordinator
 from run_runtime.pipeline import CanonicalPipelineRecorder
 from run_runtime.models import RunStatus, new_run_id
+from run_runtime.errors import RunNotFoundError, RunStoreError
 from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_execution_runtime import (
     AgentExecutionRequest, AgentExecutionStatus, AgentRunCoordinator, build_agent_ports, execute_task,
@@ -69,9 +70,9 @@ from context_runtime import load_project_rules
 from webhost import state
 from webhost.api.activity import ActivityStreamer, start_activity_streamer
 from webhost.bridge import handler, BridgeError
-from run_runtime.errors import RunStoreError
 from webhost.run_registry import RunSlot, registry as _run_registry
 from webhost.run_history import get_history, list_history, retry_source, retry_availability
+from workspace.ownership import WorkspaceOwnership, OwnershipError
 
 try:
     from pipeline_runtime import PipelineRunner, PipelineStatus
@@ -160,6 +161,7 @@ def get_collaboration_status(run_id=None):
 # the Composer's own UI-level cap — a client is never trusted blindly.
 _MAX_MENTIONS = 10
 _draining_workers: list[tuple[object, object, object, str | None]] = []
+_orphaned_retry_workspaces: list[tuple[str, object]] = []
 _delivery_lock = threading.RLock()
 _delivery_leases: dict[tuple[int, str], int] = {}
 _delivery_closing: set[tuple[int, str]] = set()
@@ -386,9 +388,25 @@ def _worker_is_finished(worker):
 def _drain_collaboration_resources():
     """Retry only quiescent retained resources; active workers keep ownership."""
     with _collaboration_cleanup_lock:
+        for root, workspace in list(_orphaned_retry_workspaces):
+            try:
+                workspace.dispose()
+            except Exception:
+                continue
+            _orphaned_retry_workspaces.remove((root, workspace))
+            _run_registry.release(root)
         entries = list(_draining_workers)
         for entry in entries:
             worker, session, workspace, run_id = entry
+            if session is None:
+                if not _worker_is_finished(worker):
+                    continue
+                try:
+                    workspace.dispose()
+                except Exception:
+                    continue
+                _draining_workers.remove(entry)
+                continue
             with _delivery_lock:
                 if not _worker_is_finished(worker) or _delivery_is_busy(session, run_id):
                     continue
@@ -1199,6 +1217,15 @@ def _emit_pipeline_report(emit_ui, proj: Project, workspace, report, *, runtime=
                 emit_ui({"type": "summary", "text": final_message})
 
 
+def _require_drained_admission(project_root):
+    _drain_collaboration_resources()
+    root = Path(project_root).resolve()
+    if (any(item[1] is None or root == Path(item[1].project_root).resolve()
+            for item in list(_draining_workers))
+            or any(orphan_root == str(root) for orphan_root, _ in _orphaned_retry_workspaces)):
+        raise BridgeError("collab_cleanup_failed", "Önceki çalışma alanı güvenle kapatılamadı.")
+
+
 @handler("run.start")
 def _start(params, ctx):
     if not isinstance(params, dict):
@@ -1209,19 +1236,20 @@ def _start(params, ctx):
     collab_handle = params.get("collabApprovalHandle") if collab_requested else None
     if collab_requested and (type(collab_handle) is not str or not collab_handle):
         raise BridgeError("collab_invalid", "Yerel işbirliği onayı geçersiz.")
-    task = (params.get("task") or "").strip()
     retry_run_id = params.get("retryOfRunId")
     if "retryOfRunId" in params:
         if (type(retry_run_id) is not str or not retry_run_id
                 or set(params) != {"retryOfRunId"}):
             raise BridgeError("invalid_retry", "Yeniden deneme isteği yalnızca kaynak koşu kimliği içerebilir.")
+        task = ""
+    else:
+        raw_task = params.get("task")
+        if raw_task is not None and not isinstance(raw_task, str):
+            raise BridgeError("invalid_params", "Görev metni geçersiz.")
+        task = (raw_task or "").strip()
     if not task and retry_run_id is None:
         raise BridgeError("empty_task", "Görev boş.")
-    _drain_collaboration_resources()
-    if any(item[1] is not None and
-           Path(proj.root).resolve() == Path(item[1].project_root).resolve()
-           for item in list(_draining_workers)):
-        raise BridgeError("collab_cleanup_failed", "Önceki yerel işbirliği kaynağı güvenle kapatılamadı.")
+    _require_drained_admission(proj.root)
     if _active["worker"] is not None and _active["worker"].isRunning() and not agent_mode:
         raise BridgeError("busy", "Zaten bir koşu sürüyor.")
     if _delivery_is_busy():
@@ -1244,9 +1272,11 @@ def _start(params, ctx):
         retry = None
         if retry_run_id is not None:
             project_root = str(Path(proj.root).resolve())
-            retry = retry_source(
-                state.get_run_runtime(), project_root, retry_run_id,
-            )
+            try:
+                retry_runtime = state.get_run_runtime()
+                retry = retry_source(retry_runtime, project_root, retry_run_id)
+            except Exception:
+                retry = None
             if retry is None:
                 raise BridgeError("retry_unavailable", "Bu geçmiş koşu güvenle yeniden başlatılamıyor.")
             task = retry["task"]
@@ -1277,8 +1307,10 @@ def _start(params, ctx):
             raise BridgeError("run_capacity", "Bu proje için en fazla iki ajan koşusu tutulabilir.")
         coordinator = None
         workspace = None
+        runtime = None
+        planned_run_id = None
         try:
-            runtime = state.get_run_runtime()
+            runtime = retry_runtime if retry is not None else state.get_run_runtime()
             planned_run_id = new_run_id() if retry is not None else None
             if retry is not None:
                 workspace = engine_factory.create_pipeline_workspace(proj.root, planned_run_id)
@@ -1287,56 +1319,122 @@ def _start(params, ctx):
                 **({"retry_of_run_id": retry_run_id, "run_id": planned_run_id} if retry is not None else {}),
             )
         except Exception as exc:
-            _run_registry.release(project_root)
-            if workspace is not None:
-                try:
-                    workspace.dispose()
-                except Exception as cleanup_exc:
-                    if retry is not None:
-                        source_runtime = state.get_run_runtime()
-                        source_coordinator = LegacyRunCoordinator(
-                            source_runtime, task_id=retry["taskId"], run_id=retry_run_id,
-                            routing={"agent_provider": provider_id},
-                        )
-                        _run_registry.add(RunSlot(
-                            retry_run_id, retry["taskId"], project_root, provider_id,
-                            source_coordinator, workspace=workspace, task=task,
-                            phase="cleanup_failed", error_code="workspace_cleanup_failed",
-                        ))
-                        raise BridgeError("workspace_cleanup_failed", "Geçici worktree güvenle kapatılamadı.") from cleanup_exc
-                    raise BridgeError("workspace_cleanup_failed", "Geçici worktree güvenle kapatılamadı.") from cleanup_exc
             if retry is not None:
-                if isinstance(exc, RunStoreError):
-                    raise BridgeError("retry_unavailable", "Geçmiş koşu artık güvenle yeniden başlatılamıyor.") from None
-                raise BridgeError("worker_start_failed", "Tek ajan çalışma alanı güvenle başlatılamadı.") from None
+                if runtime is None:
+                    if workspace is not None:
+                        try:
+                            workspace.dispose()
+                            workspace = None
+                        except Exception as cleanup_exc:
+                            _orphaned_retry_workspaces.append((project_root, workspace))
+                            _run_registry.release(project_root)
+                            raise BridgeError("retry_uncertain", "Runtime ve worktree temizliği erişilemiyor; yeni çalışma başlatmayın.") from cleanup_exc
+                    _run_registry.release(project_root)
+                    raise BridgeError("retry_unavailable", "Görev deposuna şu anda erişilemiyor.") from None
+                try:
+                    run_record = runtime.get_run(planned_run_id) if planned_run_id is not None else None
+                except RunNotFoundError:
+                    run_record = None
+                except Exception as lookup_exc:
+                    _run_registry.add(RunSlot(
+                        planned_run_id, retry["taskId"], project_root, provider_id,
+                        AgentRunCoordinator(runtime, task_id=retry["taskId"], run_id=planned_run_id,
+                                            routing={"agent_provider": provider_id}),
+                        workspace=workspace, task=task, phase="uncertain",
+                        error_code="retry_record_lookup_failed",
+                    ))
+                    raise BridgeError("retry_uncertain", "Retry kaydının durumu okunamadı; yeni çalışma başlatmayın.") from lookup_exc
+                if run_record is None:
+                    if workspace is not None:
+                        try:
+                            workspace.dispose()
+                            workspace = None
+                        except Exception as cleanup_exc:
+                            _orphaned_retry_workspaces.append((str(Path(proj.root).resolve()), workspace))
+                            raise BridgeError("retry_uncertain", "Geçici worktree temizlenemedi; kaynak korunuyor.") from cleanup_exc
+                    _run_registry.release(project_root)
+                    if isinstance(exc, RunStoreError):
+                        raise BridgeError("retry_unavailable", "Geçmiş koşu artık güvenle yeniden başlatılamıyor.") from None
+                    raise BridgeError("worker_start_failed", "Tek ajan çalışma alanı güvenle başlatılamadı.") from None
+
+                coordinator = AgentRunCoordinator(
+                    runtime, task_id=run_record.task_id, run_id=planned_run_id,
+                    routing=dict(run_record.routing),
+                )
+                settled = False
+                try:
+                    coordinator.finish_failed("retry_lifecycle_start_failed")
+                    settled = True
+                except Exception:
+                    pass
+                if settled:
+                    if workspace is not None:
+                        try:
+                            workspace.dispose()
+                            workspace = None
+                        except Exception:
+                            pass
+                    if workspace is None:
+                        _run_registry.add(RunSlot(
+                            planned_run_id, run_record.task_id, project_root, provider_id, coordinator,
+                            task=task, phase="failed", error_code="retry_lifecycle_start_failed",
+                        ))
+                        raise BridgeError("worker_start_failed", "Yeniden deneme başarısız olarak kaydedildi.") from None
+                    _run_registry.add(RunSlot(
+                        planned_run_id, run_record.task_id, project_root, provider_id, coordinator,
+                        workspace=workspace, task=task, phase="cleanup_failed",
+                        error_code="workspace_cleanup_failed",
+                    ))
+                    raise BridgeError("retry_uncertain", "Başarısız deneme kaydedildi; worktree temizliği gerekiyor.") from None
+                _run_registry.add(RunSlot(
+                    planned_run_id, run_record.task_id, project_root, provider_id, coordinator,
+                    workspace=workspace, task=task, phase="uncertain",
+                    error_code="retry_settlement_failed",
+                ))
+                raise BridgeError("retry_uncertain", "Yeniden deneme yaşam döngüsü belirsiz; kaynak korunuyor.") from None
+            _run_registry.release(project_root)
             raise
         run_id = coordinator.run_id
         try:
             if workspace is None:
                 workspace = engine_factory.create_pipeline_workspace(proj.root, run_id)
+            WorkspaceOwnership.attach(runtime, run_id, workspace)
             ports = build_agent_ports(runtime, run_id, provider_id)
         except Exception:
+            settlement_succeeded = False
             if coordinator is not None:
-                _run_registry.release(project_root)
                 try:
                     coordinator.finish_failed("agent_worker_unavailable")
+                    settlement_succeeded = True
                 except Exception:
                     pass
             if workspace is not None:
                 try:
                     workspace.dispose()
+                    workspace = None
                 except Exception:
-                    if coordinator is not None:
-                        record = coordinator.get_run()
-                        retained = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
-                                           workspace=workspace, task=task, phase="cleanup_failed",
-                                           error_code="workspace_cleanup_failed")
-                        _run_registry.add(retained)
-            elif retry is not None and coordinator is not None:
+                    pass
+            if coordinator is not None and not settlement_succeeded:
                 record = coordinator.get_run()
                 retained = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
-                                   task=task, phase="failed", error_code="agent_worker_unavailable")
+                                   workspace=workspace, task=task, phase="uncertain",
+                                   error_code="agent_worker_unavailable")
                 _run_registry.add(retained)
+            elif coordinator is not None and retry is not None:
+                record = coordinator.get_run()
+                retained = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
+                                   workspace=workspace, task=task,
+                                   phase="cleanup_failed" if workspace is not None else "failed",
+                                   error_code="workspace_cleanup_failed" if workspace is not None else "agent_worker_unavailable")
+                _run_registry.add(retained)
+            elif coordinator is not None and workspace is not None:
+                record = coordinator.get_run()
+                retained = RunSlot(run_id, record.task_id, project_root, provider_id, coordinator,
+                                   workspace=workspace, task=task, phase="cleanup_failed",
+                                   error_code="workspace_cleanup_failed")
+                _run_registry.add(retained)
+            else:
+                _run_registry.release(project_root)
             raise BridgeError("worker_start_failed", "Tek ajan worker'ı başlatılamadı.") from None
         cancel_event = threading.Event()
         record = coordinator.get_run()
@@ -1755,6 +1853,17 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
     """Bridge the agent core's canonical result without synthesizing pipeline events."""
     def dispose_after_quiescent():
         def dispose():
+            owner = getattr(workspace, "ownership", None)
+            if slot is not None and slot.retain_for_restart and owner is not None:
+                try:
+                    owner.stash()
+                    slot.workspace = None
+                    if _active.get("workspace") is workspace:
+                        _active["workspace"] = None
+                except Exception:
+                    slot.phase = "cleanup_failed"
+                    slot.error_code = "workspace_stash_failed"
+                return
             if slot is not None:
                 if _dispose_agent_workspace(workspace, run_id):
                     slot.workspace = None
@@ -1867,6 +1976,14 @@ def _wire_agent_worker(worker, *, runtime, run_id, coordinator, workspace, proj,
             if slot.worker is worker and _worker_is_finished(worker):
                 slot.worker = None
         worker.finished.connect(release_worker_reference)
+        def seal_quiescent_workspace():
+            owner = getattr(workspace, "ownership", None)
+            if owner is not None and not workspace._disposed:
+                try:
+                    owner.seal()
+                except Exception:
+                    slot.error_code = "workspace_seal_failed"
+        worker.finished.connect(seal_quiescent_workspace)
     worker.start()
     worker.agent_started = True
     if on_started is not None:
@@ -2164,6 +2281,89 @@ def _wire_pipeline_worker(worker, *, runtime, run_id, coordinator, workspace, pr
     return worker
 
 
+@handler("run.restart")
+def _restart(params, ctx):
+    """Explicitly claim a sealed workspace; never resurrect historical evidence."""
+    _validate_run_rpc_params(params, {"runId"}, required={"runId"})
+    proj = _require_project()
+    root = str(Path(proj.root).resolve())
+    run_id = params["runId"]
+    _require_drained_admission(root)
+    if _delivery_is_busy() or _run_registry.get(run_id) is not None:
+        raise BridgeError("busy", "Çalışma zaten sahiplenilmiş veya teslimat sürüyor.")
+    if _active.get("engine") != "agent" and _active_canonical_run_blocks_start():
+        raise BridgeError("busy", "Başka bir çalışma sürüyor.")
+    runtime = state.get_run_runtime()
+    try:
+        run = runtime.get_run(run_id)
+        task = runtime.store.get_task(run.task_id)
+    except Exception as exc:
+        raise BridgeError("restart_unavailable", "Görev kaydı okunamadı.") from exc
+    owner = None
+    if not _run_registry.reserve(root):
+        raise BridgeError("run_capacity", "Bu proje için en fazla iki çalışma tutulabilir.")
+    try:
+        owner = WorkspaceOwnership.adopt(runtime, run_id, root)
+        run = runtime.get_run(run_id)
+        task = runtime.store.get_task(run.task_id)
+        provider_id = run.routing["agent_provider"]
+        supported, why = engine_factory.role_supported(provider_id)
+        if not supported:
+            raise OwnershipError(why)
+        owner.busy()
+        runtime.record(run_id=run_id, type="run.restarted", payload={"reason": "explicit_restart"},
+                       source="workspace_ownership")
+        coordinator = AgentRunCoordinator(runtime, task_id=task.task_id, run_id=run_id,
+                                          routing=dict(run.routing))
+        ports = build_agent_ports(runtime, run_id, provider_id)
+    except Exception as exc:
+        if owner is None:
+            _run_registry.release(root)
+            raise BridgeError("restart_unavailable", "Çalışma alanı güvenle sahiplenilemedi.") from exc
+        coordinator = AgentRunCoordinator(runtime, task_id=run.task_id, run_id=run_id,
+                                          routing=dict(run.routing))
+        slot = RunSlot(run_id, run.task_id, root, run.routing["agent_provider"], coordinator,
+                       workspace=owner.workspace, task=task.prompt, phase="uncertain",
+                       error_code="restart_start_failed")
+        _run_registry.add(slot)
+        try:
+            if runtime.get_run(run_id).status is RunStatus.RUNNING:
+                coordinator.finish_failed("restart_start_failed")
+            owner.stash()
+            slot.workspace = None
+            slot.phase = "failed"
+        except Exception:
+            raise BridgeError("restart_uncertain", "Devam başlatılamadı; sahiplik korunuyor.") from exc
+        raise BridgeError("restart_unavailable", "Devam başlatılamadı; çalışma alanı korunuyor.") from exc
+    slot = RunSlot(run_id, run.task_id, root, provider_id, coordinator, workspace=owner.workspace,
+                   ports=ports, task=task.prompt, cancel_event=threading.Event())
+    _run_registry.add(slot)
+    worker = None
+    try:
+        worker = _AgentWorker(runtime, run_id, owner.workspace, ports, task.prompt, provider_id,
+                              slot.cancel_event, [])
+        worker.feedback = "Continue the original task in the recovered workspace. Re-check all changes; prior evidence is not current authorization."
+        _wire_agent_worker(worker, runtime=runtime, run_id=run_id, coordinator=coordinator,
+                           workspace=owner.workspace, proj=proj,
+                           emit_ui=lambda ev: ctx._bridge.emit_event("run.event", {"runId": run_id, "ev": ev}),
+                           bridge=ctx._bridge, ended={"flag": False}, slot=slot,
+                           activity_after_seq=runtime.get_run(run_id).last_event_seq)
+    except Exception as exc:
+        if worker is not None and (worker.isRunning() or getattr(worker, "agent_started", False)):
+            return {"runId": run_id}
+        slot.worker = None
+        slot.phase = "uncertain"
+        try:
+            coordinator.finish_failed("restart_worker_unavailable")
+            owner.stash()
+            slot.workspace = None
+            slot.phase = "failed"
+        except Exception:
+            raise BridgeError("restart_uncertain", "Devam worker'ı başlatılamadı; sahiplik korunuyor.") from exc
+        raise BridgeError("restart_unavailable", "Devam worker'ı başlatılamadı; çalışma alanı korunuyor.") from exc
+    return {"runId": run_id}
+
+
 @handler("run.followUp")
 def _follow_up(params, ctx):
     """F2 (takip isteği): bekleyen bir proposal varken kullanıcının yazdığı
@@ -2202,6 +2402,9 @@ def _follow_up(params, ctx):
                 raise BridgeError("no_active_run", "Takip isteği için bekleyen bir öneri yok.")
             mentions, _invalid = _validate_mentions(proj, params.get("mentions") or [])
             slot.pinned_paths = list(dict.fromkeys(slot.pinned_paths + mentions))
+            owner = getattr(slot.workspace, "ownership", None)
+            if owner is not None:
+                owner.busy()
             CanonicalPipelineRecorder(state.get_run_runtime(), slot.run_id).resumed(reason="user_feedback")
             slot.proposals = []
             slot.evidence = None
@@ -2732,6 +2935,8 @@ def shutdown():
     """Uygulama kapanırken koşuyu iptal et (zombi thread önleme)."""
     for slot in _run_registry.slots():
         worker = slot.worker
+        owner = getattr(slot.workspace, "ownership", None)
+        slot.retain_for_restart = owner is not None
         if worker is not None and worker.isRunning():
             if slot.cancel_event is not None:
                 slot.cancel_event.set()
@@ -2750,7 +2955,17 @@ def shutdown():
                 slot.phase = "cleanup_failed"
                 slot.error_code = "activity_streamer_cleanup_pending"
         if slot.workspace is not None and _worker_is_finished(worker):
-            if _dispose_agent_workspace(slot.workspace, slot.run_id):
+            owner = getattr(slot.workspace, "ownership", None)
+            if owner is not None:
+                try:
+                    owner.stash()
+                    if _active.get("workspace") is slot.workspace:
+                        _active["workspace"] = None
+                    slot.workspace = None
+                except Exception:
+                    slot.phase = "cleanup_failed"
+                    slot.error_code = "workspace_stash_failed"
+            elif _dispose_agent_workspace(slot.workspace, slot.run_id):
                 slot.workspace = None
             else:
                 slot.phase = "cleanup_failed"
@@ -2778,9 +2993,11 @@ def shutdown():
         if _active.get("engine") == "agent" and not _worker_is_finished(w):
             # Do not remove the worktree while a native agent/process is still
             # using it; cancellation may take longer than the bounded wait.
-            w.finished.connect(lambda: _dispose_agent_workspace(workspace))
+            if getattr(workspace, "ownership", None) is None:
+                w.finished.connect(lambda: _dispose_agent_workspace(workspace))
         elif _active.get("engine") == "agent":
-            _dispose_agent_workspace(workspace)
+            if getattr(workspace, "ownership", None) is None:
+                _dispose_agent_workspace(workspace)
         else:
             _dispose_workspace()
     try:

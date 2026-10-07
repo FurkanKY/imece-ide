@@ -43,6 +43,7 @@ from collab_runtime.proposals import (  # noqa: E402
     MAX_FILE_BYTES,
     MAX_PROPOSAL_JSON_BYTES,
     capture_proposal,
+    capture_proposal_from_session_state,
     list_proposals,
     parse_proposal_bytes,
     proposal_bytes,
@@ -272,6 +273,21 @@ def test_capture_accepts_validated_binding_without_project_artifact(tmp_path):
 
 
 # ---------------- capture: add / modify / delete / mode-only ----------------
+
+
+def test_capture_from_live_state_needs_no_peer_store(tmp_path):
+    w = _world(tmp_path)
+    _mutate_frontend(w)
+    _revision, state = w.store_a.fetch_state()
+    proposal = capture_proposal_from_session_state(
+        w.frontend, "peer-capture", "t-fe", ["app.py"],
+        session_state=state, context_revision=w.rev3,
+    )
+    assert proposal.owner == "alice"
+    assert proposal.session_id == "demo-1"
+    assert proposal.base_commit == w.base
+    assert proposal.context_revision == w.rev3
+    assert proposal.files[0].path == "app.py"
 
 
 def test_capture_add_modify_delete_and_mode_only(tmp_path):

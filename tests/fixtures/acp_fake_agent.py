@@ -74,7 +74,7 @@ class FakeAgent:
         if self._mode == "child_process":
             pid_file = os.environ["ACP_FAKE_AGENT_CHILD_PID_FILE"]
             child = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(120)"],
+                [sys.executable, "-c", f"import time; time.sleep({float(os.environ.get('ACP_FAKE_AGENT_CHILD_SLEEP', '120'))!r})"],
                 start_new_session=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,

@@ -5,6 +5,7 @@ import { bridge, BridgeError, DirEntry } from "@/bridge";
 import { useEditor } from "@/state/editor";
 import { toast } from "@/components/toasts/toasts";
 import { confirmDialog, promptDialog } from "@/components/dialogs/dialogs";
+import { advanceProjectEpoch, projectEpoch } from "@/state/projectEpoch";
 
 function parentOf(rel: string): string {
   const i = rel.lastIndexOf("/");
@@ -29,7 +30,7 @@ interface WorkspaceState {
   openProject: (path: string) => Promise<void>;
   pickAndOpen: () => Promise<void>;
   toggleDir: (rel: string) => Promise<void>;
-  loadDir: (rel: string) => Promise<void>;
+  loadDir: (rel: string, expectedRoot?: string) => Promise<void>;
   // dosya işlemleri (diyalog + köprü + tazeleme uçtan uca)
   newFile: (dirRel: string) => Promise<void>;
   newFolder: (dirRel: string) => Promise<void>;
@@ -40,6 +41,8 @@ interface WorkspaceState {
   copyPath: (rel: string) => Promise<void>;
   revealInOS: (rel: string) => Promise<void>;
 }
+
+let observedRoot = null as string | null;
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   root: null,
@@ -67,7 +70,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (path) await get().openProject(path);
   },
 
-  loadDir: async (rel) => {
+  loadDir: async (rel, expectedRoot) => {
+    const capturedRoot = expectedRoot ?? get().root;
+    const capturedEpoch = projectEpoch();
+    if (expectedRoot && get().root !== expectedRoot) return;
+    const isCurrent = () => get().root === capturedRoot && projectEpoch() === capturedEpoch;
     set((s) => {
       const errors = { ...s.errors };
       delete errors[rel];
@@ -75,6 +82,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     });
     try {
       const { entries } = await bridge.call("fs.listDir", { rel });
+      if (!isCurrent()) return;
       set((s) => {
         const loading = new Set(s.loading);
         loading.delete(rel);
@@ -83,6 +91,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         return { children: { ...s.children, [rel]: entries }, loading, errors };
       });
     } catch (e) {
+      if (!isCurrent()) return;
       set((s) => {
         const loading = new Set(s.loading);
         loading.delete(rel);
@@ -263,3 +272,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }
   },
 }));
+
+useWorkspace.subscribe((state) => {
+  if (state.root !== observedRoot) {
+    observedRoot = state.root;
+    advanceProjectEpoch();
+  }
+});

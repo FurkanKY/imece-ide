@@ -405,10 +405,11 @@ class RunStore:
                 event_rows = conn.execute(
                     "SELECT type FROM run_events WHERE run_id=? ORDER BY seq LIMIT 2001", (source_run_id,),
                 ).fetchall()
-                if (len(event_rows) > 2000 or not event_rows
-                        or event_rows[-1]["type"] not in {"run.failed", "run.cancelled"}
+                lifecycle_tail = [row for row in event_rows if not row["type"].startswith("workspace.")]
+                if (len(event_rows) > 2000 or not lifecycle_tail
+                        or lifecycle_tail[-1]["type"] not in {"run.failed", "run.cancelled"}
                         or any(row["type"] in {"proposal.ready", "proposal.applied", "proposal.rejected",
-                                                "checkpoint.restored", "run.resumed", "run.waiting_user"}
+                                                "checkpoint.restored", "run.resumed", "run.restarted", "run.waiting_user"}
                                for row in event_rows)):
                     raise RunStoreError("Retry kaynağı eski yetki veya geçersiz olay içeriyor.")
                 record = RunRecord.new(

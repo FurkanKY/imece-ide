@@ -895,6 +895,22 @@ def test_no_background_loop_thread_remains_after_run(tmp_path):
     assert after == before
 
 
+def test_worker_passes_owned_workspace_lease_to_supervision_aware_client(tmp_path):
+    from types import SimpleNamespace
+    class LeaseAwareClient:
+        def __init__(self): self.lease_fd = None
+        async def run(self, launch, request, *, limits=None, event_sink=None, cancel_token=None,
+                      permission_policy=None, supervision_lease_fd=None):
+            self.lease_fd = supervision_lease_fd
+            return _acp_result()
+    client = LeaseAwareClient()
+    adapter, _runtime, _run, _ = _adapter(tmp_path, client=client)
+    workspace = _fake_worktree(tmp_path)
+    workspace.ownership = SimpleNamespace(lease=SimpleNamespace(fd=9876))
+    adapter.run(workspace, _worker_request(), execution_id="execution-lease")
+    assert client.lease_fd == 9876
+
+
 def test_success_records_only_real_acp_result_facts_and_returns_worker_result(tmp_path):
     result = _acp_result()
     client = _FakeAcpClient(result=result)
@@ -914,6 +930,7 @@ def test_success_records_only_real_acp_result_facts_and_returns_worker_result(tm
         "permission_request_count": result.permission_request_count,
         "session_close_supported": result.session_close_supported,
         "session_close_succeeded": result.session_close_succeeded,
+        "producer_quiescent": False,
     }
     assert "final_text" not in event.payload
     assert "model_turns" not in event.payload

@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -87,6 +88,69 @@ def test_create_preview_then_create_touches_only_private_metadata(world):
     assert _git(["status", "--porcelain=v1"], world.root) == before
     assert _git(["rev-parse", "HEAD"], world.root) == preview["baseCommit"]
     assert (world.root / ".imece").exists() is False
+
+
+def test_explicit_lan_bridge_start_and_invite_never_export_owner_credential(world):
+    if shutil.which("openssl") is None:
+        pytest.skip("temporary real TLS fixture requires an existing OpenSSL executable")
+    cert, key = world.private.parent / "lan-cert.pem", world.private.parent / "lan-key.pem"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                   "-keyout", str(key), "-out", str(cert), "-days", "1",
+                   "-subj", "/CN=localhost"], check=True, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL)
+    preview = _rpc("collab.owner.previewCreate", _create_args())["result"]
+    assert _rpc("collab.owner.create", {"previewId": preview["previewId"]})["ok"]
+    started = _rpc("collab.owner.startLAN", {"bindAddress": "127.0.0.1",
+        "certificate": str(cert), "privateKey": str(key)})
+    assert started["ok"], started
+    status = _rpc("collab.owner.status", {})["result"]
+    assert status["transportMode"] == "lan"
+    assert status["controlEndpoint"].startswith("https://127.0.0.1:")
+    assert status["proposalEndpoint"].startswith("https://127.0.0.1:")
+    assert status["certificateSha256"] and "credential" not in json.dumps(status)
+    assert set(world.manager._credentials) == {"alice"}
+    invite = _rpc("collab.owner.issueInvite", {"memberId": "bob"})
+    assert invite["ok"] and invite["result"]["memberId"] == "bob"
+    assert "credential" not in json.dumps(invite["result"])
+    assert _rpc("collab.owner.shareOnce", {"memberId": "bob", "confirmSecret": True})["ok"] is False
+    assert _rpc("collab.owner.localPreview", {"memberId": "bob", "taskId": "task-1"})["ok"] is False
+    stopped = _rpc("collab.owner.stop", {})
+    assert stopped["ok"] and stopped["result"]["state"] == "stopped"
+    assert world.manager._server is None and world.manager._proposal_server is None
+
+
+def test_lan_bridge_project_and_delayed_start_fences(world, monkeypatch):
+    if shutil.which("openssl") is None:
+        pytest.skip("temporary real TLS fixture requires an existing OpenSSL executable")
+    cert, key = world.private.parent / "cert.pem", world.private.parent / "key.pem"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                   "-keyout", str(key), "-out", str(cert), "-days", "1",
+                   "-subj", "/CN=localhost"], check=True, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL)
+    preview = _rpc("collab.owner.previewCreate", _create_args())["result"]
+    assert _rpc("collab.owner.create", {"previewId": preview["previewId"]})["ok"]
+    captured = {}
+    real_start = world.manager.start
+    def delayed_reply(*args, **kwargs):
+        result = real_start(*args, **kwargs)
+        captured["control"], captured["proposal"] = world.manager._server, world.manager._proposal_server
+        monkeypatch.setattr(state, "project_generation", lambda: 2)
+        return result
+    monkeypatch.setattr(world.manager, "start", delayed_reply)
+    reply = _rpc("collab.owner.startLAN", {"bindAddress": "127.0.0.1",
+                 "certificate": str(cert), "privateKey": str(key)})
+    assert not reply["ok"] and reply["error"]["code"] == "owner_stale"
+    assert captured["control"]._closed and captured["proposal"]._closed
+    assert world.manager.status()["state"] == "stopped"
+    monkeypatch.setattr(world.manager, "start", real_start)
+    assert _rpc("collab.owner.startLAN", {"bindAddress": "127.0.0.1",
+                "certificate": str(cert), "privateKey": str(key)})["ok"]
+    invitation = _rpc("collab.owner.issueInvite", {"memberId": "bob"})["result"]
+    monkeypatch.setattr(state, "get_project", lambda: SimpleNamespace(root=str(world.root.parent / "other")))
+    for method in ("collab.owner.issueInvite", "collab.owner.revokeMember"):
+        reply = _rpc(method, {"memberId": "bob"})
+        assert not reply["ok"] and reply["error"]["code"] == "owner_product_stale"
+    world.manager._server._pairing.check(invitation["code"])
 
 
 def test_start_status_share_once_and_stop_rotate_credentials(world):

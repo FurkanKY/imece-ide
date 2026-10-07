@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from workspace.ownership import continuation_available
+
 MAX_HISTORY_RUNS = 32
 MAX_HISTORY_EVENTS = 2_000
 EVENT_PAGE = 200
@@ -49,7 +51,7 @@ def _evidence(runtime, run):
         return None, True
     receipt = None
     current_attempt_after = max((event.seq for event in events if event.type in (
-        "run.resumed", "proposal.applied", "proposal.rejected", "run.cancelled",
+        "run.resumed", "run.restarted", "proposal.applied", "proposal.rejected", "run.cancelled",
         "run.failed", "run.interrupted", "checkpoint.restored",
     )), default=0)
     for event in events:
@@ -85,6 +87,7 @@ def list_history(runtime, project_root: str, *, limit: int = MAX_HISTORY_RUNS) -
             "readOnly": True, "createdAt": run.created_at.isoformat(),
             "lastEventSeq": run.last_event_seq, "taskTruncated": task_truncated,
             "retryAvailable": retry_availability(runtime, project_root, run.run_id),
+            "continuationAvailable": continuation_available(runtime, project_root, run.run_id),
         })
     return result[:min(max(limit, 0), MAX_HISTORY_RUNS)]
 
@@ -100,13 +103,14 @@ def retry_source(runtime, project_root: str, run_id: str) -> dict | None:
         }:
             return None
         events, truncated = _events(runtime, run_id)
-        if truncated or not events or events[-1].type not in {
+        lifecycle_tail = [event for event in events if not event.type.startswith("workspace.")]
+        if truncated or not lifecycle_tail or lifecycle_tail[-1].type not in {
             "run.failed", "run.cancelled",
         }:
             return None
         if any(event.type in {
             "proposal.ready", "proposal.applied", "proposal.rejected", "checkpoint.restored",
-            "run.resumed", "run.waiting_user",
+            "run.resumed", "run.restarted", "run.waiting_user",
         } for event in events):
             # Applying/rejecting evidence or retaining a proposal/worktree is
             # not an exhausted attempt; retry must never recreate that authority.
@@ -182,4 +186,5 @@ def get_history(runtime, project_root: str, run_id: str) -> dict | None:
         "historyTruncated": truncated, "createdAt": run.created_at.isoformat(),
         "lastEventSeq": run.last_event_seq, "taskTruncated": task_truncated,
         "retryAvailable": retry_availability(runtime, project_root, run.run_id),
+        "continuationAvailable": continuation_available(runtime, project_root, run.run_id),
     }

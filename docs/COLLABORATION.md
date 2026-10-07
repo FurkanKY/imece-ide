@@ -10,17 +10,27 @@
 - It is **not connected to the default single-agent flow** described in the
   [README](../README.md). An attached collaboration shared context is **refused
   explicitly** (`collab_unsupported`), never silently accepted.
-- It is **not** the M4 two-machine product. **No LAN pairing, no LAN/WAN
-  deployment, no TLS, no remote participant UI.** The control listener binds
-  literal `127.0.0.1` only.
-- **Two-computer, LAN and Windows end-to-end are unverified.** Windows-native
-  behaviour is not demonstrated by the local tests.
+- The M4 first engineering slice ([details](M4-LAN-FIRST-SLICE.md)) now
+  supports an **explicitly constructed** TLS-only listener on a literal private
+  IPv4 address, pinned client TLS, and
+  one-use member pairing for bounded metadata control. Existing default listener
+  remains literal `127.0.0.1` HTTP. The second opt-in slice now provides a
+  **separate TLS proposal-byte listener** limited to explicit one-artifact publish
+  and named fetch; control/events remain metadata-only. Neither listener writes
+  Source or starts automatically. This is not yet the M4 two-machine product:
+  local owner-side LAN start/invite/revoke UI is now available as a third
+  experimental slice ([details](M4-OWNER-LAN.md)). Remote peer join, proposal
+  capture/publish/fetch UI, explicit cross-host Source integration and actual
+  LAN/two-machine acceptance remain open.
+- **Two-computer/LAN and Windows end-to-end are unverified.** Local TLS tests
+  use a temporary certificate and literal loopback only; they do not demonstrate
+  firewall, real NIC, multi-host routing, or Windows-native behavior.
 - The owner-facing **Ortak ürün** view is a **poll of local metadata at most
   every five seconds** while the tab is visible — a deliberately limited local
   experiment, not a synchronized multi-user view.
-- **New collaboration features are frozen** while the current milestone is in
-  progress; only blocking bug fixes. The scope of record is
-  [PRODUCT-PLAN.md](PRODUCT-PLAN.md), which this document does not override.
+- The user has authorized the bounded M4 first slice while M3 platform/native
+  acceptance is deferred. Further work remains opt-in and within
+  [PRODUCT-PLAN.md](PRODUCT-PLAN.md); this document does not broaden the scope.
 - **No pass count below is product progress.** Each section states *what* is
   covered rather than how many cases passed. To reproduce the whole offline
   collaboration scope:
@@ -83,11 +93,11 @@ code steps that exist are EXPLICIT and separately named:
   immutable storage.
 
 **Explicitly missing:** enforced scope locks; automatic task/proposal publication
-or candidate application; Jev coordination; multi-session hubs; LAN/WAN
-deployment, secure pairing and TLS; pushing a candidate back to
-your normal git remote; whole two-machine E2E validation (only local
-two-client flows are offline-tested, and Windows-native behaviour is not
-demonstrated by them). Later milestones build on the same hub format.
+or candidate application; Jev coordination; multi-session hubs; production
+certificate/invitation UI; actual two-host LAN deployment/acceptance and full
+cross-machine candidate-to-Source integration; pushing a candidate back to your
+normal Git remote; Windows-native validation. Local TLS control/proposal tests do not imply
+these capabilities. Later M4 slices build on the same hub format.
 
 ## Product direction and next slices
 
@@ -103,10 +113,11 @@ demonstrated by them). Later milestones build on the same hub format.
 > end-to-end platform acceptance and packaged release.
 >
 > **M1's real-provider/supported-platform acceptance gate is deferred and still
-> open** — tracked validation debt, not a closed item. **M2 is authorized and
-> starting; M3–M5 are not started.** This foundation is frozen apart from
-> blocking bug fixes until M4 owns it, and the table below is a record of what
-> exists, not current scope or a promise.
+> open** — tracked validation debt, not a closed item. M2 remains in development;
+> M3 is in progress with Windows/native acceptance deferred, not completed. M4's
+> opt-in TLS pairing/control first slice is implemented, while its two-machine
+> and proposal-channel acceptance remain open. The table below is an inventory,
+> not a promise that these slices are product-accepted.
 
 The goal is an autonomous, shared development environment: people keep their
 own agents and providers, while working toward one product goal with shared
@@ -120,15 +131,16 @@ slice describe intended work; they do not restrict an agent's tool permissions.
 | Private code proposals | Implemented, offline-tested | Explicitly selected task changes published as private immutable hub refs with context provenance; metadata receipts on listing; nothing published to the project's normal remote. |
 | Combined candidate | Implemented, offline-tested (local two-client) | Combine selected proposals with the committed baseline in a new isolated directory, real three-way merges with structured conflicts, optional explicit verification with honesty statuses. |
 | Local metadata control core | Implemented, offline-tested | Owner-configured credential gate, owner/assignee permissions, strict revision writes and bounded restart/reconnect replay; Python interface only, no listener or CLI integration. |
-| Loopback HTTP/JSON control | Implemented, locally HTTP-tested | Explicit native-client listener on literal 127.0.0.1, four finite authenticated metadata operations, bounded replay, safe framing/errors and stop-and-replace credentials. The snapshot client below is read-only, not a general write/replay client. No LAN, UI or code endpoints. |
+| Loopback HTTP/JSON control | Implemented, locally HTTP-tested | Explicit native-client listener on literal 127.0.0.1, finite authenticated metadata operations, bounded replay, safe framing/errors and stop-and-replace credentials. Existing loopback defaults remain unchanged. |
 | Native-client revision subscription | Implemented, locally socket-tested | Explicit authenticated SSE subscription with Git-backed replay observation, bounded workers/subscribers and drain-safe shutdown. No automatic client, prompt refresh, UI or selective routing. |
 | Native revision consumer | Implemented, locally socket/checkpoint-tested | Explicit reconnect worker, bounded notification inbox and durable consumed cursor advanced only by host acknowledgement/reset assertion. By itself it does not apply context or prove a worker is idle. |
 | Python native-worker safe point | Implemented as opt-in Python factory wiring; canonical binder, bounded replay-lag wait and explicit finite snapshot client | Host may provide `LoopbackSnapshotClient.snapshot` as the safe-point snapshot provider. No automatic startup, UI/CLI pause, terminal recovery, fresh CAS/publication authority, LAN or real-model E2E. |
 | Read-only loopback snapshot client | Implemented, locally socket-tested | Explicit authenticated POST `/v1/snapshot`; one fresh AF_INET connection per call, fixed five-second connect/idle timeout and bounded strict response parsing. It does not start/own the consumer, retry, replay or acknowledge. |
 | Explicit native task-status commands | Implemented, locally socket/Git-tested | Separate opt-in `LoopbackTaskClient`; exactly one authenticated status command with an explicitly reviewed CAS revision, immutable receipt and honest uncertain-outcome failures. No snapshot/retry, native acknowledgement or automatic run lifecycle integration. |
+| First TLS LAN control slice | Implemented, local TLS-tested only | Separately documented opt-in literal-private-IPv4 TLS listener, pinned client, one-use pre-bound invitations, ephemeral member credentials, metadata snapshot/task status. No auto-start, proposal bytes, remote UI or two-machine acceptance. |
 | Application native collaboration beta | Implemented, offline bridge/E2E and browser-mock tested | Composer preview + explicit local approval, credential-free opaque run handle, native-only fail-closed admission, per-execution consumer lifecycle, private leased cursors, follow-up replay and explicit reset consent. Loopback only; the Owner Session tab below can configure/start it explicitly. |
 | Application shared delivery | Implemented, local two-checkout bridge/E2E and browser-mock tested | Accepted native worktree binding → selected immutable publication ticket → explicit private-hub publication → metadata proposal selection → new combined candidate with separately authorized verification. No normal-remote push, automatic publication, in-place apply or LAN/WAN. |
-| Owner/session setup | Implemented, real local setup→run→candidate E2E and browser-mock tested | Explicit metadata preview/create or existing-store selection, explicit loopback start/stop, memory-only per-epoch member credentials, separate one-shot secret share and credential-free local task preview handoff. No LAN pairing, automatic listener startup or source mutation. |
+| Owner/session setup | Implemented, real local setup→run→candidate E2E and browser-mock tested | Existing application UI provides explicit local setup and loopback start/stop. The new TLS LAN listener is library-only in this first slice; it has no application UI or automatic startup, and does not mutate source. |
 | Shared product view | Implemented, targeted local Git/bridge and browser-mock tested | Owner-facing goal/decisions/interfaces, member/task state, explicit new queued tasks, advisory overlaps, CAS context/status changes, on-demand proposal receipts and a scoped local candidate verification record. No remote participant UI, existing-task reassignment or automatic agent actions. |
 | Broader entry points | Later | Easier remote connectivity and a limited new-project bootstrap feeding the same development loop. |
 

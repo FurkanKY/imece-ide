@@ -9,6 +9,11 @@ from __future__ import annotations
 import secrets
 import os
 import stat
+import hashlib
+import ssl
+import re
+import tempfile
+from contextlib import contextmanager
 import threading
 import uuid
 from pathlib import Path
@@ -69,7 +74,10 @@ class OwnerSessionManager:
         self._config: dict[str, Any] | None = None
         self._previews: dict[str, dict[str, Any]] = {}
         self._server: Any = None
+        self._proposal_server: Any = None
         self._coordinator: Any = None
+        self._transport_mode = "loopback"
+        self._certificate_pin: str | None = None
         self._credentials: dict[str, str] = {}
         self._exported: set[str] = set()
         self._epoch = 0
@@ -258,8 +266,59 @@ class OwnerSessionManager:
             except Exception:
                 raise OwnerError("invalid_existing_session") from None
 
-    def start(self, project_root: Path, *, port: int = 0) -> dict[str, Any]:
-        if type(port) is not int or not 0 <= port <= 65535:
+    @contextmanager
+    def _tls_identity(self, certificate, private_key):
+        """Load both listeners from one bounded, private copy of the identity.
+
+        The selected files may be renewed concurrently. The advertised pin must
+        describe the bytes actually loaded, not a later read of the source PEM.
+        """
+        def read_regular(path):
+            if not isinstance(path, (str, Path)):
+                raise OwnerError("invalid_certificate")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            fd = os.open(path, flags)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                    raise OwnerError("invalid_certificate")
+                with os.fdopen(fd, "rb", closefd=False) as stream:
+                    data = stream.read(1024 * 1024 + 1)
+                if not data or len(data) > 1024 * 1024:
+                    raise OwnerError("invalid_certificate")
+                return data
+            finally:
+                os.close(fd)
+
+        try:
+            cert_data, key_data = read_regular(certificate), read_regular(private_key)
+            leaf = re.search(rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+                             cert_data, re.DOTALL)
+            if leaf is None:
+                raise OwnerError("invalid_certificate")
+            pin = hashlib.sha256(ssl.PEM_cert_to_DER_cert(leaf[0].decode("ascii"))).hexdigest()
+            self._ensure_private_root()
+            with tempfile.TemporaryDirectory(prefix="tls-identity-", dir=self._private_root) as folder:
+                copies = [Path(folder) / "certificate.pem", Path(folder) / "private-key.pem"]
+                for path, data in zip(copies, (cert_data, key_data)):
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(data)
+                yield str(copies[0]), str(copies[1]), pin
+        except OwnerError:
+            raise
+        except Exception:
+            raise OwnerError("invalid_certificate") from None
+
+    def start(self, project_root: Path, *, port: int = 0, allow_lan: bool = False,
+              bind_address: str | None = None, certificate: str | None = None,
+              private_key: str | None = None, proposal_port: int = 0) -> dict[str, Any]:
+        if any(type(value) is not int or not 0 <= value <= 65535 for value in (port, proposal_port)):
+            raise OwnerError("invalid_port")
+        if type(allow_lan) is not bool or (not allow_lan and any(
+                value is not None for value in (bind_address, certificate, private_key))):
+            raise OwnerError("start_failed")
+        if allow_lan and port and port == proposal_port:
             raise OwnerError("invalid_port")
         with self._op_lock:
             with self._lock:
@@ -267,7 +326,9 @@ class OwnerSessionManager:
                 if config is None or self._state not in {"configured", "stopped"}:
                     raise OwnerError("not_configured")
                 self._state = "starting"
-            server = coordinator = None
+            server = proposal_server = coordinator = None
+            credentials = {}
+            pin = None
             try:
                 root, head = self._project(project_root)
                 if str(root) != config["projectRoot"] or head != config["baseCommit"]:
@@ -290,9 +351,8 @@ class OwnerSessionManager:
                                           "scopes": list(task.scopes), "status": task.status,
                                           "contextRevision": task.context_revision}
                                          for key, task in state.tasks.items()])
-                credentials: dict[str, str] = {}
                 used: set[str] = set()
-                for member in config["memberIds"]:
+                for member in ([config["ownerId"]] if allow_lan else config["memberIds"]):
                     token = secrets.token_urlsafe(32)
                     while token in used:
                         token = secrets.token_urlsafe(32)
@@ -300,13 +360,29 @@ class OwnerSessionManager:
                     used.add(token)
                 coordinator = self._coordinator_factory(config["store"], session_id=config["sessionId"],
                                                         owner_id=config["ownerId"], member_credentials=credentials)
-                server = self._server_factory(coordinator, port=port)
-                server.start()
+                if allow_lan:
+                    from collab_runtime.lan_proposals import TlsProposalServer
+                    GitStore.ensure_outside_project(self._private_root, root, what="TLS identity directory")
+                    with self._tls_identity(certificate, private_key) as (cert_copy, key_copy, pin):
+                        server = self._server_factory(coordinator, port=port, allow_lan=True,
+                            bind_address=bind_address, certificate=cert_copy, private_key=key_copy)
+                        proposal_server = TlsProposalServer(coordinator, bind_address=bind_address,
+                            certificate=cert_copy, private_key=key_copy, port=proposal_port)
+                    server.start()
+                    proposal_server.start()
+                else:
+                    server = self._server_factory(coordinator, port=port)
+                    server.start()
+                    proposal_server = None
+                    pin = None
                 with self._lock:
                     self._epoch += 1
                     self._credentials = credentials
                     self._exported.clear()
                     self._coordinator, self._server = coordinator, server
+                    self._proposal_server = proposal_server
+                    self._transport_mode = "lan" if allow_lan else "loopback"
+                    self._certificate_pin = pin
                     self._endpoint = server.base_url
                     self._state = "running"
             except Exception as exc:
@@ -314,15 +390,23 @@ class OwnerSessionManager:
                 if server is not None:
                     try: server.close()
                     except Exception: cleanup_failed = True
-                elif coordinator is not None:
+                if proposal_server is not None:
+                    try: proposal_server.close()
+                    except Exception: cleanup_failed = True
+                if server is None and coordinator is not None:
                     close = getattr(coordinator, "close", None)
                     if close:
                         try: close()
                         except Exception: cleanup_failed = True
                 with self._lock:
                     if cleanup_failed:
-                        self._credentials = credentials if 'credentials' in locals() else {}
+                        self._epoch += 1
+                        self._credentials = credentials
                         self._coordinator, self._server = coordinator, server
+                        self._proposal_server = proposal_server
+                        self._transport_mode = "lan" if allow_lan else "loopback"
+                        self._certificate_pin = pin
+                        self._endpoint = getattr(server, "base_url", None) if allow_lan else None
                         self._state = "cleanup_failed"
                     else:
                         self._state = "configured"
@@ -331,22 +415,35 @@ class OwnerSessionManager:
                 raise OwnerError("start_failed") from None
             return self.status()
 
-    def stop(self) -> dict[str, Any]:
+    def stop(self, *, expected_epoch: int | None = None,
+             expected_project_root: str | None = None) -> dict[str, Any]:
         with self._op_lock:
             with self._lock:
+                if (expected_epoch is not None and expected_epoch != self._epoch) or (
+                        expected_project_root is not None and
+                        expected_project_root != (self._config or {}).get("projectRoot")):
+                    return self._status_locked()
                 server = self._server
-                if server is None:
+                proposal_server = self._proposal_server
+                if server is None and proposal_server is None:
                     if self._state == "configured": self._state = "stopped"
                     return self._status_locked()
                 self._state = "stopping"
-            try:
-                server.close()
-            except Exception:
+            cleanup_failed = False
+            for listener in (server, proposal_server):
+                if listener is not None:
+                    try:
+                        listener.close()
+                    except Exception:
+                        cleanup_failed = True
+            if cleanup_failed:
                 with self._lock: self._state = "cleanup_failed"
                 raise OwnerError("cleanup_failed", {"retryRequired": True}) from None
             with self._lock:
-                self._server = self._coordinator = None
+                self._server = self._proposal_server = self._coordinator = None
                 self._credentials.clear()
+                self._transport_mode = "loopback"
+                self._certificate_pin = None
                 self._exported.clear()
                 self._endpoint = None
                 self._state = "stopped"
@@ -582,6 +679,53 @@ class OwnerSessionManager:
                     "action": "createTask", "taskId": task_id, "status": "queued",
                     "owner": owner, "contextRevision": expected_revision}
 
+    def shared_candidate_store(self, project_root: Path, *, expected_session_id: str, expected_epoch: int):
+        """Return the selected local owner store only for its captured identity.
+
+        No credentials or transport objects cross this boundary. The manager lock
+        is held only while copying the trusted configuration identity.
+        """
+        root, head = self._project(project_root)
+        with self._lock:
+            config, epoch, lifecycle = self._config, self._epoch, self._state
+            if (config is None or lifecycle not in {"configured", "stopped", "running"}
+                    or epoch != expected_epoch or config["sessionId"] != expected_session_id
+                    or config["projectRoot"] != str(root) or config["baseCommit"] != head):
+                raise OwnerError("product_stale")
+            store = config["store"]
+            store_path, hub_path = Path(config["storePath"]), Path(config["hubPath"])
+            identity = (config, epoch, lifecycle)
+        try:
+            for path in (store_path, hub_path):
+                if path.is_symlink() or not path.is_dir() or path.resolve(strict=True) != path.absolute():
+                    raise OwnerError("invalid_metadata_path")
+                if path == root or path in root.parents or root in path.parents:
+                    raise OwnerError("unsafe_metadata_path")
+            if Path(store.store_path).resolve(strict=True) != store_path.resolve(strict=True):
+                raise OwnerError("invalid_metadata_path")
+            revision, state = store.fetch_state()
+            checked_root, checked_head = self._project(project_root)
+            if checked_root != root or checked_head != head or state.session_id != expected_session_id or state.base_commit != head:
+                raise OwnerError("product_stale")
+        except OwnerError:
+            raise
+        except Exception:
+            raise OwnerError("product_read_failed") from None
+        with self._lock:
+            if self._config is not identity[0] or self._epoch != epoch or self._state != lifecycle:
+                raise OwnerError("product_stale")
+        return {"store": store, "storePath": str(store_path.resolve()), "hubPath": str(hub_path.resolve()),
+                "sessionId": state.session_id, "baseCommit": state.base_commit, "revision": revision,
+                "contextHash": state.context_hash, "epoch": epoch}
+
+    def validate_shared_candidate(self, project_root: Path, provenance: dict[str, Any]):
+        current = self.shared_candidate_store(project_root, expected_session_id=provenance.get("sessionId"),
+                                             expected_epoch=provenance.get("epoch"))
+        if any(current.get(key) != provenance.get(key) for key in
+               ("sessionId", "baseCommit", "revision", "contextHash", "storePath", "hubPath")):
+            raise OwnerError("product_stale")
+        return current
+
     def product_proposals(self, project_root: Path, *, expected_session_id: str) -> dict[str, Any]:
         if not isinstance(expected_session_id, str) or not expected_session_id:
             raise OwnerError("session_identity_mismatch")
@@ -614,6 +758,21 @@ class OwnerSessionManager:
     def _status_locked(self) -> dict[str, Any]:
         config = self._config or {}
         tasks = config.get("tasks", [])
+        if self._transport_mode == "lan":
+            return {"state": self._state, "transportMode": "lan",
+                    "projectRoot": config.get("projectRoot"),
+                    "controlEndpoint": self._endpoint,
+                    "proposalEndpoint": getattr(self._proposal_server, "base_url", None),
+                    "certificateSha256": self._certificate_pin,
+                    "sessionId": config.get("sessionId"), "ownerId": config.get("ownerId"),
+                    "memberIds": list(config.get("memberIds", [])),
+                    "targetVersion": config.get("targetVersion"),
+                    "baseCommit": config.get("baseCommit"), "revision": config.get("revision"),
+                    "goal": config.get("goal"), "tasks": _detached(tasks),
+                    "storePath": None, "hubPath": None, "endpoint": self._endpoint,
+                    "exportedMembers": [], "createdPaths": [],
+                    "epoch": self._epoch,
+                    "retryRequired": self._state == "cleanup_failed"}
         return {"state": self._state, "projectRoot": config.get("projectRoot"),
                 "sessionId": config.get("sessionId"), "targetVersion": config.get("targetVersion"),
                 "baseCommit": config.get("baseCommit"), "revision": config.get("revision"),
@@ -625,9 +784,53 @@ class OwnerSessionManager:
                 "retryRequired": self._state in {"cleanup_failed", "creation_failed"},
                 "createdPaths": list(self._created_paths)}
 
+    def _require_lan_project(self, project_root, expected_epoch):
+        if (project_root is not None and str(project_root) != (self._config or {}).get("projectRoot")) or (
+                expected_epoch is not None and expected_epoch != self._epoch):
+            raise OwnerError("product_stale")
+
+    def issue_lan_invitation(self, member_id: str, *, project_root=None,
+                             expected_epoch=None) -> dict[str, Any]:
+        with self._op_lock, self._lock:
+            self._require_lan_project(project_root, expected_epoch)
+            if self._state != "running" or self._transport_mode != "lan" or self._server is None:
+                raise OwnerError("not_running_or_member")
+            config = self._config
+            if member_id not in config["memberIds"] or member_id == config["ownerId"]:
+                raise OwnerError("not_running_or_member")
+            try:
+                invitation = self._server.issue_invitation(self._credentials[config["ownerId"]], member_id)
+            except Exception:
+                raise OwnerError("invite_failed") from None
+            return {"memberId": invitation.member_id, "code": invitation.code,
+                    "expiresInSeconds": invitation.expires_in_seconds,
+                    "controlEndpoint": self._endpoint,
+                    "proposalEndpoint": self._proposal_server.base_url,
+                    "certificateSha256": self._certificate_pin,
+                    "sessionId": config["sessionId"], "epoch": self._epoch}
+
+    def discard_lan_invitation(self, code, *, project_root, expected_epoch):
+        with self._op_lock, self._lock:
+            if (str(project_root) != (self._config or {}).get("projectRoot") or
+                    expected_epoch != self._epoch or self._transport_mode != "lan" or
+                    self._state != "running"):
+                return
+            self._server.cancel_invitation(self._credentials[self._config["ownerId"]], code)
+
+    def revoke_lan_member(self, member_id: str, *, project_root=None,
+                          expected_epoch=None) -> dict[str, Any]:
+        with self._op_lock, self._lock:
+            self._require_lan_project(project_root, expected_epoch)
+            if self._state != "running" or self._transport_mode != "lan" or self._server is None:
+                raise OwnerError("not_running_or_member")
+            if member_id == self._config["ownerId"] or member_id not in self._config["memberIds"]:
+                raise OwnerError("not_running_or_member")
+            self._server.revoke_member(self._credentials[self._config["ownerId"]], member_id)
+            return self._status_locked()
+
     def reveal_member_once(self, member_id: str) -> dict[str, Any]:
         with self._lock:
-            if self._state != "running" or member_id not in self._credentials:
+            if self._state != "running" or self._transport_mode == "lan" or member_id not in self._credentials:
                 raise OwnerError("not_running_or_member")
             if member_id in self._exported:
                 raise OwnerError("already_shared")
@@ -651,7 +854,7 @@ class OwnerSessionManager:
         except OwnerError:
             raise
         with self._lock:
-            if self._state != "running" or member_id not in self._credentials:
+            if self._state != "running" or self._transport_mode == "lan" or member_id not in self._credentials:
                 raise OwnerError("not_running_or_member")
             try:
                 root = Path(project_root).resolve(strict=True)

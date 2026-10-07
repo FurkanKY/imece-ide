@@ -87,6 +87,7 @@ class CanonicalVerificationEventSink:
             type=event_type,
             payload=payload,
             item_id=item_id,
+            execution_id=self._verification_id,
             correlation_id=self._verification_id,
             source=SOURCE,
         )
@@ -121,6 +122,7 @@ class CanonicalVerificationEventSink:
                 "stderr_truncated": process.stderr_truncated,
                 "stdout_bytes": process.stdout_bytes,
                 "stderr_bytes": process.stderr_bytes,
+                "producer_quiescent": process.producer_quiescent,
             })
         return payload
 
@@ -179,11 +181,19 @@ class CanonicalVerificationEventSink:
                 },
             })]
         if isinstance(event, VerificationInterrupted):
-            return [self._spec(event, RunEventType.VERIFICATION_INTERRUPTED, {
+            specs = []
+            if event.check_id is not None:
+                specs.append(self._spec(event, RunEventType.VERIFICATION_CHECK_INTERRUPTED, {
+                    "verification_id": event.verification_id,
+                    "check_id": event.check_id,
+                    "producer_quiescent": event.producer_quiescent,
+                }, item_id=self._check_item_id(event.verification_id, event.check_id)))
+            specs.append(self._spec(event, RunEventType.VERIFICATION_INTERRUPTED, {
                 "verification_id": event.verification_id,
                 "plan_id": event.plan_id,
                 "reason": event.reason,
-            })]
+            }))
+            return specs
         raise ValueError(f"Unsupported verification event: {type(event).__name__}")
 
     @staticmethod

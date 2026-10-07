@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, TypeAlias
 
 from agent_runtime.models import ModelToolCall, ModelUsage
@@ -89,6 +89,7 @@ class ToolFailed(AgentEvent):
     recoverable: bool
     error_type: str
     message: str
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

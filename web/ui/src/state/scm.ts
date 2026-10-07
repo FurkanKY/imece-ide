@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { bridge, BridgeError, ScmChange, ScmStatus } from "@/bridge";
 import { useEditor } from "@/state/editor";
+import { projectEpoch } from "@/state/projectEpoch";
 import { toast } from "@/components/toasts/toasts";
 import { confirmDialog } from "@/components/dialogs/dialogs";
 
@@ -26,7 +27,7 @@ interface ScmState extends ScmStatus {
   error: string | null;
   message: string;
   setMessage: (m: string) => void;
-  refresh: () => Promise<void>;
+  refresh: (expectedRoot?: string) => Promise<void>;
   stage: (paths: string[]) => Promise<void>;
   unstage: (paths: string[]) => Promise<void>;
   discard: (change: ScmChange) => Promise<void>;
@@ -51,11 +52,18 @@ export const useScm = create<ScmState>((set, get) => ({
 
   setMessage: (m) => set({ message: m }),
 
-  refresh: async () => {
+  refresh: async (expectedRoot) => {
+    const capturedEpoch = projectEpoch();
+    const workspace = await import("@/state/workspace");
+    const capturedRoot = expectedRoot ?? workspace.useWorkspace.getState().root;
+    const isCurrent = () => workspace.useWorkspace.getState().root === capturedRoot
+      && projectEpoch() === capturedEpoch;
     try {
       const st = await bridge.call("scm.status", {});
+      if (!isCurrent()) return;
       set({ ...st, loaded: true, error: null });
     } catch (e) {
+      if (!isCurrent()) return;
       set({ isRepo: false, staged: [], unstaged: [], loaded: true,
         error: e instanceof BridgeError ? e.message : "Kaynak denetimi okunamadı." });
     }

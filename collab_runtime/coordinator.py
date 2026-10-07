@@ -175,6 +175,19 @@ class Coordinator:
             raise ValidationError("the hub session does not match the configured session_id.")
         self._identity = (state.session_id, state.base_commit, state.target_version)
 
+    @property
+    def session_id(self) -> str:
+        return self._identity[0]
+
+    def authenticate_member(self, credential: str) -> str:
+        """Return the authenticated principal for a trusted transport adapter.
+
+        The caller may hold `_lock` across an authorization-sensitive domain
+        operation to serialize it with credential revocation.
+        """
+        with self._lock:
+            return self._authenticate(credential)
+
     def _authenticate(self, credential: str) -> str:
         digest = _credential_hash(credential)
         if digest is None:
@@ -186,6 +199,50 @@ class Coordinator:
         if principal is None:
             raise AccessDeniedError(_ACCESS_DENIED)
         return principal
+
+    def validate_new_member(self, owner_credential: str, member_id: str) -> None:
+        with self._lock:
+            if self._authenticate(owner_credential) != self._owner_id:
+                raise AccessDeniedError(_ACCESS_DENIED)
+            principal = safe_id(member_id, "member id")
+            if principal in self._credential_hashes or len(self._credential_hashes) >= _MAX_MEMBERS:
+                raise ValidationError("member identity is unavailable.")
+
+    def register_member_credential(self, owner_credential: str, member_id: str, credential: str) -> None:
+        """Explicitly add one principal; owner cannot be replaced."""
+        with self._lock:
+            if self._authenticate(owner_credential) != self._owner_id:
+                raise AccessDeniedError(_ACCESS_DENIED)
+            self.register_member_credential_internal(member_id, credential)
+
+    def register_member_credential_internal(self, member_id: str, credential: str) -> None:
+        """Trusted pairing-adapter hook; no network-facing caller receives it."""
+        with self._lock:
+            principal = safe_id(member_id, "member id")
+            digest = _credential_hash(credential)
+            if digest is None or principal in self._credential_hashes or len(self._credential_hashes) >= _MAX_MEMBERS:
+                raise ValidationError("member identity or credential is unavailable.")
+            if any(hmac.compare_digest(digest, existing) for existing in self._credential_hashes.values()):
+                raise ValidationError("member credential must be distinct.")
+            self._credential_hashes = MappingProxyType({**self._credential_hashes, principal: digest})
+
+    def revoke_member_credential(self, owner_credential: str, member_id: str) -> None:
+        with self._lock:
+            if self._authenticate(owner_credential) != self._owner_id:
+                raise AccessDeniedError(_ACCESS_DENIED)
+            self.revoke_member_credential_internal(member_id)
+
+    def revoke_member_credential_internal(self, member_id: str, *, expected_hash: bytes | None = None) -> None:
+        """Trusted lifecycle hook; optional hash prevents revoking a replacement identity."""
+        with self._lock:
+            principal = safe_id(member_id, "member id")
+            current = self._credential_hashes.get(principal)
+            if (principal == self._owner_id or current is None
+                    or (expected_hash is not None and not hmac.compare_digest(current, expected_hash))):
+                return
+            credentials = dict(self._credential_hashes)
+            del credentials[principal]
+            self._credential_hashes = MappingProxyType(credentials)
 
     def check_access(self, credential: str) -> None:
         """Authentication-only seam for transport adapters.

@@ -163,6 +163,7 @@ class CanonicalAgentEventSink:
                 **_error_payload(event),
                 "call_id": event.call_id,
                 "tool_name": event.tool_name,
+                "metadata": event.metadata,
             }, turn_id=event.turn_id, item_id=event.item_id)]
         if isinstance(event, ApprovalRequested):
             return [

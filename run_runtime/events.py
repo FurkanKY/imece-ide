@@ -36,6 +36,12 @@ class RunEventType(StrEnum):
     RUN_CANCELLED = "run.cancelled"
     RUN_INTERRUPTED = "run.interrupted"
     RUN_RESUMED = "run.resumed"
+    RUN_RESTARTED = "run.restarted"
+    WORKSPACE_SAVED = "workspace.saved"
+    WORKSPACE_CLAIMED = "workspace.claimed"
+    CANDIDATE_PREPARED = "candidate.prepared"
+    CANDIDATE_APPLIED = "candidate.applied"
+    CANDIDATE_ROLLED_BACK = "candidate.rolled_back"
 
     TURN_STARTED = "turn.started"
     TURN_COMPLETED = "turn.completed"

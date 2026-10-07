@@ -18,6 +18,7 @@ public export.
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import re
 import socket
 import socketserver
@@ -43,6 +44,8 @@ __all__ = ["LoopbackServer"]
 _MAX_ENVELOPE_BYTES = MAX_JSON_BYTES
 _MAX_HEAD_BYTES = MAX_JSON_BYTES
 _ROUTES = ("/v1/snapshot", "/v1/context", "/v1/task-status", "/v1/replay", "/v1/subscribe")
+_PAIR_ROUTE = "/v1/pair"
+_LEAVE_ROUTE = "/v1/member/leave"
 _MAX_WORKERS = 12
 _MAX_SUBSCRIPTIONS = 8
 _REPLAY_LIMIT = 32
@@ -314,7 +317,7 @@ class _LoopbackHTTPServer(HTTPServer):
 
     def __init__(self, port: int, loopback: LoopbackServer) -> None:
         self.loopback = loopback
-        super().__init__(("127.0.0.1", port), _LoopbackRequestHandler)
+        super().__init__((loopback._bind_address, port), _LoopbackRequestHandler)
 
     def server_bind(self) -> None:
         """Bind exactly as TCPServer does but skip HTTPServer's
@@ -359,6 +362,9 @@ class _LoopbackHTTPServer(HTTPServer):
 
     def _run_request(self, request: Any, client_address: Any) -> None:
         try:
+            if self.loopback._tls_context is not None:
+                request.settimeout(5)
+                request = self.loopback._tls_context.wrap_socket(request, server_side=True)
             self.finish_request(request, client_address)
         except Exception:
             self.handle_error(request, client_address)
@@ -373,20 +379,54 @@ class _LoopbackHTTPServer(HTTPServer):
 class LoopbackServer:
     """Authenticated finite routes and revision streams on one loopback listener.
 
-    Construction binds only literal IPv4 127.0.0.1 (no host argument,
-    resolution or wildcard); port 0 selects a fresh ephemeral port. Bind
-    failure raises a fixed local ValidationError. start()/close() are
-    explicit, close is idempotent and works before start, and a closed
-    server cannot be restarted. The context manager starts on entry and
-    closes on exit.
+    By default construction binds only literal IPv4 127.0.0.1 (no host
+    argument, resolution or wildcard) and retains the original plaintext
+    loopback protocol. LAN mode is separately opt-in and requires a literal
+    private IPv4 bind plus explicit TLS certificate/key; it adds session-bound
+    metadata control and one-use pairing, never proposal bytes. Port 0 selects
+    a fresh ephemeral port. Bind failure raises a fixed local ValidationError.
+    start()/close() are explicit, close is idempotent and works before start,
+    and a closed server cannot be restarted. The context manager starts on
+    entry and closes on exit.
     """
 
-    def __init__(self, coordinator: Coordinator, *, port: int = 0) -> None:
+    def __init__(self, coordinator: Coordinator, *, port: int = 0,
+                 allow_lan: bool = False, bind_address: str | None = None,
+                 certificate: str | None = None, private_key: str | None = None) -> None:
         if not isinstance(coordinator, Coordinator):
             raise ValidationError("coordinator must be an already configured Coordinator.")
         if type(port) is not int or not 0 <= port <= 65535:
             raise ValidationError("port must be an integer between 0 and 65535.")
+        if type(allow_lan) is not bool:
+            raise ValidationError("allow_lan must be explicitly true for LAN transport.")
+        if not allow_lan:
+            if any(value is not None for value in (bind_address, certificate, private_key)):
+                raise ValidationError("LAN transport options require allow_lan=True.")
+            self._bind_address, self._tls_context = "127.0.0.1", None
+        else:
+            try:
+                address = ipaddress.ip_address(bind_address)
+                private_networks = tuple(ipaddress.ip_network(value) for value in
+                                          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+                if (not isinstance(address, ipaddress.IPv4Address)
+                        or not (address.is_loopback or any(address in network for network in private_networks))):
+                    raise ValueError()
+                if not certificate or not private_key:
+                    raise ValueError()
+                import ssl
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                # Never allow OpenSSL to prompt on a background server thread.
+                context.load_cert_chain(certificate, private_key, password=lambda: "")
+                self._bind_address = str(address)
+                self._tls_context = context
+            except Exception:
+                raise ValidationError("LAN requires a literal private IPv4 bind and an explicit TLS certificate/key.") from None
         self._coordinator = coordinator
+        self._pairing = None
+        if allow_lan:
+            from collab_runtime.lan import InvitationRegistry
+            self._pairing = InvitationRegistry(coordinator)
         self._tracking = Lock()
         self._workers: set[Thread] = set()
         self._worker_threads: set[Thread] = set()
@@ -404,7 +444,24 @@ class LoopbackServer:
 
     @property
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._bound_port}"
+        scheme = "https" if self._tls_context is not None else "http"
+        return f"{scheme}://{self._bind_address}:{self._bound_port}"
+
+    def issue_invitation(self, owner_credential: str, member_id: str):
+        if self._pairing is None:
+            raise ValidationError("pairing is available only on explicit TLS LAN listeners.")
+        return self._pairing.issue(owner_credential, member_id)
+
+    def cancel_invitation(self, owner_credential: str, code: str) -> None:
+        if self._pairing is None:
+            raise ValidationError("pairing is not available.")
+        self._pairing.cancel(owner_credential, code)
+
+    def revoke_member(self, owner_credential: str, member_id: str) -> None:
+        if self._pairing is not None:
+            self._pairing.revoke(owner_credential, member_id)
+        else:
+            self._coordinator.revoke_member_credential(owner_credential, member_id)
 
     def start(self) -> LoopbackServer:
         with self._lifecycle:
@@ -465,7 +522,9 @@ class LoopbackServer:
             try:
                 self._server.server_close()
             except OSError:
-                raise ValidationError("the loopback listener could not be closed; retry close().") from None
+                raise ValidationError("the listener could not be closed; retry close().") from None
+            if self._pairing is not None:
+                self._pairing.close()
             self._closed = True
 
     def __enter__(self) -> LoopbackServer:
@@ -495,7 +554,7 @@ class LoopbackServer:
         if "?" in route:
             raise _RequestError(400, "query strings are not accepted.")
         hosts = raw_headers.get_all("Host") or []
-        if len(hosts) != 1 or hosts[0].strip() != f"127.0.0.1:{self._bound_port}":
+        if len(hosts) != 1 or hosts[0].strip() != f"{self._bind_address}:{self._bound_port}":
             raise _RequestError(
                 400,
                 "the request must carry exactly one Host header naming the bound loopback authority.",
@@ -511,6 +570,14 @@ class LoopbackServer:
             raise _RequestError(400, "exactly one decimal Content-Length header is required.")
         content_length = _bounded_length(lengths[0].strip(), _MAX_ENVELOPE_BYTES)
 
+        # LAN requests bind every operation to this exact metadata session
+        # before body parsing or domain/storage I/O. Loopback wire behavior is
+        # unchanged because this guard is TLS-opt-in only.
+        if self._tls_context is not None:
+            sessions = raw_headers.get_all("X-Imece-Session") or []
+            if len(sessions) != 1 or sessions[0] != self._coordinator.session_id:
+                raise _RequestError(400, "the session binding is invalid.")
+
         # Authentication strictly before content-type, routing and any
         # body read/parse. Unknown routes and unsupported methods also
         # require authentication first.
@@ -525,14 +592,19 @@ class LoopbackServer:
             raise _RequestError(
                 401, _ACCESS_DENIED, code="access_denied", headers=_BEARER_CHALLENGE
             )
+        is_pairing = route == _PAIR_ROUTE and self._pairing is not None
         try:
-            self._coordinator.check_access(credential)
+            if is_pairing:
+                self._pairing.check(credential)
+            else:
+                self._coordinator.check_access(credential)
         except AccessDeniedError:
             raise _RequestError(
                 401, _ACCESS_DENIED, code="access_denied", headers=_BEARER_CHALLENGE
             ) from None
 
-        if route not in _ROUTES:
+        is_leave = route == _LEAVE_ROUTE and self._pairing is not None
+        if route not in _ROUTES and not is_pairing and not is_leave:
             raise _RequestError(404, "unknown route.")
         if handler.command != "POST":
             raise _RequestError(
@@ -552,6 +624,25 @@ class LoopbackServer:
             raise _RequestError(400, _INVALID_JSON) from None
         if not isinstance(payload, dict):
             raise _RequestError(400, "the request body must be a JSON object.")
+
+        if is_leave:
+            if payload:
+                raise _RequestError(400, "the leave body must be an empty JSON object.")
+            try:
+                self._pairing.leave(credential)
+            except AccessDeniedError:
+                raise _RequestError(403, _PERMISSION_DENIED, code="access_denied") from None
+            return 200, {"left": True}, ()
+
+        if is_pairing:
+            if set(payload) != {"member_id"} or type(payload["member_id"]) is not str:
+                raise _RequestError(400, "the pairing body must name the invited member.")
+            try:
+                member_credential = self._pairing.redeem(credential, payload["member_id"])
+            except AccessDeniedError:
+                raise _RequestError(401, _ACCESS_DENIED, code="access_denied") from None
+            return 200, {"session_id": self._coordinator.session_id,
+                         "member_id": payload["member_id"], "credential": member_credential}, ()
 
         if route == "/v1/subscribe":
             if set(payload) != {"after_revision"}:

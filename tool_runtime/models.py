@@ -49,6 +49,7 @@ class ToolExecutionContext:
     workspace: Workspace
     run_id: str | None = None
     execution_id: str | None = None
+    cancel_token: Any = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.workspace, Workspace):

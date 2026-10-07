@@ -47,7 +47,7 @@ class RunProcessExecutor:
 
     def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolObservation:
         request = _request(arguments)
-        result = self._runner.run(context.workspace, request)
+        result = self._runner.run(context.workspace, request, cancel_token=context.cancel_token)
         if result.timed_out:
             headline = f"Command timed out after {request.timeout_ms} ms."
         else:
@@ -68,6 +68,7 @@ class RunProcessExecutor:
             "cwd": result.cwd,
             "argv": list(result.argv),
             "execution_isolation": "host",
+            "producer_quiescent": result.producer_quiescent,
         }
         return ToolObservation(content, metadata)
 

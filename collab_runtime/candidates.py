@@ -626,6 +626,18 @@ def _fingerprint_records(
     by checks can never forge rows or break the encoding. Anomalies are
     markers — never uncaught exceptions, never a read through a symbolic
     link or from outside the candidate directory."""
+    if os.name == "nt":
+        try:
+            from workspace.windows_safety import fingerprint_records
+            return fingerprint_records(
+                root, original_paths, max_depth=_FP_MAX_DEPTH,
+                entry_budget=_FP_ENTRY_BUDGET, max_file=MAX_BASELINE_FILE,
+                max_total=MAX_BASELINE_TOTAL, ignore_dirs=_FP_IGNORE_DIR_NAMES,
+            )
+        except (OSError, ValueError):
+            marker = json.dumps({"kind": "marker", "path": ".", "reason": "windows-handle-error"},
+                                sort_keys=True, separators=(",", ":")).encode("utf-8")
+            return hashlib.sha256(marker).hexdigest(), False
     originals = frozenset(original_paths)
     original_dirs = frozenset(
         prefix for path in originals for prefix in _ancestor_prefixes(path)

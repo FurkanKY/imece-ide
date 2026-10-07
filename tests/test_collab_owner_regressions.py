@@ -806,6 +806,214 @@ def test_start_bind_failure_returns_to_configured_and_can_retry(tmp_path):
     manager.stop()
 
 
+def _tls_pair(tmp_path):
+    if shutil.which("openssl") is None:
+        pytest.skip("temporary real TLS fixture requires an existing OpenSSL executable")
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cert, key = tmp_path / "lan-cert.pem", tmp_path / "lan-key.pem"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                   "-keyout", str(key), "-out", str(cert), "-days", "1",
+                   "-subj", "/CN=localhost"], check=True, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL)
+    return cert, key
+
+
+def test_explicit_lan_start_pairs_only_invited_peer_and_stop_revokes(tmp_path):
+    from collab_runtime.lan_client import PinnedLanClient
+    root, _head = project(tmp_path, "lan-project")
+    manager = configured(root, tmp_path / "lan-private")
+    cert, key = _tls_pair(tmp_path)
+    status = manager.start(root, allow_lan=True, bind_address="127.0.0.1",
+                           certificate=str(cert), private_key=str(key))
+    assert status["transportMode"] == "lan"
+    assert status["certificateSha256"] and status["proposalEndpoint"].startswith("https://127.0.0.1:")
+    assert not ({"privateKey", "credential"} & set(status))
+    assert status["storePath"] is None and status["hubPath"] is None
+    assert isinstance(status["createdPaths"], list) and isinstance(status["tasks"], list)
+    assert set(manager._credentials) == {"alice"}
+    with pytest.raises(OwnerError):
+        manager.reveal_member_once("alice")
+    with pytest.raises(OwnerError):
+        manager.preview_local_collaboration(CollaborationHost(tmp_path / "local"), root,
+                                            member_id="bob", task_id="task-a")
+    invitation = manager.issue_lan_invitation("bob")
+    client = PinnedLanClient(invitation["controlEndpoint"],
+        certificate_sha256=invitation["certificateSha256"], session_id=invitation["sessionId"])
+    credential = client.pair(invitation["code"], "bob")
+    _revision, snapshot = client.snapshot(credential)
+    assert snapshot.session_id == invitation["sessionId"]
+    assert set(manager._credentials) == {"alice"}
+    coordinator = manager._coordinator
+    coordinator.check_access(credential)
+    manager.stop()
+    from collab_runtime.errors import AccessDeniedError
+    with pytest.raises(AccessDeniedError):
+        coordinator.check_access(credential)
+
+
+def test_lan_second_listener_start_failure_drains_control_listener(tmp_path, monkeypatch):
+    from collab_runtime import lan_proposals
+    root, _head = project(tmp_path, "lan-partial")
+    manager = configured(root, tmp_path / "lan-partial-private")
+    cert, key = _tls_pair(tmp_path)
+    captured = {}
+    original_start = LoopbackServer.start
+    def remember_start(server):
+        captured["control"] = server
+        return original_start(server)
+    monkeypatch.setattr(LoopbackServer, "start", remember_start)
+    def fail_start(_server):
+        raise OSError("fixture proposal listener start failure")
+    monkeypatch.setattr(lan_proposals.TlsProposalServer, "start", fail_start)
+    with pytest.raises(OwnerError, match="start_failed"):
+        manager.start(root, allow_lan=True, bind_address="127.0.0.1",
+                      certificate=str(cert), private_key=str(key))
+    assert captured["control"]._closed
+    assert manager.status()["state"] == "configured"
+    assert manager._server is None and manager._proposal_server is None
+    assert manager._credentials == {}
+
+
+
+def _listener_pin(endpoint):
+    import hashlib
+    import socket
+    import ssl
+    from urllib.parse import urlsplit
+    url = urlsplit(endpoint)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    with socket.create_connection((url.hostname, url.port), timeout=3) as raw:
+        with context.wrap_socket(raw, server_hostname=url.hostname) as tls:
+            return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+
+
+def test_lan_identity_snapshot_pins_both_listeners_despite_source_pem_renewal(tmp_path):
+    import hashlib
+    import ssl
+    root, _ = project(tmp_path, "identity-project")
+    manager = configured(root, tmp_path / "identity-private")
+    cert, key = _tls_pair(tmp_path / "original")
+    replacement_cert, replacement_key = _tls_pair(tmp_path / "replacement")
+    expected = hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert.read_text())).hexdigest()
+    # A chain must still advertise the FIRST certificate actually presented.
+    cert.write_bytes(cert.read_bytes() + replacement_cert.read_bytes())
+    factory = manager._server_factory
+    def renew_after_control_load(coordinator, **kwargs):
+        server = factory(coordinator, **kwargs)
+        cert.write_bytes(replacement_cert.read_bytes())
+        key.write_bytes(replacement_key.read_bytes())
+        return server
+    manager._server_factory = renew_after_control_load
+    try:
+        status = manager.start(root, allow_lan=True, bind_address="127.0.0.1",
+                               certificate=str(cert), private_key=str(key))
+        assert status["certificateSha256"] == expected
+        assert _listener_pin(status["controlEndpoint"]) == expected
+        assert _listener_pin(status["proposalEndpoint"]) == expected
+        assert list(manager._private_root.glob("tls-identity-*")) == []
+    finally:
+        manager.stop()
+
+
+def test_lan_failed_control_close_still_drains_proposal_and_retains_retry(tmp_path, monkeypatch):
+    root, _ = project(tmp_path, "drain-project")
+    manager = configured(root, tmp_path / "drain-private")
+    cert, key = _tls_pair(tmp_path)
+    manager.start(root, allow_lan=True, bind_address="127.0.0.1",
+                  certificate=str(cert), private_key=str(key))
+    control, proposal = manager._server, manager._proposal_server
+    real_close = control.close
+    attempts = []
+    def once_failed_close():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError("fixture private diagnostic")
+        real_close()
+    monkeypatch.setattr(control, "close", once_failed_close)
+    try:
+        with pytest.raises(OwnerError, match="cleanup_failed"):
+            manager.stop()
+        assert proposal._closed
+        assert manager._server is control and manager._proposal_server is proposal
+        assert manager.status()["state"] == "cleanup_failed"
+        manager.stop()
+        assert control._closed and manager._server is None and manager._proposal_server is None
+    finally:
+        manager.stop()
+
+
+def test_lan_epoch_root_and_nonce_fences_do_not_revoke_replacement(tmp_path):
+    from collab_runtime.lan_client import PinnedLanClient
+    from collab_runtime.errors import AccessDeniedError
+    root, _ = project(tmp_path, "fence-project")
+    manager = configured(root, tmp_path / "fence-private")
+    cert, key = _tls_pair(tmp_path)
+    params = dict(allow_lan=True, bind_address="127.0.0.1",
+                  certificate=str(cert), private_key=str(key))
+    try:
+        first = manager.start(root, **params)
+        old = manager.issue_lan_invitation("bob")
+        manager.revoke_lan_member("bob")
+        replacement = manager.issue_lan_invitation("bob")
+        manager.discard_lan_invitation(old["code"], project_root=str(root), expected_epoch=first["epoch"])
+        client = PinnedLanClient(replacement["controlEndpoint"],
+            certificate_sha256=replacement["certificateSha256"], session_id=replacement["sessionId"])
+        credential = client.pair(replacement["code"], "bob")
+        manager._coordinator.check_access(credential)
+        for wrong in (dict(project_root=str(tmp_path / "other")),
+                      dict(expected_epoch=first["epoch"] + 1)):
+            with pytest.raises(OwnerError, match="product_stale"):
+                manager.revoke_lan_member("bob", **wrong)
+            with pytest.raises(OwnerError, match="product_stale"):
+                manager.issue_lan_invitation("bob", **wrong)
+            manager._coordinator.check_access(credential)
+        # A discarded pending nonce cannot revoke an already redeemed identity.
+        manager.discard_lan_invitation(replacement["code"], project_root=str(root),
+                                       expected_epoch=first["epoch"])
+        manager._coordinator.check_access(credential)
+        old_core = manager._coordinator
+        manager.stop()
+        with pytest.raises(AccessDeniedError):
+            old_core.check_access(credential)
+        second = manager.start(root, **params)
+        manager.stop(expected_epoch=first["epoch"], expected_project_root=str(root))
+        assert manager.status()["state"] == "running"
+        assert manager.status()["epoch"] == second["epoch"]
+        manager.stop(expected_epoch=second["epoch"], expected_project_root=str(tmp_path / "other"))
+        assert manager.status()["state"] == "running"
+    finally:
+        manager.stop()
+
+
+def test_lan_identity_directory_cannot_write_into_source(tmp_path):
+    root, _ = project(tmp_path, "identity-source")
+    manager = configured(root, tmp_path / "outside-private")
+    cert, key = _tls_pair(tmp_path)
+    manager._private_root = root / "must-not-be-created"
+    before = source_manifest(root)
+    with pytest.raises(OwnerError, match="start_failed"):
+        manager.start(root, allow_lan=True, bind_address="127.0.0.1",
+                      certificate=str(cert), private_key=str(key))
+    assert not manager._private_root.exists()
+    assert source_manifest(root) == before
+    assert manager._server is None and manager._proposal_server is None
+
+
+def test_lan_invalid_identity_leaves_no_copy_or_listener(tmp_path):
+    root, _ = project(tmp_path, "invalid-identity-project")
+    manager = configured(root, tmp_path / "invalid-private")
+    cert, key = _tls_pair(tmp_path)
+    cert.write_bytes(b"not a certificate")
+    with pytest.raises(OwnerError, match="invalid_certificate"):
+        manager.start(root, allow_lan=True, bind_address="127.0.0.1",
+                      certificate=str(cert), private_key=str(key))
+    assert manager.status()["state"] == "configured"
+    assert manager._server is None and manager._proposal_server is None
+    assert list(manager._private_root.glob("tls-identity-*")) == []
+
+
 def test_start_that_cannot_release_its_listener_keeps_the_resource_owned(tmp_path):
     root, _ = project(tmp_path)
     manager = OwnerSessionManager(tmp_path / "private")

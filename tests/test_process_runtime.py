@@ -33,6 +33,8 @@ def test_success_nonzero_and_separate_streams(workspace):
     assert "hello" in success.stdout
     assert success.stderr == ""
     assert success.duration_ms >= 0
+    if sys.platform.startswith("linux"):
+        assert success.producer_quiescent is True
 
     nonzero = runner.run(
         workspace,
@@ -42,6 +44,248 @@ def test_success_nonzero_and_separate_streams(workspace):
     assert nonzero.timed_out is False
     assert "bad" in nonzero.stdout
     assert "err" in nonzero.stderr
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper supervisor")
+def test_supervisor_preserves_negative_signal_returncode(workspace):
+    import signal
+    result = ProcessRunner().run(workspace, ProcessRequest(py(
+        "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"
+    )))
+    assert result.exit_code == -signal.SIGTERM
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows Job Object integration")
+def test_windows_job_contains_detached_child_and_proves_drain(workspace):
+    import subprocess
+    child = "import time; time.sleep(1)"
+    root = ("import subprocess,sys; "
+            f"subprocess.Popen([sys.executable,'-c',{child!r}], "
+            "creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS)")
+    started = time.monotonic()
+    result = ProcessRunner().run(workspace, ProcessRequest(py(root), timeout_ms=5000))
+    assert result.exit_code == 0 and result.producer_quiescent
+    assert time.monotonic() - started >= .7
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows Job Object cancellation")
+def test_windows_job_cancellation_kills_root_and_detached_descendants(workspace):
+    import threading
+    token = CancellationToken()
+    script = ("import subprocess,sys; subprocess.Popen([sys.executable,'-c',"
+              "'import time; time.sleep(30)'], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | "
+              "subprocess.DETACHED_PROCESS)")
+    timer = threading.Timer(.7, token.cancel)
+    timer.start()
+    try:
+        with pytest.raises(ProcessCancelledError) as exc:
+            ProcessRunner().run(workspace, ProcessRequest(py(script), timeout_ms=5000), cancel_token=token)
+        assert exc.value.producer_quiescent is True
+    finally:
+        timer.cancel()
+
+
+def test_windows_receipt_reader_enforces_small_bound(tmp_path):
+    from process_runtime.errors import ProcessCleanupError
+    from process_runtime.runner import _read_windows_receipt
+    path = tmp_path / "receipt.json"
+    path.write_bytes(b"{}")
+    assert _read_windows_receipt(path) == b"{}"
+    path.write_bytes(b"x" * 1025)
+    with pytest.raises(ProcessCleanupError, match="size bound"):
+        _read_windows_receipt(path)
+
+
+def test_supervisor_receipt_rejects_tampering():
+    import json
+    from process_runtime.errors import ProcessCleanupError
+    from process_runtime.runner import _validated_receipt
+    nonce = "a" * 64
+    valid = json.dumps({"nonce": nonce, "exit_code": 7, "quiescent": True}).encode()
+    assert _validated_receipt(valid, nonce, 0)["exit_code"] == 7
+    win_receipt = json.dumps({"nonce": nonce, "exit_code": 1, "quiescent": True,
+                              "cancelled": False}).encode()
+    assert _validated_receipt(win_receipt, nonce, 0)["cancelled"] is False
+    forged_cancel = json.dumps({"nonce": nonce, "exit_code": 1, "quiescent": True,
+                                "cancelled": 1}).encode()
+    with pytest.raises(ProcessCleanupError):
+        _validated_receipt(forged_cancel, nonce, 0)
+    forged = json.dumps({"nonce": "b" * 64, "exit_code": 0, "quiescent": True}).encode()
+    with pytest.raises(ProcessCleanupError):
+        _validated_receipt(forged, nonce, 0)
+    with pytest.raises(ProcessCleanupError):
+        _validated_receipt(valid, nonce, 1)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper supervisor")
+def test_acp_relay_large_bidirectional_payload_and_final_input_before_eof():
+    import json
+    import subprocess
+    config_read, config_write = os.pipe()
+    receipt_read, receipt_write = os.pipe()
+    os.set_inheritable(config_read, True)
+    os.set_inheritable(receipt_write, True)
+    nonce = "c" * 64
+    script = Path(__file__).resolve().parents[1] / "process_runtime" / "supervisor.py"
+    command = (sys.executable, "-c", "import sys; data=sys.stdin.buffer.read(); sys.stdout.buffer.write(data)")
+    payload = json.dumps({"argv": command, "cwd": os.getcwd(), "env": dict(os.environ), "stdio": "acp"}).encode() + b"\n"
+    try:
+        proc = subprocess.Popen([sys.executable, str(script), str(config_read), str(receipt_write), nonce],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            pass_fds=(config_read, receipt_write))
+        os.close(config_read); config_read = -1
+        os.close(receipt_write); receipt_write = -1
+        os.write(config_write, payload); os.close(config_write); config_write = -1
+        message = (b"large-acp-frame:" + b"x" * (2 * 1024 * 1024) + b":final-frame")
+        writer_error = []
+        def writer():
+            try:
+                proc.stdin.write(message); proc.stdin.close()
+            except Exception as exc:
+                writer_error.append(exc)
+        import threading
+        thread = threading.Thread(target=writer)
+        thread.start()
+        received = bytearray()
+        while True:
+            chunk = proc.stdout.read(65536)
+            if not chunk: break
+            received.extend(chunk)
+        thread.join(timeout=5)
+        assert not thread.is_alive() and not writer_error
+        assert bytes(received) == message
+        assert proc.wait(timeout=5) == 0
+        receipt = os.read(receipt_read, 1024)
+        assert json.loads(receipt) == {"nonce": nonce, "exit_code": 0, "quiescent": True}
+    finally:
+        for fd in (config_read, config_write, receipt_read, receipt_write):
+            if fd >= 0:
+                try: os.close(fd)
+                except OSError: pass
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper supervisor")
+def test_acp_relay_delivers_output_eof_when_agent_exits_before_parent_stdin():
+    import json
+    import subprocess
+    config_read, config_write = os.pipe()
+    receipt_read, receipt_write = os.pipe()
+    os.set_inheritable(config_read, True); os.set_inheritable(receipt_write, True)
+    nonce = "d" * 64
+    script = Path(__file__).resolve().parents[1] / "process_runtime" / "supervisor.py"
+    command = (sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'agent-exited')")
+    payload = json.dumps({"argv": command, "cwd": os.getcwd(), "env": dict(os.environ), "stdio": "acp"}).encode() + b"\n"
+    proc = None
+    try:
+        proc = subprocess.Popen([sys.executable, str(script), str(config_read), str(receipt_write), nonce],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            pass_fds=(config_read, receipt_write))
+        os.close(config_read); config_read = -1
+        os.close(receipt_write); receipt_write = -1
+        os.write(config_write, payload); os.close(config_write); config_write = -1
+        assert proc.stdout.read() == b"agent-exited"
+        # Parent stdin deliberately remains open: root stdout EOF is sufficient
+        # to close the protocol stream and let the host observe agent death.
+        assert proc.wait(timeout=5) == 0
+        assert json.loads(os.read(receipt_read, 1024)) == {"nonce": nonce, "exit_code": 0, "quiescent": True}
+    finally:
+        if proc is not None:
+            if proc.stdin and not proc.stdin.closed: proc.stdin.close()
+        for fd in (config_read, config_write, receipt_read, receipt_write):
+            if fd >= 0:
+                try: os.close(fd)
+                except OSError: pass
+
+
+def test_reap_after_root_exit_never_signals_reusable_process_group(monkeypatch):
+    import process_runtime.supervisor as supervisor
+
+    calls = iter([(4242, 0), None])
+    def waitpid(_pid, _options):
+        result = next(calls)
+        if result is None:
+            raise ChildProcessError()
+        return result
+    monkeypatch.setattr(supervisor.os, "waitpid", waitpid)
+    monkeypatch.setattr(supervisor, "_kill_children", lambda: None)
+    monkeypatch.setattr(supervisor.os, "killpg", lambda *_args: pytest.fail("stale process group was signaled"))
+    monkeypatch.setattr(supervisor, "_shutdown", True)
+    status, complete = supervisor._reap_all(4242)
+    assert status == 0 and complete
+
+
+def test_subreaper_children_inspection_failure_is_not_empty_tree(monkeypatch):
+    import builtins
+    from process_runtime.supervisor import _children
+    real_open = builtins.open
+    def fail(path, *args, **kwargs):
+        if str(path).endswith("/children"):
+            raise PermissionError("denied")
+        return real_open(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", fail)
+    with pytest.raises(RuntimeError, match="quiescence is unproven"):
+        _children()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux subreaper supervisor")
+def test_config_pipe_broken_pipe_reaps_started_supervisor(monkeypatch, workspace):
+    import process_runtime.runner as runner
+    real_fdopen = runner.os.fdopen
+    spawned = []
+    real_popen = runner.subprocess.Popen
+
+    def capture_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def broken_config_pipe(fd, mode="r", *args, **kwargs):
+        if mode == "wb":
+            raise BrokenPipeError("simulated config pipe failure")
+        return real_fdopen(fd, mode, *args, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", capture_popen)
+    monkeypatch.setattr(runner.os, "fdopen", broken_config_pipe)
+    with pytest.raises(ProcessSpawnError):
+        ProcessRunner().run(workspace, ProcessRequest(py("raise SystemExit('must not run')")))
+    assert len(spawned) == 1 and spawned[0].poll() is not None
+
+
+def test_supervisor_failure_does_not_produce_receipt():
+    import os
+    import subprocess
+    read_fd, write_fd = os.pipe()
+    os.set_inheritable(write_fd, True)
+    script = Path(__file__).resolve().parents[1] / "process_runtime" / "supervisor.py"
+    try:
+        child = subprocess.run([sys.executable, str(script), str(write_fd), "a" * 64],
+                               input=b"not-json\\n", pass_fds=(write_fd,), capture_output=True)
+        os.close(write_fd)
+        assert child.returncode != 0
+        assert os.read(read_fd, 1024) == b""
+    finally:
+        os.close(read_fd)
+        try:
+            os.close(write_fd)
+        except OSError:
+            pass
+
+
+def test_subreaper_waits_for_detached_descendant_before_receipt(workspace, tmp_path):
+    child_pid_file = tmp_path / "detached.pid"
+    code = (
+        "import pathlib, subprocess, sys; "
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(.35)'], "
+        "start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); print('parent done')"
+    )
+    started = time.monotonic()
+    result = ProcessRunner().run(workspace, ProcessRequest(py(code, str(child_pid_file))))
+    assert result.exit_code == 0 and result.producer_quiescent is True
+    assert "parent done" in result.stdout
+    assert time.monotonic() - started >= .25
+    child_pid = int(child_pid_file.read_text())
+    assert not psutil.pid_exists(child_pid)
 
 
 def test_large_output_is_drained_and_bounded(workspace):
@@ -87,13 +331,11 @@ def test_timeout_terminates_process_tree(workspace, tmp_path):
 
 
 def test_cancel_token_terminates_process_tree(workspace, tmp_path):
-    """F7: cancelling a CancellationToken mid-wait kills the process tree
-    exactly like a timeout, and raises ProcessCancelledError (never a
-    ProcessResult -- callers must not mistake this for an ordinary FAIL)."""
+    """Cancellation authenticates quiescence after reaping a detached child."""
     child_pid_file = tmp_path / "child.pid"
     code = (
         "import pathlib, subprocess, sys, time; "
-        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], start_new_session=True); "
         "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(30)"
     )
     token = CancellationToken()
@@ -109,12 +351,13 @@ def test_cancel_token_terminates_process_tree(workspace, tmp_path):
     canceller = threading.Thread(target=_cancel_soon)
     canceller.start()
     try:
-        with pytest.raises(ProcessCancelledError):
+        with pytest.raises(ProcessCancelledError) as cancelled:
             ProcessRunner().run(
                 workspace,
                 ProcessRequest(py(code, str(child_pid_file)), timeout_ms=30_000),
                 cancel_token=token,
             )
+        assert cancelled.value.producer_quiescent is True
     finally:
         canceller.join(timeout=5)
 

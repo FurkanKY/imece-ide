@@ -51,6 +51,7 @@ export class MockBridge implements Bridge {
   private collabPreviews = new Map<string, Api["collab.preview"]["result"]>();
   private collabApprovals = new Map<string, { memberId: string; taskId: string }>();
   private collabStatus: Api["collab.status"]["result"]["collaboration"] = null;
+  private participantSession: Api["collab.peer.refresh"]["result"] | null = null;
   private deliveryTickets = new Map<string, Api["collab.delivery.preview"]["result"]>();
   private participantTickets = new Map<string, Api["collab.taskStatus.preview"]["result"]>();
   private deliveryProposals: Api["collab.delivery.list"]["result"]["proposals"] = [];
@@ -407,6 +408,7 @@ export class MockBridge implements Bridge {
         return { path: "C:/Projeler/demo-api" } as R;
       case "project.open":
         this.mockRoot = (params as { path: string }).path;
+        this.participantSession = null;
         this.collabPreviews.clear();
         this.collabApprovals.clear();
         this.participantTickets.clear();
@@ -502,6 +504,53 @@ export class MockBridge implements Bridge {
       }
       case "collab.status":
         return { collaboration: this.collabStatus } as R;
+      case "collab.peer.previewProposal":
+      case "collab.peer.publishProposal":
+      case "collab.peer.reconcileProposal":
+      case "collab.peer.discardProposal":
+      case "collab.peer.fetchProposal":
+        throw new Error("MOCK: kalıcı öneri paylaşımı ve kod taşıma desteklenmiyor.");
+      case "collab.peer.join": {
+        const p = params as Api["collab.peer.join"]["params"], invite = p.bundle;
+        const validEndpoint = (value: string) => {
+          const match = /^https:\/\/(\d{1,3}(?:\.\d{1,3}){3}):([1-9]\d{0,4})$/.exec(value);
+          if (!match || Number(match[2]) > 65535) return false;
+          const octets = match[1].split(".").map(Number);
+          if (octets.some((part) => part > 255) || octets.join(".") !== match[1]) return false;
+          const [a, b] = octets;
+          return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+        };
+        if (typeof invite.code !== "string" || !/^[A-Za-z0-9_-]{40,128}$/.test(invite.code) ||
+            typeof invite.memberId !== "string" || !invite.memberId || typeof invite.sessionId !== "string" || !invite.sessionId ||
+            typeof invite.certificateSha256 !== "string" || !/^[0-9a-f]{64}$/.test(invite.certificateSha256) ||
+            !validEndpoint(invite.controlEndpoint) || !validEndpoint(invite.proposalEndpoint) ||
+            invite.controlEndpoint === invite.proposalEndpoint || p.confirmPin !== true || typeof p.pin !== "string" ||
+            p.pin.trim().toLowerCase() !== invite.certificateSha256 ||
+            (invite.expiresInSeconds !== undefined && (!Number.isInteger(invite.expiresInSeconds) || invite.expiresInSeconds < 1 || invite.expiresInSeconds > 300)) ||
+            (invite.epoch !== undefined && (!Number.isInteger(invite.epoch) || invite.epoch < 0))) throw new Error("Davet veya doğrulanmış PIN geçersiz.");
+        const paired: Api["collab.peer.join"]["result"] = {
+          peerHandle: `mock-peer-${Date.now()}`, state: "active", memberId: invite.memberId,
+          sessionId: invite.sessionId, projectRoot: this.mockRoot, epoch: invite.epoch ?? 0,
+          baseCommit: "a".repeat(40), revision: "b".repeat(40),
+          context: { goal: "Mock shared goal", decisions: ["Mock decision"], interfaces: { API: "Mock interface" } },
+          tasks: [{ id: "mock-task", owner: invite.memberId, goal: "Mock task", scopes: ["src/"], status: "queued", contextRevision: "b".repeat(40) }],
+          controlEndpoint: invite.controlEndpoint, proposalEndpoint: invite.proposalEndpoint,
+          certificateSha256: invite.certificateSha256, error: null,
+        };
+        this.participantSession = paired;
+        return paired as R;
+      }
+      case "collab.peer.refresh":
+      case "collab.peer.status": {
+        const p = params as Api["collab.peer.refresh"]["params"];
+        if (!this.participantSession || this.participantSession.peerHandle !== p.peerHandle) throw new Error("Katılımcı oturumu yok.");
+        return this.participantSession as R;
+      }
+      case "collab.peer.disconnect": {
+        const p = params as Api["collab.peer.disconnect"]["params"];
+        if (this.participantSession?.peerHandle === p.peerHandle) this.participantSession = null;
+        return { disconnected: true, warning: null } as R;
+      }
       case "collab.taskStatus.preview": {
         const p = params as Api["collab.taskStatus.preview"]["params"], current = this.collabStatus;
         if (!current || current.runId !== p.runId || current.active || !current.memberId || !current.taskId ||
@@ -637,19 +686,42 @@ export class MockBridge implements Bridge {
         if (this.ownerStatus.state === "cleanup_failed") throw new Error("Sunucu kapatılamadı; yeniden deneyin.");
         if (!this.ownerStatus.projectRoot) throw new Error("Önce oturumu yapılandırın.");
         this.ownerStatus = { ...this.ownerStatus, state: "running", endpoint: "http://127.0.0.1:0", epoch: this.ownerStatus.epoch + 1, exportedMembers: [] }; this.ownerShared.clear(); return this.ownerStatus as R;
+      case "collab.owner.startLAN": {
+        const p = params as Api["collab.owner.startLAN"]["params"];
+        if (this.ownerStatus.state === "cleanup_failed" || !this.ownerStatus.projectRoot || !p.certificate.trim() || !p.privateKey.trim()) throw new Error("TLS yapılandırması geçersiz.");
+        this.ownerStatus = { ...this.ownerStatus, state: "running", transportMode: "lan", endpoint: null,
+          controlEndpoint: `https://${p.bindAddress}:41001`, proposalEndpoint: `https://${p.bindAddress}:41002`,
+          certificateSha256: "a".repeat(64), epoch: this.ownerStatus.epoch + 1, exportedMembers: [] };
+        return this.ownerStatus as R;
+      }
+      case "collab.owner.issueInvite": {
+        const p = params as Api["collab.owner.issueInvite"]["params"];
+        if ((p.expectedEpoch !== undefined && p.expectedEpoch !== this.ownerStatus.epoch) || this.ownerStatus.state !== "running" || this.ownerStatus.transportMode !== "lan" || !this.ownerStatus.memberIds.includes(p.memberId) || p.memberId === this.ownerStatus.ownerId) throw new Error("Üye için davet verilemiyor.");
+        return { memberId: p.memberId, code: "MOCK_INVITATION_CODE_NOT_REAL", expiresInSeconds: 300,
+          controlEndpoint: this.ownerStatus.controlEndpoint!, proposalEndpoint: this.ownerStatus.proposalEndpoint!,
+          certificateSha256: this.ownerStatus.certificateSha256!, sessionId: this.ownerStatus.sessionId!, epoch: this.ownerStatus.epoch } as R;
+      }
+      case "collab.owner.cancelInvite": return {} as R;
+      case "collab.owner.revokeMember": {
+        const p = params as Api["collab.owner.revokeMember"]["params"];
+        if (this.ownerStatus.state !== "running" || this.ownerStatus.transportMode !== "lan" || (p.expectedEpoch !== undefined && p.expectedEpoch !== this.ownerStatus.epoch) || p.memberId === this.ownerStatus.ownerId || !this.ownerStatus.memberIds.includes(p.memberId)) throw new Error("Üye geçersiz.");
+        return this.ownerStatus as R;
+      }
       case "collab.owner.stop":
-        this.ownerStatus = { ...this.ownerStatus, state: "stopped", endpoint: null, exportedMembers: [] }; this.ownerShared.clear(); return this.ownerStatus as R;
+        if ((params as Api["collab.owner.stop"]["params"]).expectedEpoch !== undefined && (params as Api["collab.owner.stop"]["params"]).expectedEpoch !== this.ownerStatus.epoch) return this.ownerStatus as R;
+        if ((params as Api["collab.owner.stop"]["params"]).expectedProjectRoot !== undefined && (params as Api["collab.owner.stop"]["params"]).expectedProjectRoot !== this.ownerStatus.projectRoot) return this.ownerStatus as R;
+        this.ownerStatus = { ...this.ownerStatus, state: "stopped", endpoint: null, controlEndpoint: null, proposalEndpoint: null, transportMode: "loopback", exportedMembers: [] }; this.ownerShared.clear(); return this.ownerStatus as R;
       case "collab.owner.shareOnce": {
         const p = params as Api["collab.owner.shareOnce"]["params"];
         const key = `${this.ownerStatus.epoch}:${p.memberId}`;
-        if (this.ownerStatus.state !== "running" || !this.ownerStatus.memberIds.includes(p.memberId) || this.ownerShared.has(key)) throw new Error("Bu üyeye erişim verilemiyor.");
+        if (this.ownerStatus.state !== "running" || this.ownerStatus.transportMode === "lan" || !this.ownerStatus.memberIds.includes(p.memberId) || this.ownerShared.has(key)) throw new Error("Bu üyeye erişim verilemiyor.");
         this.ownerShared.add(key); this.ownerStatus = { ...this.ownerStatus, exportedMembers: [...this.ownerStatus.exportedMembers, p.memberId] };
         return { endpoint: this.ownerStatus.endpoint!, sessionId: this.ownerStatus.sessionId!, baseCommit: this.ownerStatus.baseCommit!, targetVersion: this.ownerStatus.targetVersion!, memberId: p.memberId, credential: "MOCK: erişim datasimülasyon", storePath: this.ownerStatus.storePath!, hubPath: this.ownerStatus.hubPath!, taskIds: this.ownerStatus.tasks.filter((task) => task.owner === p.memberId).map((task) => task.id), epoch: this.ownerStatus.epoch, scope: "loopback-only" } as R;
       }
       case "collab.owner.localPreview": {
         const p = params as Api["collab.owner.localPreview"]["params"];
         const task = this.ownerStatus.tasks.find((item) => item.id === p.taskId && item.owner === p.memberId && (item.status === "queued" || item.status === "running"));
-        if (this.ownerStatus.state !== "running" || this.ownerStatus.projectRoot !== this.mockRoot || !task) throw new Error("Görev bu üyeye atanmadı veya etkin değil.");
+        if (this.ownerStatus.state !== "running" || this.ownerStatus.transportMode === "lan" || this.ownerStatus.projectRoot !== this.mockRoot || !task) throw new Error("Görev bu üyeye atanmadı veya etkin değil.");
         const preview: Api["collab.preview"]["result"] = { previewId: `mock-local-preview-${Date.now()}`, projectRoot: this.mockRoot, endpoint: this.ownerStatus.endpoint!, memberId: p.memberId, taskId: task.id, sessionId: this.ownerStatus.sessionId!, targetVersion: this.ownerStatus.targetVersion!, baseCommit: this.ownerStatus.baseCommit!, revision: this.ownerStatus.revision!, task, context: structuredClone(this.ownerContext) };
         this.collabPreviews.set(preview.previewId, preview); return { preview, storePath: this.ownerStatus.storePath!, hubPath: this.ownerStatus.hubPath!, endpoint: this.ownerStatus.endpoint!, memberId: p.memberId, taskId: task.id, epoch: this.ownerStatus.epoch } as R;
       }
@@ -693,6 +765,13 @@ export class MockBridge implements Bridge {
         if (conflicts.length) return { candidate: null, conflicts } as R;
         return { candidate: { session_id: "mock-session", session_revision: "mock-r2", binding_revision: "mock-binding-r1", context_hash: "mock-context-hash", base_commit: "mock-base", proposal_ids: p.proposalIds, proposals: selected.map((proposal) => ({ proposal_id: proposal.proposalId, task_id: proposal.taskId, owner: proposal.owner, context_revision: proposal.contextRevision, paths: [] })), candidate_dir: p.outputPath, file_count: selected.reduce((count, proposal) => count + proposal.fileCount, 0), content_fingerprint: "mock-fingerprint", verification: { status: p.verify ? "pass" : "not_run", plan_id: null, checks: [], changed_content: false, ...(p.verify ? { fingerprint_complete: true, fingerprint_before: "mock-before", fingerprint_after: "mock-before" } : {}) }, conflicts: [], notes: ["MOCK: yeni aday sonucu simüle edildi; dosya yazımı ve proje komutu çalıştırılmadı."] }, conflicts: [] } as R;
       }
+      case "candidate.list":
+        return { candidates: [] } as R;
+      case "candidate.prepare":
+      case "candidate.apply":
+      case "candidate.rollback":
+      case "run.restart":
+        throw new BridgeError("unavailable", "MOCK: bu kalıcı görev işlemi kontrollü kabul fixture'ı gerektirir.");
       case "run.start": {
         const startParams = params as Api["run.start"]["params"];
         if ("retryOfRunId" in startParams) {

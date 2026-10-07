@@ -23,6 +23,7 @@ def test_frozen_mode_separates_resources_and_writable_data(tmp_path, monkeypatch
     local = tmp_path / "local"
     exe = tmp_path / "bundle" / "ImeceIDE.exe"
     monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
     monkeypatch.setattr(sys, "executable", str(exe))
     monkeypatch.setenv("LOCALAPPDATA", str(local))
@@ -34,6 +35,29 @@ def test_frozen_mode_separates_resources_and_writable_data(tmp_path, monkeypatch
     assert runtime_paths.log_path() == data / "logs" / "app.log"
     assert runtime_paths.workspaces_dir() == data / "workspaces"
     assert runtime_paths.run_runtime_db_path() == data / "runtime.sqlite3"
+
+
+def test_frozen_linux_uses_absolute_xdg_data_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert runtime_paths.app_data_dir() == tmp_path / "xdg" / "ImeceIDE"
+    assert not (tmp_path / "xdg").exists()
+
+
+def test_frozen_linux_ignores_relative_xdg_data_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("XDG_DATA_HOME", "relative/data")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert runtime_paths.app_data_dir() == tmp_path / ".local/share/ImeceIDE"
+
+
+def test_frozen_windows_keeps_localappdata_with_explicit_platform(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert runtime_paths.app_data_dir() == tmp_path / "ImeceIDE"
 
 
 def test_frozen_helper_resolves_next_to_executable(tmp_path, monkeypatch):

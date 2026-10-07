@@ -12,13 +12,15 @@ if (-not (Test-Path $Python)) {
 
 if (-not $SkipWebBuild) {
     Push-Location (Join-Path $Root "web\ui")
-    try { npm.cmd run build } finally { Pop-Location }
+    try {
+        npm.cmd run build
+        if ($LASTEXITCODE -ne 0) { throw "npm build başarısız (exit $LASTEXITCODE)." }
+    } finally { Pop-Location }
 }
 
-$Index = Join-Path $Root "web\ui\dist\index.html"
-if (-not (Test-Path $Index)) {
-    throw "web/ui/dist/index.html yok; frontend build tamamlanmadı."
-}
+$env:PYTHONDONTWRITEBYTECODE = "1"
+& $Python (Join-Path $PSScriptRoot "check.py") sources --root $Root
+if ($LASTEXITCODE -ne 0) { throw "Paketleme kaynak ön kontrolü başarısız (exit $LASTEXITCODE)." }
 
 Push-Location $Root
 try {
@@ -27,5 +29,8 @@ try {
 } finally {
     Pop-Location
 }
+
+& $Python (Join-Path $PSScriptRoot "check.py") bundle --root $Root --bundle (Join-Path $Root "dist\ImeceIDE") --write-manifest
+if ($LASTEXITCODE -ne 0) { throw "Paketleme bundle kontrolü başarısız (exit $LASTEXITCODE)." }
 
 Write-Host "Paket hazır: $Root\dist\ImeceIDE\ImeceIDE.exe"

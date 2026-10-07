@@ -25,6 +25,8 @@ web/ui/dist/
 skills-lock.json
 
 # Yayınlanmayan yerel çalışma/devir kayıtları
+.pi/
+/PI_HANDOFF.md
 docs/agent-handoff/
 docs/HANDOFF.md
 docs/CONTINUE-ON-ANOTHER-PC.md

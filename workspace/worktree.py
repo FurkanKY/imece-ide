@@ -483,9 +483,15 @@ class GitWorktreeWorkspace(Workspace):
 
     def dispose(self) -> None:
         if self._disposed:
+            owner = getattr(self, "ownership", None)
+            if owner is not None and owner.lease.fd is not None:
+                owner.disposed()
             return
         # Yalnızca temizlik GERÇEKTEN başarılı olduktan sonra işaretlenir;
         # _remove_worktree hata fırlatırsa bu obje "disposed" sayılmaz ve bir
         # sonraki dispose() çağrısı temizliği yeniden dener.
         _remove_worktree(self._repo_root, self._worktree_dir)
         self._disposed = True
+        owner = getattr(self, "ownership", None)
+        if owner is not None:
+            owner.disposed()

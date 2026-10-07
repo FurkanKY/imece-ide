@@ -1,0 +1,5 @@
+# Preserve upstream license bytes and POSIX scripts on Windows checkouts.
+/packaging/licenses/*.txt text eol=lf
+/packaging/*.sh text eol=lf
+# This reviewed upstream text intentionally contains space-before-tab indentation.
+/packaging/licenses/node-v24.19.0-LICENSE.txt whitespace=-space-before-tab

@@ -9,24 +9,54 @@ import os
 import sys
 
 
-def _run_packaged_helper() -> bool:
+def _run_packaged_helper() -> int | None:
     """Tek exe içindeki alt-süreç girişleri (Qt kurulmadan önce çalışır)."""
+    from process_runtime.supervisor_launch import DISPATCH_FLAG
+    if DISPATCH_FLAG in sys.argv:
+        if len(sys.argv) < 2 or sys.argv[1] != DISPATCH_FLAG:
+            return 125
+        sys.argv.pop(1)
+        try:
+            from process_runtime.supervisor import main as supervisor_main
+            return supervisor_main()
+        except BaseException:
+            return 125
     if "--imece-debugpy" in sys.argv:
         sys.argv.remove("--imece-debugpy")
         from debugpy.server.cli import main as debugpy_main
         debugpy_main()
-        return True
+        return 0
     if "--imece-lsp" in sys.argv:
         sys.argv.remove("--imece-lsp")
         from basedpyright.langserver import main as lsp_main
         lsp_main()
-        return True
-    return False
+        return 0
+    return None
+
+
+def _configure_graphics() -> None:
+    """Frozen Linux compatibility default; never relax Chromium's sandbox.
+
+    GPU-backed QtWebEngine startup was intermittent on the build host. Keep
+    source/Windows defaults unchanged and allow an explicit hardware opt-in.
+    Helpers return before this GUI-only configuration is reached.
+    """
+    software = "--software-rendering" in sys.argv
+    hardware = "--hardware-rendering" in sys.argv
+    if software and hardware:
+        raise ValueError("Choose either software or hardware rendering")
+    if not software and not (getattr(sys, "frozen", False) and sys.platform.startswith("linux") and not hardware):
+        return
+    flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    if "--disable-gpu" not in flags.split():
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (flags + " --disable-gpu").strip()
 
 
 def main() -> int:
-    if _run_packaged_helper():
-        return 0
+    helper_exit = _run_packaged_helper()
+    if helper_exit is not None:
+        return helper_exit
+    _configure_graphics()
     dev = "--dev" in sys.argv
 
     # Kaynak modunda depo .env'i; pakette yazılabilir LOCALAPPDATA kopyası.

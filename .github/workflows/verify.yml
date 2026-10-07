@@ -35,6 +35,9 @@ jobs:
           node scripts/task-workspace-acceptance.mjs
           node scripts/run-history-acceptance.mjs
           node scripts/run-retry-acceptance.mjs
+          node scripts/m3-acceptance.mjs
+          node scripts/m4-owner-acceptance.mjs
+          node scripts/m4-peer-acceptance.mjs
 
   linux-python:
     runs-on: ubuntu-latest

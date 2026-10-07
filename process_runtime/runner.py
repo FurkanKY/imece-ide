@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+import secrets
+import signal
 import shutil
 import subprocess
 import sys
@@ -19,6 +22,7 @@ from process_runtime.errors import (
     ProcessSpawnError,
 )
 from process_runtime.models import ProcessRequest, ProcessResult
+from process_runtime.supervisor_launch import supervisor_argv
 from workspace.base import resolve_within_workspace
 from workspace.errors import WorkspaceBoundaryError
 
@@ -74,6 +78,30 @@ def _resolve_executable(executable: str, workspace, environment: Mapping[str, st
     return resolved
 
 
+def _read_windows_receipt(path: Path) -> bytes:
+    """Read a small receipt without trusting a target-writable temp path size."""
+    with path.open("rb") as stream:
+        raw = stream.read(1025)
+    if len(raw) > 1024:
+        raise ProcessCleanupError("Supervisor receipt exceeded its size bound")
+    return raw
+
+
+def _validated_receipt(raw: bytes, nonce: str, supervisor_exit: int) -> dict:
+    try:
+        receipt = json.loads(raw.decode("ascii"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProcessCleanupError("Supervisor did not issue a valid quiescence receipt") from exc
+    if (not isinstance(receipt, dict)
+            or set(receipt) not in ({"nonce", "exit_code", "quiescent"},
+                                     {"nonce", "exit_code", "quiescent", "cancelled"})
+            or receipt["nonce"] != nonce or receipt["quiescent"] is not True
+            or ("cancelled" in receipt and type(receipt["cancelled"]) is not bool)
+            or type(receipt["exit_code"]) is not int or supervisor_exit != 0):
+        raise ProcessCleanupError("Supervisor quiescence receipt failed validation")
+    return receipt
+
+
 class ProcessRunner:
     def run(self, workspace, request: ProcessRequest, *, cancel_token=None) -> ProcessResult:
         """`cancel_token` is duck-typed (only `.cancelled` is read) so
@@ -92,23 +120,101 @@ class ProcessRunner:
         started = time.monotonic()
         creationflags = 0
         popen_kwargs = {}
-        if os.name == "posix":
-            popen_kwargs["start_new_session"] = True
-        elif os.name == "nt":
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        linux_supervised = sys.platform.startswith("linux")
+        windows_supervised = os.name == "nt"
+        supervisor_dir = None
+        receipt_path = cancel_path = None
+        receipt_read = receipt_write = config_read = config_write = None
+        nonce = None
+        if linux_supervised:
+            receipt_read, receipt_write = os.pipe()
+            config_read, config_write = os.pipe()
+            os.set_inheritable(receipt_write, True)
+            os.set_inheritable(config_read, True)
+            nonce = secrets.token_hex(32)
+            wrapper_argv = supervisor_argv(str(config_read), str(receipt_write), nonce)
+            ownership = getattr(workspace, "ownership", None)
+            lease_fd = getattr(getattr(ownership, "lease", None), "fd", None)
+            inherited_fds = (receipt_write, config_read) if lease_fd is None else (receipt_write, config_read, lease_fd)
+            popen_kwargs.update(start_new_session=True, pass_fds=inherited_fds)
+            stdin = subprocess.DEVNULL
+            argv_to_spawn = wrapper_argv
+        elif windows_supervised:
+            import tempfile
+            supervisor_dir = Path(tempfile.mkdtemp(prefix="imece-job-"))
+            receipt_path = supervisor_dir / "receipt.json"
+            cancel_path = supervisor_dir / "cancel"
+            nonce = secrets.token_hex(32)
+            wrapper_argv = supervisor_argv("--windows-process", str(receipt_path), str(cancel_path), nonce)
+            stdin = subprocess.PIPE
+            argv_to_spawn = wrapper_argv
+        else:
+            if os.name == "posix":
+                popen_kwargs["start_new_session"] = True
+            stdin = subprocess.DEVNULL
+            argv_to_spawn = argv
+        process = None
         try:
             process = subprocess.Popen(
-                argv,
+                argv_to_spawn,
                 cwd=str(cwd),
                 env=environment,
                 shell=False,
-                stdin=subprocess.DEVNULL,
+                stdin=stdin,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 creationflags=creationflags,
                 **popen_kwargs,
             )
+            if linux_supervised:
+                os.close(receipt_write)
+                receipt_write = None
+                os.close(config_read)
+                config_read = None
+                payload = json.dumps({"argv": list(argv), "cwd": str(cwd), "env": environment,
+                                      "stdio": "process"}, separators=(",", ":")).encode("utf-8")
+                with os.fdopen(config_write, "wb") as stream:
+                    config_write = None
+                    stream.write(payload + b"\n")
+            elif windows_supervised:
+                payload = json.dumps({"argv": list(argv), "cwd": str(cwd), "env": environment,
+                                      "stdio": "process"}, separators=(",", ":")).encode("utf-8")
+                process.stdin.write(payload + b"\n")
+                process.stdin.close()
         except (OSError, ValueError) as exc:
+            if process is not None:
+                # Configuration-pipe failure after Popen must not leave an
+                # untracked supervisor, zombie, or unread pipe behind.
+                try:
+                    process.send_signal(signal.SIGTERM)
+                except OSError:
+                    pass  # It may have exited as the config pipe closed.
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+            if supervisor_dir is not None:
+                import shutil
+                shutil.rmtree(supervisor_dir, ignore_errors=True)
+            for fd in (receipt_read, receipt_write, config_read, config_write):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
             raise ProcessSpawnError(f"Could not spawn executable: {request.argv[0]}") from exc
 
         stdout_capture = BoundedCapture()
@@ -139,11 +245,17 @@ class ProcessRunner:
             if timed_out or cancelled:
                 cleanup_error = None
                 try:
-                    terminate_process_tree(process.pid)
-                except ProcessCleanupError as exc:
-                    cleanup_error = exc
+                    if linux_supervised:
+                        process.send_signal(signal.SIGTERM)
+                    elif windows_supervised:
+                        cancel_path.write_text("cancelled" if cancelled else "timeout", encoding="ascii")
+                    else:
+                        terminate_process_tree(process.pid)
+                except (ProcessCleanupError, ProcessLookupError, OSError) as exc:
+                    cleanup_error = (exc if isinstance(exc, ProcessCleanupError)
+                                     else ProcessCleanupError("Could not signal process supervisor"))
                 try:
-                    process.wait(timeout=2)
+                    process.wait(timeout=None if linux_supervised else 10 if windows_supervised else 2)
                 except subprocess.TimeoutExpired as exc:
                     if cleanup_error is None:
                         cleanup_error = ProcessCleanupError(
@@ -151,14 +263,45 @@ class ProcessRunner:
                         )
                         cleanup_error.__cause__ = exc
                 if cleanup_error is not None:
+                    if receipt_read is not None:
+                        os.close(receipt_read)
+                    if supervisor_dir is not None:
+                        import shutil
+                        shutil.rmtree(supervisor_dir, ignore_errors=True)
                     raise cleanup_error
-                if cancelled:
-                    raise ProcessCancelledError(
-                        f"Process cancelled while waiting: {request.argv[0]!r}"
-                    )
         finally:
             stdout_thread.join(timeout=3)
             stderr_thread.join(timeout=3)
+        # Authenticate the private receipt before exposing cancellation proof.
+        # Even capture errors do not erase a valid process-tree quiescence fact.
+        producer_quiescent = False
+        exit_code = process.returncode
+        receipt = None
+        if linux_supervised:
+            try:
+                raw = os.read(receipt_read, 1024)
+                receipt = _validated_receipt(raw, nonce, process.returncode)
+                exit_code = receipt["exit_code"]
+                producer_quiescent = True
+            finally:
+                os.close(receipt_read)
+                receipt_read = None
+        elif windows_supervised:
+            try:
+                raw = _read_windows_receipt(receipt_path)
+                receipt = _validated_receipt(raw, nonce, process.returncode)
+                exit_code = receipt["exit_code"]
+                producer_quiescent = True
+            except OSError as exc:
+                raise ProcessCleanupError("Windows Job supervisor did not provide a receipt") from exc
+            finally:
+                import shutil
+                shutil.rmtree(supervisor_dir, ignore_errors=True)
+        if cancelled or (receipt and receipt.get("cancelled")):
+            raise ProcessCancelledError(
+                f"Process cancelled while waiting: {request.argv[0]!r}",
+                producer_quiescent=producer_quiescent,
+            )
         if stdout_thread.is_alive() or stderr_thread.is_alive():
             raise ProcessRuntimeError("Process output capture did not terminate")
         if stdout_capture.error is not None:
@@ -169,7 +312,7 @@ class ProcessRunner:
         return ProcessResult(
             argv=request.argv,
             cwd=request.cwd,
-            exit_code=process.returncode,
+            exit_code=exit_code,
             timed_out=timed_out,
             duration_ms=max(duration_ms, 0),
             stdout=stdout_capture.text(),
@@ -178,4 +321,5 @@ class ProcessRunner:
             stderr_truncated=stderr_capture.truncated,
             stdout_bytes=stdout_capture.total,
             stderr_bytes=stderr_capture.total,
+            producer_quiescent=producer_quiescent,
         )

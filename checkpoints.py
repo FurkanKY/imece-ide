@@ -5,6 +5,7 @@ import base64
 import binascii
 import json
 import os
+import stat
 import tempfile
 import time
 import uuid
@@ -33,6 +34,7 @@ class CheckpointStore:
             else:
                 raw = b""
             files.append({"path": rel, "exists": exists,
+                          "mode": stat.S_IMODE(os.stat(full).st_mode) if exists else None,
                           "content": base64.b64encode(raw).decode("ascii")})
         rec = {"id": str(uuid.uuid4()), "ts": time.time(), "runId": run_id, "files": files}
         os.makedirs(self.dir, exist_ok=True)
@@ -85,13 +87,16 @@ class CheckpointStore:
                     raise ValueError("Checkpoint dosya kaydı geçersiz.")
                 full = proj._safe(rel)
                 raw = base64.b64decode(item["content"], validate=True)
-                prepared.append((rel, full, exists, raw))
+                mode = item.get("mode")
+                if mode is not None and (type(mode) is not int or not 0 <= mode <= 0o7777):
+                    raise ValueError("Checkpoint dosya modu geçersiz.")
+                prepared.append((rel, full, exists, raw, mode))
         except (TypeError, KeyError, binascii.Error) as e:
             raise ValueError("Checkpoint içeriği bozuk.") from e
 
         # Önce mevcut durumu bellekte tut; restore ortada hata verirse geri sar.
         before = []
-        for rel, full, _exists, _raw in prepared:
+        for rel, full, _exists, _raw, _mode in prepared:
             current_exists = os.path.isfile(full)
             current = b""
             if current_exists:
@@ -99,22 +104,27 @@ class CheckpointStore:
                     current = f.read()
             elif os.path.exists(full):
                 raise IsADirectoryError(f"Dosya yolu klasöre dönüştü: {rel}")
-            before.append((full, current_exists, current))
+            before.append((full, current_exists, current,
+                           stat.S_IMODE(os.stat(full).st_mode) if current_exists else None))
 
         try:
-            for _rel, full, exists, raw in prepared:
+            for _rel, full, exists, raw, mode in prepared:
                 if exists:
                     self._write_atomic(full, raw)
+                    if mode is not None:
+                        os.chmod(full, mode)
                 elif os.path.exists(full):
                     os.unlink(full)
         except Exception:
-            for full, existed, raw in before:
+            for full, existed, raw, mode in before:
                 if existed:
                     self._write_atomic(full, raw)
+                    if mode is not None:
+                        os.chmod(full, mode)
                 elif os.path.isfile(full):
                     os.unlink(full)
             raise
-        return [rel for rel, _full, _exists, _raw in prepared]
+        return [rel for rel, _full, _exists, _raw, _mode in prepared]
 
     def drop(self, checkpoint_id: str) -> None:
         try:

@@ -87,7 +87,7 @@ try {
   await page.getByRole("button", { name: /Original prior task/ }).click();
   await page.getByText("0/2 etkin veya bekleyen").waitFor();
    await page.getByRole("button", { name: /Original prior task/ }).getByText("Önceki oturum · running").waitFor();
-  await page.getByRole("status").filter({ hasText: "Önceki oturumun kaydı; bu oturumda uygulanamaz/devam ettirilemez." }).waitFor();
+  await page.getByRole("status").filter({ hasText: "Önceki oturumun kaydı; eski öneriler uygulanamaz. Devam etmek yeni doğrulama gerektirir." }).waitFor();
   await page.getByRole("tab", { name: "Sonuç" }).click();
   await page.getByText("Historical result message").waitFor();
   await page.getByText(/güncel çalışma alanının doğrulaması/).waitFor();

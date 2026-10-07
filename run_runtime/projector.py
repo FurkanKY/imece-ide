@@ -185,7 +185,44 @@ def _on_usage_recorded(current: RunRecord, event: RunEvent) -> RunRecord:
     )
 
 
+def _on_workspace_saved(current: RunRecord, event: RunEvent) -> RunRecord:
+    return dataclasses.replace(current, workspace_snapshot=dict(event.payload))
+
+
+def _on_restarted(current: RunRecord, event: RunEvent) -> RunRecord:
+    if current.status not in {RunStatus.WAITING_USER, RunStatus.CANCELLED,
+                              RunStatus.FAILED, RunStatus.INTERRUPTED}:
+        raise RunProjectionError("Restart requires a settled, explicitly owned workspace")
+    return dataclasses.replace(current, status=RunStatus.RUNNING, phase=RunPhase.EXECUTING,
+                               finished_at=None, error_code=None, error_message=None)
+
+
+def _on_candidate_prepared(current: RunRecord, event: RunEvent) -> RunRecord:
+    return dataclasses.replace(current, status=RunStatus.WAITING_USER, phase=RunPhase.READY,
+                               workspace_snapshot=dict(event.payload))
+
+
+def _on_candidate_applied(current: RunRecord, event: RunEvent) -> RunRecord:
+    if not current.workspace_snapshot or current.workspace_snapshot.get("state") != "prepared":
+        raise RunProjectionError("Candidate is not prepared")
+    return dataclasses.replace(current, status=RunStatus.SUCCEEDED, phase=RunPhase.APPLIED,
+        finished_at=event.created_at,
+        workspace_snapshot={**current.workspace_snapshot, "state": "applied", **event.payload})
+
+
+def _on_candidate_rolled_back(current: RunRecord, event: RunEvent) -> RunRecord:
+    if not current.workspace_snapshot or current.workspace_snapshot.get("state") != "applied":
+        raise RunProjectionError("Candidate is not applied")
+    return dataclasses.replace(current, phase=RunPhase.RESTORED,
+        workspace_snapshot={**current.workspace_snapshot, "state": "rolled_back"})
+
+
 _HANDLERS: dict[str, _Handler] = {
+    "candidate.prepared": _on_candidate_prepared,
+    "candidate.applied": _on_candidate_applied,
+    "candidate.rolled_back": _on_candidate_rolled_back,
+    "workspace.saved": _on_workspace_saved,
+    "run.restarted": _on_restarted,
     RunEventType.RUN_CREATED: _on_run_created,
     RunEventType.RUN_STARTED: _on_run_started,
     RunEventType.RUN_PHASE_CHANGED: _on_phase_changed,

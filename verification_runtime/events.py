@@ -48,14 +48,14 @@ class VerificationCompleted(VerificationEvent):
 
 @dataclass(frozen=True, slots=True)
 class VerificationInterrupted(VerificationEvent):
-    """A cancellation was observed mid-verification (between or during a
-    check, via a CancellationToken); the in-flight check's process tree has
-    already been terminated by the time this is emitted. Terminal for this
-    verification attempt, exactly like VerificationCompleted -- this is the
-    "the run was cancelled, not that verification failed" outcome."""
+    """Cancellation was observed mid-verification. The matching check ID and
+    producer_quiescent flag record whether a supervisor authenticated process
+    tree reaping; cancellation is never represented as a PASS result."""
 
     plan_id: str
     reason: str
+    check_id: str | None = None
+    producer_quiescent: bool = False
 
 
 VerificationLifecycleEvent: TypeAlias = (

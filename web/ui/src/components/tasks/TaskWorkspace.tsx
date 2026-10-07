@@ -5,6 +5,7 @@ import { useWorkspace } from "@/state/workspace";
 import { useUi } from "@/state/ui";
 import { useEditor } from "@/state/editor";
 import { AiPanel } from "@/components/aipanel/AiPanel";
+import { CandidatePanel } from "@/components/tasks/CandidatePanel";
 import { Button } from "@/components/ui";
 
 function statusLabel(status: string, stage: string, readOnly = false, historicalStatus: string | null = null) {
@@ -29,6 +30,7 @@ export function TaskWorkspace() {
   const selectRun = useRun((s) => s.selectRun);
   const refreshRuns = useRun((s) => s.refreshRuns);
   const retryHistory = useRun((s) => s.retryHistory);
+  const restartHistory = useRun((s) => s.restartHistory);
   const historyUnavailable = useRun((s) => s.historyUnavailable);
   const selectTask = (id: string) => {
     if (useRun.getState().selectedRunId !== id && useEditor.getState().diff) useEditor.getState().closeDiff();
@@ -99,12 +101,14 @@ export function TaskWorkspace() {
                 {(run.uncertain || run.pending) && <span className="mt-1 flex items-center gap-1 text-warn" style={{ fontSize: "var(--t-caption)" }}><AlertTriangle size={12}/>{run.uncertain ? "Durum doğrulanamadı" : "İstek bekliyor; yenileyerek doğrulayın"}</span>}
               </button>;
             })}
+            <CandidatePanel />
           </div>
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {selectedRunId && runs[selectedRunId]?.readOnly && <div role="status" className="shrink-0 border-b border-warn/30 bg-warn/5 px-4 py-2 text-warn" style={{ fontSize: "var(--t-caption)" }}>
-            Önceki oturumun kaydı; bu oturumda uygulanamaz/devam ettirilemez.
+            Önceki oturumun kaydı; eski öneriler uygulanamaz. Devam etmek yeni doğrulama gerektirir.
             {runs[selectedRunId]?.authoritativeTask !== false && <Button className="ml-2" variant="secondary" size="sm" onClick={() => { const old = runs[selectedRunId]; if (!root || old.root !== root || useWorkspace.getState().root !== old.root || useRun.getState().selectedRunId !== old.runId) return; createDraft(); setTask(old.task); setProviderId(old.providerId); }}>Yeni görev taslağına taşı</Button>}
+            {runs[selectedRunId]?.continuationAvailable && <Button className="ml-2" variant="secondary" size="sm" onClick={() => void restartHistory(selectedRunId)}>Çalışma alanından devam et</Button>}
             {runs[selectedRunId]?.retryAvailable && <Button className="ml-2" variant="secondary" size="sm" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void retryHistory(selectedRunId); }} disabled={runs[selectedRunId]?.pending || runs[selectedRunId]?.uncertain}>Yeniden çalıştır</Button>}
           </div>}
           <div className="min-h-0 flex-1"><AiPanel embedded /></div>

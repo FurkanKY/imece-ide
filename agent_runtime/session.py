@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any
 
 from agent_runtime.backend import ModelBackend, ModelSession
-from agent_runtime.cancellation import CancellationToken
+from agent_runtime.cancellation import CancellationToken, OperationCancelledError
 from agent_runtime.events import (
     AgentEventSink,
     ApprovalRequested,
@@ -281,6 +281,9 @@ class AgentSession:
         if decision.approved:
             try:
                 result = self._execute_prepared(pending.model_call, prepared, grant=True)
+            except OperationCancelledError as exc:
+                self._emit_cancelled_tool_failure(pending.model_call, exc)
+                raise
             except ToolApprovalRequiredError as exc:
                 self._emit_nonrecoverable_tool_failure(pending.model_call, "approval", exc)
                 self._fail_internal_tool(exc)
@@ -435,6 +438,17 @@ class AgentSession:
             raise AgentToolRuntimeError("Tool event için aktif turn yok.")
         return self._model_turns, self._current_turn_id, self._tool_item_id(model_call.call_id)
 
+    def _emit_cancelled_tool_failure(self, model_call: ModelToolCall, exc: Exception) -> None:
+        turn_index, turn_id, item_id = self._tool_event_context(model_call)
+        metadata = {}
+        if model_call.name == "run_process" and getattr(exc, "producer_quiescent", False) is True:
+            metadata = {"producer_quiescent": True}
+        self._emit(ToolFailed(
+            self._execution_id, turn_index, turn_id, item_id, model_call.call_id,
+            model_call.name, "execute", False, type(exc).__name__,
+            str(exc).replace("\x00", "")[:2000], metadata,
+        ))
+
     def _emit_nonrecoverable_tool_failure(
         self, model_call: ModelToolCall, stage: str, exc: Exception
     ) -> None:
@@ -508,6 +522,9 @@ class AgentSession:
 
             try:
                 result = self._execute_prepared(model_call, prepared, grant=False)
+            except OperationCancelledError as exc:
+                self._emit_cancelled_tool_failure(model_call, exc)
+                raise
             except ToolApprovalRequiredError:
                 pending.prepared = prepared
                 pending.model_call = model_call

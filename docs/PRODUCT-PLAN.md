@@ -128,43 +128,117 @@ What the implemented default flow actually does:
 
 ### M3 — Durable tasks and results, controlled integration — **in progress (2026-10-06)**
 
-- The current bounded slice is **read-only historical reopening** of persisted
-  native-agent task/result records after restart. This is in development; it
-  does not restore an owned worker or authorize historical proposals.
-- **Safe continuation, durable pending-worktree adoption, and verified
-  CombinedCandidate integration with rollback remain unfinished.**
+- The development branch implements bounded history/retry, durable native
+  workspace descriptors, explicit restart continuation, and verified native
+  CombinedCandidate apply/rollback. **M3 acceptance is still open**; fixture
+  coverage is not supported-platform/native-desktop acceptance.
+- Workspace descriptors and quiescent fingerprints are recorded in the existing
+  canonical SQLite events/projection; no new database or schema migration is
+  introduced. Kernel-held leases prevent concurrent ownership. Startup never
+  prunes historical worktrees or automatically adopts/resumes a task.
+- Orderly close cancels/drains the worker and retains pending work. On Linux,
+  `ProcessRunner` uses a dedicated `PR_SET_CHILD_SUBREAPER` supervisor; only after
+  root exit and `waitpid(-1) == ECHILD` does it emit a private nonce-bound receipt.
+  Native process-tool and verification completion events carry that receipt;
+  sealing requires positive receipts for every started command/check. Windows
+  workspace fingerprints use handle-anchored no-reparse traversal. Windows
+  `ProcessRunner` assigns suspended commands to a non-breakaway kill-on-close
+  Job Object before resuming and emits a receipt after kernel active-process
+  count reaches zero. Linux ACP uses a byte-preserving supervisor proxy; Windows
+  ACP config travels over a dedicated inherited pipe and agent stdio is passed
+  through under the same Job containment. Native SDK/file-only histories need no process
+  receipt. These are engineering implementations, not cross-platform acceptance. When positively sealed, explicit continuation claims that
+  same workspace and RunID/TaskID, checks project/Git/source/content identity,
+  and creates a fresh execution and verification. Historical proposal/checkpoint
+  authority is not revived. A free lock without a quiescent seal does not prove
+  orphaned subprocesses died: unsealed abrupt-crash workspaces fail closed.
 - The `m3-task-history` development branch reopens bounded native-agent history
   from the existing SQLite store. Its bounded retry slice explicitly reruns
   only a latest failed/cancelled attempt in the same task/provider chain, using
   the canonical prompt, a new RunID/attempt, and a fresh isolated workspace.
-  SQLite transaction checks serialize concurrent retry admission. Retry does
-  not transfer proposals, checkpoints, credentials, mentions, or worktree
-  authority; active, interrupted, malformed, changed-provider, and otherwise
-  ineligible histories fail closed. Copying an older task still creates a new
-  draft without automatically starting a run.
+  That workspace snapshots the current Git-visible source state (tracked
+  changes and non-ignored untracked files included by the existing workspace
+  contract), never the old attempt's worktree. SQLite transaction checks
+  serialize concurrent retry admission. Retry does not transfer proposals,
+  checkpoints, credentials, mentions, or worktree authority; active, interrupted,
+  malformed, changed-provider, and otherwise ineligible histories fail closed.
+  Copying an older task still creates a new draft without automatically starting
+  a run.
 - Same-database restart fixtures, independent-connection retry races, and
   controlled browser history/retry responses are tested separately. Neither
   substitutes for native desktop restart or actual-provider acceptance. The
   focused checks are `node scripts/run-history-acceptance.mjs` and
   `node scripts/run-retry-acceptance.mjs` from `web/ui`.
-- A **verified CombinedCandidate** is integrated through an explicit,
-  controlled decision path with **rollback**.
-- M3 acceptance remains open: close the app mid-task, safely continue the task,
-  integrate a verified candidate, and roll it back cleanly.
+- One or two explicitly selected owned native results sharing a clean,
+  top-level committed baseline can form a CombinedCandidate outside Source.
+  Conflicts are surfaced; verification must have unchanged, complete fingerprints
+  and PASS before explicit apply. Apply writes exact bytes/modes with a checkpoint;
+  explicit rollback checks source/checkpoint provenance and restores bytes/modes.
+  Candidate receipts and apply/rollback history survive reopening SQLite.
+- The combined fixture/UI check is `node scripts/m3-acceptance.mjs`; details and
+  reproducible acceptance gates are in [M3-ACCEPTANCE.md](M3-ACCEPTANCE.md).
+- M3 acceptance remains open: actual-provider/supported-platform desktop
+  close mid-task → explicit continuation → verified candidate → apply → rollback.
+  An isolated Linux QtWebEngine `ShellWindow.closeEvent` fixture verifies orderly
+  drain, retained worktree, same-database reopen and same-ID continuation; it is
+  not actual-provider/platform release acceptance. The Win32 filesystem walker
+  and Job Object supervisor are not yet exercised on a Windows runner in this
+  session; Windows ACP Job-backed stdio integration is implemented but likewise
+  awaits execution on a real Windows runner.
+  Linux subreaper supervision covers process tools, deterministic checks and ACP
+  CLI producers. Authenticated cancellation receipts can seal interrupted work
+  without turning cancellation into PASS; non-Linux process-backed work remains
+  fail-closed.
 
-### M4 — Two people: secure LAN pairing and control — **not started**
+### M4 — Two people: secure LAN pairing and control — **in progress (engineering slices)**
 
-- **Secure LAN pairing and control**, plus **proposal transport on a channel
-  distinct from control/events**. Control/coordination and code proposals stay
-  **logically distinct** — the separation is a property of the model, not a
-  premature ban on any particular transport. Whether they may ride the same
-  wire is a concrete design question deferred to M4, not a rule decided here.
-- Acceptance: two machines on a LAN pair with authentication, exchange control
-  state, transport a proposal on the separate channel, and integrate it
+- The opt-in first engineering slice adds TLS-only, literal-private-IPv4 control
+  listeners, out-of-band certificate-pinned clients, bounded one-use member
+  invitations, and finite authenticated metadata snapshot/task-status calls.
+  Existing loopback HTTP remains loopback-only and unchanged by default. No
+  code/proposal bytes are accepted on this control transport.
+- Pair credentials are ephemeral and bound to a preselected member identity;
+  member role checks stay in Coordinator. Listener shutdown revokes identities
+  created by that listener. No listener starts automatically or from import.
+- The second engineering slice adds an opt-in, separately bound TLS proposal
+  listener/client. Its only code routes explicitly publish one strict bounded
+  artifact or fetch one named immutable ID; the existing control channel remains
+  metadata-only. Authenticated principal must equal proposal owner; existing
+  provenance, CAS, duplicate-ID and atomic private-ref publication checks remain
+  authoritative. Revocation fences both listeners. Transport never writes Source;
+  candidate assembly/integration remains a separate explicit decision. See
+  [M4-PROPOSAL-CHANNEL.md](M4-PROPOSAL-CHANNEL.md).
+- A third engineering slice exposes explicit owner-side LAN startup, two-listener
+  lifecycle, configured-member invitation/revocation and guarded out-of-band invite
+  display/copy in the existing native UI. Status exposes listener endpoints and
+  certificate pin, never private keys or credentials. Legacy loopback secret
+  sharing/local handoff is refused in LAN mode. This is still experimental UI,
+  not two-machine acceptance; see [M4-OWNER-LAN.md](M4-OWNER-LAN.md).
+- Participant join/manual metadata refresh/disconnect and explicit selected-file
+  preview/publication/single-ID receipt fetch are implemented. Ambiguous publication
+  retains its immutable ID for checksum reconciliation, without blind retries.
+  Owner-selected shared proposals now use durable CombinedCandidate verification,
+  confirmed Source apply and checkpoint rollback, including the existing editor
+  refresh path. The workflow and boundary review are in [M4-DELIVERY.md](M4-DELIVERY.md).
+- Real two-machine native LAN acceptance remains open. Separate-checkout pinned
+  loopback TLS, browser fixtures and the operational threat review are engineering
+  evidence, not LAN deployment acceptance. At the user’s direction M5 packaging
+  engineering has started while these acceptance items remain open.
+- Acceptance remains: two machines on a LAN pair with authentication, exchange
+  control state, transport a proposal on the separate channel, and integrate it
   explicitly — with no unauthenticated listener ever exposed.
 
-### M5 — Supported-platform acceptance and packaged release — **not started**
+### M5 — Supported-platform acceptance and packaged release — **in progress (packaging engineering)**
 
+- The user explicitly authorized M5 engineering with M1/M3/M4 acceptance still
+  deferred/open. Frozen process/ACP dispatch, structural package preflight,
+  per-file SHA-256/link manifests, Linux XDG paths and platform-specific
+  Node/PTY payloads, offline license inventory and isolated Windows/Linux smoke
+  workflow preparation form the first slices. A local Linux manual-test archive
+  now passed native Wayland smoke and repo-independent extraction testing; see
+  [M5-PACKAGING.md](M5-PACKAGING.md) and [MANUAL-ACCEPTANCE.md](MANUAL-ACCEPTANCE.md).
+  Current Windows package execution, clean-machine acceptance and publication
+  are not claimed.
 - **End-to-end acceptance on the supported platform set** (Windows first,
   Linux as supported today), then **packaged releases**.
 - Acceptance: a clean machine installs the package, runs a real task on a real
@@ -172,9 +246,11 @@ What the implemented default flow actually does:
   platform.
 
 **Value ladder:** M1–M3 are useful **solo**. M4 makes it **team-complete**.
-M5 is the **release** gate. M1's acceptance gate is still open (deferred,
-tracked); M2 remains in development and M3's read-only history slice is in
-progress.
+M5 is the **release** gate. M1 actual-provider/platform acceptance remains a
+separate deferred, tracked packaged-release gate; its deferral permits M5
+engineering, not acceptance or publication. M3 remains in progress; its Windows and
+native-desktop acceptance is explicitly deferred, not completed. M4's engineering
+slices do not close its two-machine/proposal acceptance.
 
 ## 4. What is explicitly not v1 scope
 
@@ -239,11 +315,15 @@ Already implemented and deliberately reused rather than replaced:
   changes**, not a published main-branch delivery yet. Local mock acceptance
   exercises the visible UI, but the complete two-run frontend/Qt-host flow on
   supported desktop platforms and actual providers remains **unverified**.
-- **M3 is not done.** Read-only native-agent history reopening is in progress;
-  safe continuation, durable pending-worktree adoption, task-preserving re-run
-  and CombinedCandidate integration/rollback acceptance remain unfinished.
-- **M4 and M5 are not started. M2 is in development, not finished.** M1's
-  deferred acceptance gate remains open and stays a release gate before M5.
+- **M3 is not closed.** Its bounded engineering flows are implemented and
+  fixture-tested. Native-desktop acceptance, real Windows execution of the
+  newly implemented no-reparse walker and process/ACP Job supervisors, and
+  unsealed abrupt-crash producer handling remain explicit gates/limits; see
+  [M3-ACCEPTANCE.md](M3-ACCEPTANCE.md).
+- **M4 engineering includes explicit participant delivery and verified owner
+  integration; real two-machine acceptance remains open. M5 packaging engineering
+  has started with a local Linux manual-test package and Wayland smoke.** M1's
+  deferred acceptance remains a packaged-release gate, not a ban on M5 engineering.
 
 ### M2 engineering checkpoint — development branch only
 
@@ -294,9 +374,11 @@ Already implemented and deliberately reused rather than replaced:
   product.** The metadata-first session, explicit private proposals, combined
   candidates and the loopback control core exist and are locally exercised
   ([COLLABORATION.md](COLLABORATION.md)). They are **not integrated with the
-  default single-agent flow** and are **not** M4's two-machine product. The
-  loopback listener is `127.0.0.1`-only; **no LAN pairing, LAN/WAN deployment or
-  TLS exists**, and two-computer, LAN and Windows end-to-end are **unverified**.
+  default single-agent flow** and are **not** M4's two-machine product. An
+  explicitly constructed TLS LAN control/proposal library slice exists, but the
+  default listener remains loopback-only; there is no automatic LAN activation,
+  production certificate/pin UI or WAN support. Two-computer/LAN and Windows
+  end-to-end remain **unverified**.
 - The default role-free flow **rejects** collaboration **SharedContext
   explicitly** (`collab_unsupported`) rather than silently enabling it. A
   silent default would be the failure mode this plan forbids.
@@ -410,8 +492,14 @@ What that scope actually exercises:
    because those environments were unavailable. It is a **release gate before
    M5** and does not block M2. M1 stays **IN PROGRESS, not closed** — the
    deferral is a scheduling fact, not an acceptance.
-3. **No new collaboration features** while M2 is in progress; only **blocking
-   bug fixes** in existing features. The existing collaboration foundation is
-   frozen as-is until M4 owns it.
-4. M3 read-only history is **in progress**, not complete; then its remaining
-   safe continuation/integration acceptance, followed by M4 and M5.
+3. The collaboration feature freeze applied during M2. The user has explicitly
+   authorized M4 work while M3's Windows/native acceptance is deferred. Keep new
+   collaboration scope within M4's explicit opt-in, authenticated and bounded
+   slices; do not silently enable SharedContext or conflate control with code
+   proposal transport.
+4. M3's bounded engineering flows are implemented on the development branch,
+   with Windows/native acceptance **explicitly deferred and not accepted/closed**.
+   Per user direction, do not mark M3 complete; continue bounded M4 engineering
+   in parallel without weakening M3's fail-closed platform checks. M4's real
+   two-machine and separate-proposal-channel acceptance, then M3/M1 platform
+   gates and M5 release acceptance, remain outstanding.

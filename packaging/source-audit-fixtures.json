@@ -1,0 +1,54 @@
+{
+  "fixtures": [
+    {
+      "file": "tests/test_agent_security_regressions.py",
+      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "rules": [
+        "generic-api-key"
+      ],
+      "sha256": "d03089c166e6a9592a912ea641282f67d648561c43085da5e955ea3333542c5e"
+    },
+    {
+      "file": "tests/test_bridge.py",
+      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "rules": [
+        "generic-api-key"
+      ],
+      "sha256": "e3032ba4a1441e844e6a9db0b90778483f7bbe25d81d42ad002933f73b54fde9"
+    },
+    {
+      "file": "tests/test_collab_coordination_regressions.py",
+      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "rules": [
+        "generic-api-key"
+      ],
+      "sha256": "9896145ed1240ecd9df4c211bae662c1565cec501363d6f7124fd3222400da5b"
+    },
+    {
+      "file": "tests/test_collab_product_changes.py",
+      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "rules": [
+        "generic-api-key"
+      ],
+      "sha256": "b64ff1850af5c3383e52e05d020857ca4766cc9eff39fbfaced6a77e992b5687"
+    },
+    {
+      "file": "tests/test_decision_remote_state.py",
+      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "rules": [
+        "aws-access-token",
+        "generic-api-key",
+        "private-key"
+      ],
+      "sha256": "15214fff9f884577050f6dffa6ee6b5632ab9a8e8eaee11b61b67479da44cd33"
+    },
+    {
+      "file": "tests/test_packaging_audit.py",
+      "reason": "Manually reviewed synthetic tokens/constructed non-key PEM markers in security/redaction regression tests; not usable credentials",
+      "rules": [
+        "private-key"
+      ],
+      "sha256": "c7da7e3928b88722c02b918bf595676d2575033e35b5a75ea8ec87397e4502d8"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "file": "_internal/libgnutls.so.30",
+      "sha256": "ddbae2995750875c07bc218d12a062d73f8250678f54dedda7e9be5068781c98",
+      "rule": "pem_private_key",
+      "reason": "Public GnuTLS 3.8.3 cryptographic self-test fixtures, not user credentials. Exact artifact library is byte-identical to Ubuntu libgnutls30t64 3.8.3-1.1ubuntu3.6. All ten embedded PEM blocks were verified byte-for-byte against the public self-test source; different library bytes require new review.",
+      "publicSource": "https://raw.githubusercontent.com/gnutls/gnutls/3.8.3/lib/crypto-selftests-pk.c",
+      "publicSourceSha256": "0199a5b05732d825e235001455afa1d54178d8508da1fd2e0eb8a5ef271405b8"
+    }
+  ]
+}

@@ -25,7 +25,8 @@ _ERROR_MESSAGES = {
     "symlink_metadata_path": "Sembolik bağlantılı metadata yolu kabul edilmiyor.",
     "source_head_mismatch": "Kaynak proje HEAD değeri oturumla eşleşmiyor.",
     "invalid_members": "Üye listesi oturumla eşleşmiyor.", "invalid_port": "Port geçersiz.",
-    "not_configured": "Önce oturumu yapılandırın.", "start_failed": "Loopback sunucusu başlatılamadı.",
+    "not_configured": "Önce oturumu yapılandırın.", "start_failed": "Sunucu başlatılamadı.",
+    "invalid_certificate": "TLS sertifika dosyası geçersiz.", "invite_failed": "Davet oluşturulamadı.",
     "session_identity_mismatch": "Oturum kimliği metadata ile eşleşmiyor.",
     "cleanup_failed": "Sunucu kapatılamadı; yeniden deneyin.", "not_running_or_member": "Oturum çalışmıyor veya üye geçersiz.",
     "already_shared": "Bu üyeye bu çalışma döneminde zaten erişim verildi.",
@@ -313,9 +314,84 @@ def _start(params, ctx):
     return None
 
 
+@handler("collab.owner.startLAN")
+def _start_lan(params, ctx):
+    _params(params, {"bindAddress", "certificate", "privateKey", "controlPort", "proposalPort"})
+    address = _text(params, "bindAddress", 64)
+    certificate = _text(params, "certificate", 4096)
+    private_key = _text(params, "privateKey", 4096)
+    control_port, proposal_port = params.get("controlPort", 0), params.get("proposalPort", 0)
+    if any(type(port) is not int or not 0 <= port <= 65535 for port in (control_port, proposal_port)):
+        raise BridgeError("owner_invalid", "Port geçersiz.")
+    if control_port and control_port == proposal_port:
+        raise BridgeError("owner_invalid", "Kontrol ve öneri portları farklı olmalıdır.")
+    project = _project(); root, generation = project.root, state.project_generation()
+    _submit(ctx, root, generation, lambda manager, captured: manager.start(
+        captured, port=control_port, proposal_port=proposal_port, allow_lan=True,
+        bind_address=address, certificate=certificate, private_key=private_key),
+        stale_cleanup=lambda manager, result: manager.stop(
+            expected_epoch=result["epoch"], expected_project_root=result["projectRoot"]))
+    return None
+
+
+@handler("collab.owner.issueInvite")
+def _issue_invite(params, ctx):
+    _params(params, {"memberId", "expectedEpoch"})
+    member = _text(params, "memberId", 128)
+    project = _project(); root, generation = project.root, state.project_generation()
+    manager = state.peek_owner_manager()
+    if manager is None:
+        raise BridgeError("owner_not_running", "Sahip oturumu çalışmıyor.")
+    epoch = params.get("expectedEpoch", manager.status()["epoch"])
+    if type(epoch) is not int or epoch < 0:
+        raise BridgeError("owner_invalid", "Oturum dönemi geçersiz.")
+    _submit(ctx, root, generation, lambda m, captured: m.issue_lan_invitation(
+        member, project_root=captured, expected_epoch=epoch),
+        stale_cleanup=lambda m, result: m.discard_lan_invitation(
+            result["code"], project_root=root, expected_epoch=result["epoch"]))
+    return None
+
+
+@handler("collab.owner.revokeMember")
+def _revoke_member(params, ctx):
+    _params(params, {"memberId", "expectedEpoch"})
+    member = _text(params, "memberId", 128)
+    project = _project(); root, generation = project.root, state.project_generation()
+    manager = state.peek_owner_manager()
+    if manager is None:
+        raise BridgeError("owner_not_running", "Sahip oturumu çalışmıyor.")
+    epoch = params.get("expectedEpoch", manager.status()["epoch"])
+    if type(epoch) is not int or epoch < 0:
+        raise BridgeError("owner_invalid", "Oturum dönemi geçersiz.")
+    _submit(ctx, root, generation, lambda m, captured: m.revoke_lan_member(
+        member, project_root=captured, expected_epoch=epoch), stale_read=True)
+    return None
+
+
+@handler("collab.owner.cancelInvite")
+def _cancel_invite(params, ctx):
+    _params(params, {"code", "projectRoot", "expectedEpoch"})
+    code = _text(params, "code", 128)
+    root = _text(params, "projectRoot", 4096)
+    epoch = params.get("expectedEpoch")
+    if type(epoch) is not int or epoch < 0:
+        raise BridgeError("owner_invalid", "Oturum dönemi geçersiz.")
+    manager = state.peek_owner_manager()
+    if manager is not None:
+        _submit(ctx, root, state.project_generation(), lambda m, captured: (
+            m.discard_lan_invitation(code, project_root=captured, expected_epoch=epoch) or {}))
+        return None
+    return {}
+
+
 @handler("collab.owner.stop")
 def _stop(params, ctx):
-    _params(params, set())
+    _params(params, {"expectedEpoch", "expectedProjectRoot"})
+    epoch, expected_root = params.get("expectedEpoch"), params.get("expectedProjectRoot")
+    if epoch is not None and (type(epoch) is not int or epoch < 0):
+        raise BridgeError("owner_invalid", "Oturum dönemi geçersiz.")
+    if expected_root is not None:
+        expected_root = _text(params, "expectedProjectRoot", 4096)
     manager = state.peek_owner_manager()
     if manager is None:
         return {"state": "unconfigured", "projectRoot": None, "sessionId": None,
@@ -324,7 +400,9 @@ def _stop(params, ctx):
                 "hubPath": None, "endpoint": None, "epoch": 0, "exportedMembers": [],
                 "retryRequired": False, "createdPaths": []}
     status = manager.status()
-    _submit(ctx, status.get("projectRoot"), state.project_generation(), lambda m, _root: m.stop())
+    _submit(ctx, status.get("projectRoot"), state.project_generation(), lambda m, _root: (
+        m.stop() if epoch is None and expected_root is None else
+        m.stop(expected_epoch=epoch, expected_project_root=expected_root)))
     return None
 
 

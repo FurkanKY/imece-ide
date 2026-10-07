@@ -223,6 +223,7 @@ class CanonicalAcpEventSink:
                     "permission_request_count": result.permission_request_count,
                     "session_close_supported": result.session_close_supported,
                     "session_close_succeeded": result.session_close_succeeded,
+                    "producer_quiescent": result.producer_quiescent is True,
                 },
             )
         )
@@ -234,6 +235,7 @@ class CanonicalAcpEventSink:
         *,
         error_type: str | None = None,
         message: str | None = None,
+        producer_quiescent: bool = False,
     ) -> None:
         """Persist the single execution.failed event without inventing a session.
 
@@ -252,6 +254,7 @@ class CanonicalAcpEventSink:
                     "error_type": error_type or type(error).__name__,
                     "message": (message if message is not None else str(error))
                     .replace("\x00", "")[:MAX_CANONICAL_ACP_TEXT_CHARS],
+                    "producer_quiescent": producer_quiescent is True,
                 },
             )
         )

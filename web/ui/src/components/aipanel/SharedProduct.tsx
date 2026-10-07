@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bridge, BridgeError, ProductBoard, ProductChangeEvent, ProductChanges, ProductProposals } from "@/bridge";
+import { bridge, BridgeError, CandidateReceipt, ProductBoard, ProductChangeEvent, ProductChanges, ProductProposals } from "@/bridge";
 import { Button } from "@/components/ui";
 import { ProductHistory } from "./ProductHistory";
 import { CreateSharedTask } from "./CreateSharedTask";
@@ -7,6 +7,8 @@ import { useOwner } from "@/state/owner";
 import { useDelivery } from "@/state/delivery";
 import { useRun } from "@/state/run";
 import { useWorkspace } from "@/state/workspace";
+import { useCandidate } from "@/state/candidate";
+import { CandidatePanel } from "@/components/tasks/CandidatePanel";
 
 const input = "min-w-0 w-full rounded-[var(--r-sm)] border border-border-w bg-field px-2 py-1.5 text-text outline-none focus-visible:border-accent";
 type TaskStatus = ProductBoard["tasks"][number]["status"];
@@ -66,6 +68,9 @@ export function SharedProduct({ onNavigate }: { onNavigate: (tab: "owner" | "sha
   const [taskConsent, setTaskConsent] = useState<TaskConsent>({});
   const [proposals, setProposals] = useState<ProductProposals | null>(null);
   const [proposalsBusy, setProposalsBusy] = useState(false);
+  const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([]);
+  const [sharedReceipt, setSharedReceipt] = useState<CandidateReceipt | null>(null);
+  const [sharedBusy, setSharedBusy] = useState(false);
   const [writeBusy, setWriteBusy] = useState(false);
   const [changes, setChanges] = useState<ProductChangeEvent[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
@@ -96,7 +101,7 @@ export function SharedProduct({ onNavigate }: { onNavigate: (tab: "owner" | "sha
     setWriteBusy(false); setProposalsBusy(false);
     boardRef.current = null; setBoard(null); setError(""); setFresh(false); setCheckedAt(null);
     setGoal(""); setDecisions("[]"); setInterfaces("{}"); setDirty(false); dirtyRef.current = false;
-    draftRevision.current = null; setConsent(false); setTaskChoice({}); setTaskConsent({}); setProposals(null);
+    draftRevision.current = null; setConsent(false); setTaskChoice({}); setTaskConsent({}); setProposals(null); setSelectedProposalIds([]); setSharedReceipt(null); setSharedBusy(false);
     setChanges([]); setHistoryCursor(null); setHistoryAnchor(null); setHistoryMore(false); setHistoryError(""); setHistoryBusy(false); setHistoryDropped(0); setHistoryResetAvailable(false);
   }, []);
 
@@ -119,7 +124,7 @@ export function SharedProduct({ onNavigate }: { onNavigate: (tab: "owner" | "sha
       }
       const previous = boardRef.current;
       if (previous && (previous.sessionId !== next.sessionId || previous.epoch !== next.epoch)) { clearSession(); }
-      else if (previous && previous.revision !== next.revision) { setConsent(false); setTaskConsent({}); setProposals(null); }
+      else if (previous && previous.revision !== next.revision) { setConsent(false); setTaskConsent({}); setProposals(null); setSelectedProposalIds([]); setSharedReceipt(null); }
       boardRef.current = next; setBoard(next); setFresh(true); setCheckedAt(Date.now()); setError("");
       setHistoryAnchor((anchor) => anchor ?? next.revision);
       setTaskChoice((old) => Object.fromEntries(next.tasks.map((task) => [task.id,
@@ -230,9 +235,48 @@ export function SharedProduct({ onNavigate }: { onNavigate: (tab: "owner" | "sha
     proposalsFlight.current = true; setProposalsBusy(true); setError("");
     try {
       const value = await bridge.call("collab.owner.proposals", { expectedSessionId: captured.sessionId });
-      if (id === proposalId.current && identityMatches(captured, token) && value.sessionId === captured.sessionId && value.epoch === captured.epoch) setProposals(value);
+      if (id === proposalId.current && identityMatches(captured, token) && value.sessionId === captured.sessionId && value.epoch === captured.epoch) {
+        setProposals(value); setSelectedProposalIds([]); setSharedReceipt(null);
+      }
     } catch { if (id === proposalId.current && identityMatches(captured, token)) setError("Teklif metadata'sı yüklenemedi."); }
     finally { if (id === proposalId.current) { proposalsFlight.current = false; if (mounted.current && token === generation.current) setProposalsBusy(false); } }
+  };
+
+  const prepareShared = async () => {
+    const captured = boardRef.current;
+    const selected = selectedProposalIds;
+    if (!captured || !fresh || !identityMatches(captured, generation.current) || !proposals || operation.current || selected.length < 1 || selected.length > 2) return;
+    const valid = proposals.sessionId === captured.sessionId && proposals.baseCommit === captured.baseCommit &&
+      proposals.epoch === captured.epoch && proposals.revision === captured.revision && proposals.contextHash === captured.contextHash &&
+      selected.every((id) => proposals.proposals.some((p) => p.proposalId === id && !p.staleContext &&
+        p.sessionId === captured.sessionId && p.baseCommit === captured.baseCommit &&
+        p.contextHash === captured.contextHash));
+    if (!valid) { setSelectedProposalIds([]); setSharedReceipt(null); setError("Teklifler güncel pano revizyonuyla eşleşmiyor; yeniden yükleyip seçin."); return; }
+    const token = generation.current, op = ++operationId.current;
+    operation.current = true; setSharedBusy(true); setSharedReceipt(null); setError("");
+    try {
+      const { candidate: receipt } = await bridge.call("candidate.prepareShared", {
+        projectRoot: captured.projectRoot, expectedSessionId: captured.sessionId, expectedEpoch: captured.epoch,
+        expectedRevision: captured.revision, proposalIds: selected, verify: true,
+      });
+      if (!identityMatches(captured, token)) return;
+      if (!receipt) { setError("Birleşik aday yanıtı boş; doğrulanmadı."); return; }
+      const provenance = receipt.sharedProvenance;
+      if (receipt.projectRoot !== captured.projectRoot || !provenance ||
+          provenance.sessionId !== captured.sessionId || provenance.epoch !== captured.epoch ||
+          provenance.revision !== captured.revision || provenance.contextHash !== captured.contextHash ||
+          provenance.proposalIds.length !== selected.length || selected.some((id) => !provenance.proposalIds.includes(id)) ||
+          receipt.verification.status !== "pass" || receipt.verification.fingerprint_complete !== true || receipt.verification.changed_content !== false) {
+        setError("Birleşik adayın kimliği veya doğrulama kanıtı beklenen seçimle eşleşmiyor; yanıt doğrulanmadı.");
+        return;
+      }
+      setSharedReceipt(receipt);
+      await useCandidate.getState().refresh();
+    } catch {
+      if (identityMatches(captured, token)) setError("Birleşik aday hazırlanamadı veya doğrulanamadı; teklifleri yeniden yükleyip kontrol edin.");
+    } finally {
+      if (op === operationId.current) { operation.current = false; if (mounted.current && token === generation.current) setSharedBusy(false); }
+    }
   };
 
   const loadChanges = async () => {
@@ -274,6 +318,8 @@ export function SharedProduct({ onNavigate }: { onNavigate: (tab: "owner" | "sha
   const candidateMatches = !!candidate && channelMatches && candidate.session_id === board.sessionId && candidate.base_commit === board.baseCommit;
   const contextMatches = fresh && !!candidate && candidate.context_hash === board.contextHash;
   const verified = !!candidate && candidate.verification.status === "pass" && candidate.verification.fingerprint_complete === true && candidate.verification.changed_content === false && contextMatches;
+  const proposalsCurrent = !!proposals && proposals.sessionId === board.sessionId && proposals.baseCommit === board.baseCommit &&
+    proposals.epoch === board.epoch && proposals.revision === board.revision && proposals.contextHash === board.contextHash;
   return <div className="h-full min-w-0 overflow-y-auto p-3 text-text2">
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="min-w-0"><b>Ortak ürün · sahip görünümü</b><p className="break-all text-faint" style={{ fontSize: "var(--t-caption)" }}>{board.sessionId} · rev {board.revision} · dönem {board.epoch} · {board.state}</p></div><Button size="sm" onClick={() => void refresh()} loading={loading}>Yenile</Button></div>
     <p className="mb-2 text-faint" style={{ fontSize: "var(--t-caption)" }}>Geçici sahip görünümü: görünürken en çok 5 saniyede bir yenilenir; native SSE değildir. Bu pano görev çalıştırmaz, uygulamaz, doğrulamaz veya yayımlamaz.</p>
@@ -289,7 +335,13 @@ export function SharedProduct({ onNavigate }: { onNavigate: (tab: "owner" | "sha
      <section className="grid gap-2 py-3"><b>Görev panosu · kaynak durum</b>{board.tasks.map((task) => <article key={task.id} className="min-w-0 border border-border-w p-2"><b className="break-all">{task.id} · {task.owner}</b><p className="break-words">{task.goal}</p><p className="break-words text-faint" style={{ fontSize: "var(--t-caption)" }}>Kaynak durum: {task.status} · kapsam: {task.scopes.join(", ")} · bağlam rev {task.contextRevision}</p><div className="mt-2 flex min-w-0 flex-wrap items-center gap-2"><select className={input + " w-auto max-w-full"} value={taskChoice[task.id] ?? task.status} disabled={writeBusy || !fresh} onChange={(e) => { const status = e.target.value as TaskStatus; setTaskChoice((old) => ({ ...old, [task.id]: status })); setTaskConsent((old) => ({ ...old, [task.id]: undefined as never })); }}><option value="queued">queued</option><option value="running">running</option><option value="waiting">waiting</option><option value="done">done</option></select><label className="flex gap-1 text-faint"><input type="checkbox" checked={taskConsent[task.id]?.revision === board.revision && taskConsent[task.id]?.status === taskChoice[task.id]} disabled={!fresh || writeBusy || board.state !== "running"} onChange={(e) => setTaskConsent((old) => ({ ...old, [task.id]: e.target.checked ? { revision: board.revision, status: taskChoice[task.id] ?? task.status } : undefined as never }))} />revizyon/durum için onay</label><Button size="sm" disabled={!fresh || !taskConsent[task.id] || taskChoice[task.id] === task.status || writeBusy || board.state !== "running"} loading={writeBusy} onClick={() => void updateTask(task)}>Durumu güncelle</Button><Button size="sm" disabled={writeBusy} onClick={() => onNavigate("owner")}>Görev önizlemesi için Oturum</Button></div></article>)}</section>
      <CreateSharedTask board={board} fresh={fresh} busy={writeBusy} onSubmit={createTask} />
     {board.waitingTaskIds.length > 0 && <p className="break-words text-warn">Bekleyen görevler: {board.waitingTaskIds.join(", ")}</p>}{board.overlaps.length > 0 && <section className="grid gap-1 py-2"><b>Kapsam kesişimi önerileri</b><p className="text-faint">Amaçlanan kapsam kesişimleridir; kilit veya gerçek Git çakışması değildir.</p>{board.overlaps.map((o) => <p key={o.tasks.join(":")} className="break-words">{o.tasks.join(" ↔ ")} · {o.shared.join(", ")}</p>)}</section>}
-     <section className="grid gap-2 border-t border-border-w py-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>Teklif metadata'sı · açıkça yüklenir</b><Button size="sm" loading={proposalsBusy} disabled={!fresh || proposalsBusy} onClick={() => void loadProposals()}>Teklifleri yükle</Button></div>{proposals && <>{proposals.revision !== board.revision && <p className="text-warn">Liste rev {proposals.revision} gözleminde kaldı; pano revizyonu değişti.</p>}{proposals.proposals.map((p) => <p key={p.proposalId} className="break-all">{p.proposalId} · {p.taskId} · {p.fileCount} dosya {p.staleContext && <b className="text-warn">· eski bağlam</b>}</p>)}</>}</section>
+     <section className="grid gap-2 border-t border-border-w py-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>Teklif metadata'sı · açıkça yüklenir</b><Button size="sm" loading={proposalsBusy} disabled={!fresh || proposalsBusy} onClick={() => void loadProposals()}>Teklifleri yükle</Button></div>{proposals && <>{!proposalsCurrent && <p className="text-warn">Liste eski veya pano kimliği/bağlamıyla eşleşmiyor; birleştirme için yeniden yükleyin.</p>}{proposals.proposals.map((p) => {
+        const selectable = proposalsCurrent && fresh && !p.staleContext && p.sessionId === board.sessionId && p.baseCommit === board.baseCommit && p.contextHash === board.contextHash;
+        return <label key={p.proposalId} className="flex min-w-0 gap-2"><input type="checkbox" checked={selectedProposalIds.includes(p.proposalId)} disabled={!selectable || sharedBusy || (!selectedProposalIds.includes(p.proposalId) && selectedProposalIds.length >= 2)} onChange={(e) => {
+          setSelectedProposalIds((old) => e.target.checked ? (old.length < 2 ? [...old, p.proposalId] : old) : old.filter((id) => id !== p.proposalId)); setSharedReceipt(null);
+        }} /><span className="break-all">{p.proposalId} · {p.taskId} · {p.fileCount} dosya {!selectable && <b className="text-warn">· eski/eşleşmeyen teklif</b>}</span></label>;
+      })}<Button size="sm" variant="primary" disabled={!fresh || !proposalsCurrent || selectedProposalIds.length < 1 || selectedProposalIds.length > 2 || sharedBusy || writeBusy} loading={sharedBusy} onClick={() => void prepareShared()}>Birleştir ve doğrula</Button></>}{sharedReceipt && <div className="grid gap-1 border border-ok/40 p-2"><b className="text-ok">Birleşik aday doğrulandı</b><p className="break-all">{sharedReceipt.candidateId} · {sharedReceipt.changedPaths.length} dosya · {sharedReceipt.verification.status}</p><p className="break-all text-faint">Teklifler: {sharedReceipt.sharedProvenance?.proposalIds.join(", ")}</p></div>}</section>
+      <CandidatePanel sharedOnly />
        <ProductHistory anchor={historyAnchor} loaded={historyCursor !== null} events={changes} droppedCount={historyDropped} more={historyMore} busy={historyBusy} fresh={fresh} error={historyError} resetAvailable={historyResetAvailable} onLoad={() => void loadChanges()} onReset={resetHistory} />
     {channelMatches && (deliveryConflicts.length > 0 || candidateMatches) && <section className="grid gap-1 border-t border-border-w py-3"><b>Bu uygulamadaki aday / doğrulama kaydı</b>{deliveryConflicts.map((conflict) => <p key={conflict} className="break-words text-warn">Çakışma: {conflict}</p>)}{candidateMatches && candidate && <><p className="break-all text-faint">Aday rev {candidate.session_revision} · bağlam {candidate.context_hash === board.contextHash ? "eşleşiyor" : "farklı / eski"}</p><p className={verified ? "text-ok" : "text-warn"}>Doğrulama kaydı: {candidate.verification.status}{candidate.verification.status === "pass" && !verified ? " · güvenilir geçiş koşulları veya güncel bağlam eşleşmiyor" : ""}</p><p className="text-faint">Geçmiş doğrulama kaydıdır; güncel diskin kanıtı veya oturum-geneli son kayıt değildir.</p></>}</section>}
     <div className="flex flex-wrap gap-2 border-t border-border-w py-3"><Button size="sm" onClick={() => onNavigate("owner")}>Oturum</Button><Button size="sm" onClick={() => onNavigate("shared")}>Ortak aday</Button></div>

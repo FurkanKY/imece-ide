@@ -116,3 +116,4 @@ class AcpRunResult:
     permission_request_count: int
     session_close_supported: bool
     session_close_succeeded: bool | None
+    producer_quiescent: bool = False

@@ -94,7 +94,10 @@ class VerificationRunner:
             try:
                 process_result = self._process_runner.run(workspace, check.request, cancel_token=cancel_token)
             except OperationCancelledError as exc:
-                self._emit(VerificationInterrupted(verification_id, plan.plan_id, "cancelled"))
+                self._emit(VerificationInterrupted(
+                    verification_id, plan.plan_id, "cancelled", check.check_id,
+                    getattr(exc, "producer_quiescent", False) is True,
+                ))
                 raise VerificationCancelledError(
                     f"Verification cancelled during check {check.check_id!r}: {exc}"
                 ) from exc

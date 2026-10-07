@@ -103,6 +103,16 @@ def _workspace_inventory(workspace) -> tuple[tuple[str, ...], bool]:
     incomplete inventory is explicitly not verification evidence.
     """
     root = os.fspath(workspace.root)
+    if os.name == "nt":
+        try:
+            from workspace.windows_safety import inventory
+            paths, complete = inventory(Path(root), max_depth=_FP_MAX_DEPTH,
+                                        entry_budget=_FP_ENTRY_BUDGET,
+                                        max_file=8 * 1024 * 1024,
+                                        max_total=64 * 1024 * 1024)
+            return tuple(paths), complete
+        except (OSError, ValueError):
+            return (), False
     if os.scandir not in os.supports_fd or os.open not in os.supports_dir_fd:
         # Unsupported nofollow directory-handle inspection is incomplete
         # evidence, not permission to follow ordinary paths and claim PASS.
